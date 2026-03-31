@@ -218,6 +218,12 @@ export default function Products() {
   const emptyBulkRow: BulkRow = { name: '', short_name: '', price_thb: 0, box_id: '', bubble_id: '', item_type: 'พัสดุ' };
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([{ ...emptyBulkRow }]);
   const [bulkSaving, setBulkSaving] = useState(false);
+  // Toast notification
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   useEffect(() => {
     loadData();
@@ -410,9 +416,9 @@ export default function Products() {
 
   // ── Bulk Save ──
   const saveBulkPromos = async () => {
-    if (!bulkMasterId) { alert('กรุณาเลือก Master Product'); return; }
+    if (!bulkMasterId) { showToast('กรุณาเลือก Master Product', 'error'); return; }
     const validRows = bulkRows.filter(r => r.name.trim() && r.price_thb > 0 && r.box_id && r.bubble_id);
-    if (validRows.length === 0) { alert('กรุณากรอกข้อมูลอย่างน้อย 1 แถว (ชื่อโปร, ราคา, กล่อง, บั้บเบิ้ล)'); return; }
+    if (validRows.length === 0) { showToast('กรุณากรอกข้อมูลอย่างน้อย 1 แถวให้ครบ', 'error'); return; }
     setBulkSaving(true);
     try {
       // ดึง promos ล่าสุดเพื่อนับ suffix
@@ -437,14 +443,14 @@ export default function Products() {
         }]);
         if (error) { console.error('insert error:', error); } else { insertCount++; }
       }
-      alert(`บันทึกสำเร็จ ${insertCount} โปร`);
+      showToast(`✓ บันทึกสำเร็จ ${insertCount} โปร`);
       setShowBulkForm(false);
       setBulkMasterId('');
       setBulkRows([{ ...emptyBulkRow }]);
       await loadData();
     } catch (err) {
       console.error(err);
-      alert('เกิดข้อผิดพลาด');
+      showToast('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
     } finally {
       setBulkSaving(false);
     }
@@ -1011,6 +1017,15 @@ export default function Products() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+      {/* ======== Toast Notification ======== */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-lg text-white text-sm font-medium transition-all ${
+          toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+        }`}>
+          <span>{toast.type === 'success' ? '✓' : '✕'}</span>
+          <span>{toast.msg}</span>
         </div>
       )}
     </div>
