@@ -205,11 +205,19 @@ export default function Products() {
   const [loading, setLoading] = useState(true);
   const [showMasterForm, setShowMasterForm] = useState(false);
   const [showPromoForm, setShowPromoForm] = useState(false);
+  const [showBulkForm, setShowBulkForm] = useState(false);
   const [editingMaster, setEditingMaster] = useState<ProductMaster | null>(null);
   const [editingPromo, setEditingPromo] = useState<ProductPromoRow | null>(null);
 
   const [masterForm, setMasterForm] = useState<MasterFormState>(emptyMasterForm);
   const [promoForm, setPromoForm] = useState<PromoFormState>(emptyPromoForm);
+
+  // Bulk add state
+  const [bulkMasterId, setBulkMasterId] = useState('');
+  type BulkRow = { name: string; short_name: string; price_thb: number; box_id: string; bubble_id: string; item_type: string };
+  const emptyBulkRow: BulkRow = { name: '', short_name: '', price_thb: 0, box_id: '', bubble_id: '', item_type: 'พัสดุ' };
+  const [bulkRows, setBulkRows] = useState<BulkRow[]>([{ ...emptyBulkRow }]);
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -400,6 +408,48 @@ export default function Products() {
     }
   };
 
+  // ── Bulk Save ──
+  const saveBulkPromos = async () => {
+    if (!bulkMasterId) { alert('กรุณาเลือก Master Product'); return; }
+    const validRows = bulkRows.filter(r => r.name.trim() && r.price_thb > 0 && r.box_id && r.bubble_id);
+    if (validRows.length === 0) { alert('กรุณากรอกข้อมูลอย่างน้อย 1 แถว (ชื่อโปร, ราคา, กล่อง, บั้บเบิ้ล)'); return; }
+    setBulkSaving(true);
+    try {
+      // ดึง promos ล่าสุดเพื่อนับ suffix
+      const { data: latestPromos } = await supabase.from('products_promo').select('id').order('id', { ascending: true });
+      const currentPromos = (latestPromos || []) as { id: string }[];
+      let insertCount = 0;
+      for (const row of validRows) {
+        const nextId = getNextPromoId([...promos, ...currentPromos.map(p => ({ ...p, master_id: '', name: '', short_name: null, price_thb: 0, box_id: null, bubble_id: null, color: null, item_type: null, active: true, boxes: null, bubbles: null }))], bulkMasterId);
+        // re-fetch each iteration to avoid duplicate id
+        const { data: freshPromos } = await supabase.from('products_promo').select('id').eq('master_id', bulkMasterId);
+        const freshId = getNextPromoId((freshPromos || []).map((p: any) => ({ ...p, master_id: bulkMasterId, name: '', short_name: null, price_thb: 0, box_id: null, bubble_id: null, color: null, item_type: null, active: true, boxes: null, bubbles: null })), bulkMasterId);
+        const { error } = await supabase.from('products_promo').insert([{
+          id: freshId,
+          master_id: bulkMasterId,
+          name: row.name.trim(),
+          short_name: row.short_name.trim() || null,
+          price_thb: Number(row.price_thb) || 0,
+          box_id: row.box_id || null,
+          bubble_id: row.bubble_id || null,
+          color: 'ไม่มี',
+          item_type: row.item_type || 'พัสดุ',
+        }]);
+        if (error) { console.error('insert error:', error); } else { insertCount++; }
+      }
+      alert(`บันทึกสำเร็จ ${insertCount} โปร`);
+      setShowBulkForm(false);
+      setBulkMasterId('');
+      setBulkRows([{ ...emptyBulkRow }]);
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      alert('เกิดข้อผิดพลาด');
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
   const deleteMaster = async (id: string) => {
     const hasPromos = promos.some((p) => p.master_id === id);
     if (hasPromos) {
@@ -461,6 +511,12 @@ export default function Products() {
             className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center gap-2"
           >
             <Plus size={20} /> เพิ่ม Promo (P)
+          </button>
+          <button
+            onClick={() => { setShowBulkForm(true); setBulkMasterId(''); setBulkRows([{ ...emptyBulkRow }]); }}
+            className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 flex items-center gap-2"
+          >
+            <Plus size={20} /> เพิ่มหลายโปรพร้อมกัน
           </button>
         </div>
       </div>
@@ -825,6 +881,134 @@ export default function Products() {
               <button onClick={savePromo} className="w-full bg-green-500 text-white py-2 rounded hover:bg-green-600">
                 บันทึก
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ======== Modal: เพิ่มหลายโปรพร้อมกัน ======== */}
+      {showBulkForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-5xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-xl font-bold text-slate-800">เพิ่มหลายโปรพร้อมกัน</h3>
+                <p className="text-sm text-slate-500 mt-0.5">เลือก Master ครั้งเดียว แล้วกรอกโปรได้หลายแถว</p>
+              </div>
+              <button onClick={() => setShowBulkForm(false)} className="text-slate-400 hover:text-slate-600"><X size={22}/></button>
+            </div>
+
+            {/* เลือก Master */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-1">Master Product <span className="text-red-500">*</span></label>
+              <select value={bulkMasterId} onChange={e => setBulkMasterId(e.target.value)}
+                className="border rounded-lg px-3 py-2 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-purple-300">
+                <option value="">เลือก Master</option>
+                {masters.map(m => <option key={m.id} value={m.id}>{m.id} — {m.name}</option>)}
+              </select>
+            </div>
+
+            {/* ตาราง bulk */}
+            <div className="flex-1 overflow-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead className="bg-slate-100 sticky top-0">
+                  <tr>
+                    <th className="p-2 text-left font-medium text-slate-600 w-8">#</th>
+                    <th className="p-2 text-left font-medium text-slate-600 min-w-[200px]">ชื่อโปรโมชัน <span className="text-red-400">*</span></th>
+                    <th className="p-2 text-left font-medium text-slate-600 min-w-[140px]">ชื่อสั้น</th>
+                    <th className="p-2 text-right font-medium text-slate-600 w-28">ราคา (฿) <span className="text-red-400">*</span></th>
+                    <th className="p-2 text-left font-medium text-slate-600 min-w-[160px]">กล่อง <span className="text-red-400">*</span></th>
+                    <th className="p-2 text-left font-medium text-slate-600 min-w-[130px]">บั้บเบิ้ล <span className="text-red-400">*</span></th>
+                    <th className="p-2 text-left font-medium text-slate-600 min-w-[120px]">ประเภท</th>
+                    <th className="p-2 w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bulkRows.map((row, i) => (
+                    <tr key={i} className="border-b hover:bg-slate-50">
+                      <td className="p-2 text-slate-400 text-xs text-center">{i + 1}</td>
+                      {/* ชื่อโปร */}
+                      <td className="p-2">
+                        <input type="text" value={row.name}
+                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], name: e.target.value }; setBulkRows(r); }}
+                          placeholder="เช่น นมถั่ว 3 กระป๋อง"
+                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300"/>
+                        {row.name && (
+                          <span className={`text-xs mt-0.5 ${extractQty(row.name) > 1 ? 'text-cyan-600' : 'text-orange-400'}`}>
+                            จำนวน: {extractQty(row.name)} ชิ้น
+                          </span>
+                        )}
+                      </td>
+                      {/* ชื่อสั้น */}
+                      <td className="p-2">
+                        <input type="text" value={row.short_name}
+                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], short_name: e.target.value }; setBulkRows(r); }}
+                          placeholder="ชื่อสั้น"
+                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300"/>
+                      </td>
+                      {/* ราคา */}
+                      <td className="p-2">
+                        <input type="number" value={row.price_thb || ''}
+                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], price_thb: Number(e.target.value) }; setBulkRows(r); }}
+                          placeholder="0"
+                          className="w-full border rounded px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-1 focus:ring-purple-300"/>
+                      </td>
+                      {/* กล่อง */}
+                      <td className="p-2">
+                        <select value={row.box_id}
+                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], box_id: e.target.value }; setBulkRows(r); }}
+                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300">
+                          <option value="">เลือกกล่อง</option>
+                          {sortedBoxes.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                      </td>
+                      {/* บั้บเบิ้ล */}
+                      <td className="p-2">
+                        <select value={row.bubble_id}
+                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], bubble_id: e.target.value }; setBulkRows(r); }}
+                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300">
+                          <option value="">เลือกบั้บเบิ้ล</option>
+                          {sortedBubbles.map(b => <option key={b.id} value={b.id}>ยาว {formatBubbleLength(b)}</option>)}
+                        </select>
+                      </td>
+                      {/* ประเภท */}
+                      <td className="p-2">
+                        <select value={row.item_type}
+                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], item_type: e.target.value }; setBulkRows(r); }}
+                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300">
+                          {['พัสดุ','อาหารแห้ง','ของใช้','เครื่องสำอาง','เสื้อผ้า','อุปกรณ์ไอที','อื่นๆ'].map(t => <option key={t}>{t}</option>)}
+                        </select>
+                      </td>
+                      {/* ลบแถว */}
+                      <td className="p-2 text-center">
+                        {bulkRows.length > 1 && (
+                          <button onClick={() => setBulkRows(bulkRows.filter((_, idx) => idx !== i))}
+                            className="text-red-400 hover:text-red-600">
+                            <X size={16}/>
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer */}
+            <div className="mt-4 pt-4 border-t flex items-center justify-between">
+              <button
+                onClick={() => setBulkRows([...bulkRows, { ...emptyBulkRow }])}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm text-slate-600 flex items-center gap-2">
+                <Plus size={15}/> เพิ่มแถว
+              </button>
+              <div className="flex gap-3">
+                <span className="text-sm text-slate-400 self-center">{bulkRows.filter(r => r.name && r.price_thb > 0 && r.box_id && r.bubble_id).length} แถวพร้อมบันทึก</span>
+                <button onClick={() => setShowBulkForm(false)} className="px-4 py-2 bg-slate-200 rounded-lg text-sm hover:bg-slate-300">ยกเลิก</button>
+                <button onClick={saveBulkPromos} disabled={bulkSaving || !bulkMasterId}
+                  className="px-5 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-40 font-medium text-sm">
+                  {bulkSaving ? 'กำลังบันทึก...' : `บันทึก ${bulkRows.filter(r => r.name && r.price_thb > 0 && r.box_id && r.bubble_id).length} โปร`}
+                </button>
+              </div>
             </div>
           </div>
         </div>
