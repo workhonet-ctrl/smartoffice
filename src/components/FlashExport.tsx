@@ -233,8 +233,6 @@ export default function FlashExport() {
     }
   };
 
-  };
-
   // ส่งออกซ้ำจาก tab "ส่งออกแล้ว" โดยใช้ exportedOrders แทน orders
   const handleReExport = async (targetOrders: Order[]) => {
     setReExporting(true);
@@ -465,3 +463,4 @@ export default function FlashExport() {
       )}
     </div>
   );
+}
