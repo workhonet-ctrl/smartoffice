@@ -14,6 +14,7 @@ type PageKey =
   | 'products'
   | 'product-list'
   | 'packaging'
+  | 'pack-products'
   | 'customers'
   | 'orders'
   | 'flash-export'
@@ -23,14 +24,21 @@ type PageKey =
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>('products');
+  const [packagingOrderIds, setPackagingOrderIds] = useState<string[]>([]);
+
+  const goToPackaging = (ids: string[]) => {
+    setPackagingOrderIds(ids);
+    setActivePage('pack-products');
+  };
 
   const renderPage = () => {
     switch (activePage) {
       case 'products':       return <Products />;
       case 'product-list':   return <ProductList />;
-      case 'packaging':      return <Packaging />;
+      case 'packaging':      return <Packaging orderIds={[]} onDone={() => setActivePage('orders')} />;
+      case 'pack-products':  return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} />;
       case 'customers':      return <Customers />;
-      case 'orders':         return <Orders />;
+      case 'orders':         return <Orders onImportDone={goToPackaging} />;
       case 'flash-export':   return <FlashExport />;
       case 'myorder-export': return <MyOrderExport />;
       case 'finance':        return <Finance />;
