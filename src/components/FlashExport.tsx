@@ -46,7 +46,8 @@ export default function FlashExport() {
   // per-order product selections
   const [orderSelections, setOrderSelections] = useState<OrderSelections>({});
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
-  const [searchProduct, setSearchProduct] = useState(''); // ค้นหาชื่อสินค้า
+  const [searchProduct, setSearchProduct]   = useState(''); // ค้นหา pending
+  const [searchExported, setSearchExported] = useState(''); // ค้นหา exported
 
   useEffect(() => { loadOrders(); loadExportedOrders(); }, []);
 
@@ -170,7 +171,9 @@ export default function FlashExport() {
   const handleReExport = async () => {
     setReExporting(true);
     try {
-      const target = selectedExported.size > 0 ? exportedOrders.filter(o => selectedExported.has(o.id)) : exportedOrders;
+      const target = selectedExported.size > 0
+        ? exportedOrders.filter(o => selectedExported.has(o.id))
+        : filteredExportedOrders;
       await doExport(target, `Flash_ReExport_${new Date().toISOString().split('T')[0]}.xlsx`, false);
     } catch(e) { console.error(e); alert('เกิดข้อผิดพลาด'); }
     finally { setReExporting(false); }
@@ -190,11 +193,15 @@ export default function FlashExport() {
     ? orders.filter(o => (o.raw_prod || '').toLowerCase().includes(searchProduct.toLowerCase()))
     : orders;
 
-  const allPendingSelected  = filteredOrders.length > 0 && filteredOrders.every(o => selectedPending.has(o.id));
-  const allExportedSelected = exportedOrders.length > 0 && exportedOrders.every(o => selectedExported.has(o.id));
+  const filteredExportedOrders = searchExported.trim()
+    ? exportedOrders.filter(o => (o.raw_prod || '').toLowerCase().includes(searchExported.toLowerCase()))
+    : exportedOrders;
 
-  const pendingCount  = selectedPending.size  > 0 ? selectedPending.size  : orders.length;
-  const exportedCount = selectedExported.size > 0 ? selectedExported.size : exportedOrders.length;
+  const allPendingSelected  = filteredOrders.length > 0 && filteredOrders.every(o => selectedPending.has(o.id));
+  const allExportedSelected = filteredExportedOrders.length > 0 && filteredExportedOrders.every(o => selectedExported.has(o.id));
+
+  const pendingCount  = selectedPending.size  > 0 ? selectedPending.size  : filteredOrders.length;
+  const exportedCount = selectedExported.size > 0 ? selectedExported.size : filteredExportedOrders.length;
 
   if (loading) return <div className="p-6">กำลังโหลด...</div>;
 
@@ -297,7 +304,15 @@ export default function FlashExport() {
       {/* ── Tab: ส่งออกแล้ว ── */}
       {tab === 'exported' && (
         <>
-          <div className="flex gap-3 mb-3 shrink-0 flex-wrap">
+          <div className="flex gap-3 mb-3 shrink-0 flex-wrap items-center">
+            {/* Search */}
+            <div className="relative flex-1 min-w-[200px]">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
+              <input type="text" value={searchExported} onChange={e => setSearchExported(e.target.value)}
+                placeholder="ค้นหาชื่อสินค้า เช่น ครีม Secret Rose(1 แถม 1)..."
+                className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-300"/>
+            </div>
+            {searchExported && <span className="text-xs text-slate-500 shrink-0">พบ {filteredExportedOrders.length} รายการ</span>}
             <button onClick={handleReExport} disabled={exportedOrders.length===0||reExporting}
               className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 flex items-center gap-2 disabled:opacity-50 text-sm">
               <Download size={16}/> {reExporting?'กำลังส่งออก...':`ส่งออกซ้ำ (${exportedCount} รายการ)`}
@@ -322,7 +337,7 @@ export default function FlashExport() {
                 <tr>
                   <th className="p-3 w-8">
                     <input type="checkbox" checked={allExportedSelected}
-                      onChange={e => setSelectedExported(e.target.checked ? new Set(exportedOrders.map(o=>o.id)) : new Set())}
+                      onChange={e => setSelectedExported(e.target.checked ? new Set(filteredExportedOrders.map(o=>o.id)) : new Set())}
                       className="rounded"/>
                   </th>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
@@ -335,8 +350,8 @@ export default function FlashExport() {
                 </tr>
               </thead>
               <tbody>
-                {exportedOrders.length===0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์ที่ส่งออก</td></tr>}
-                {exportedOrders.map(o => (
+                {filteredExportedOrders.length===0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">{searchExported ? `ไม่พบสินค้า "${searchExported}"` : 'ยังไม่มีออเดอร์ที่ส่งออก'}</td></tr>}
+                {filteredExportedOrders.map(o => (
                   <tr key={o.id} className={`border-b hover:bg-green-50 ${selectedExported.has(o.id)?'bg-green-50':''}`}>
                     <td className="p-3 text-center">
                       <input type="checkbox" checked={selectedExported.has(o.id)} onChange={()=>toggleExported(o.id)} className="rounded"/>
