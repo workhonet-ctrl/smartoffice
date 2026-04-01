@@ -12,12 +12,14 @@ import {
   Warehouse,
   ChevronDown,
   ChevronRight,
+  PackageCheck,
 } from 'lucide-react';
 
 type PageKey =
   | 'products'
   | 'product-list'
   | 'packaging'
+  | 'pack-products'
   | 'customers'
   | 'orders'
   | 'flash-export'
@@ -36,6 +38,7 @@ const warehouseSubMenus: { key: PageKey; label: string; icon: any }[] = [
   { key: 'product-list',   label: 'รายการสินค้าทั้งหมด', icon: List },
   { key: 'packaging',      label: 'วัสดุแพ็กสินค้า',       icon: Archive },
   { key: 'orders',         label: 'ออเดอร์',                icon: ShoppingCart },
+  { key: 'pack-products',  label: 'แพ็คสินค้า',            icon: PackageCheck },
   { key: 'flash-export',   label: 'Flash Export',           icon: Truck },
   { key: 'myorder-export', label: 'MyOrder Export',         icon: FileSpreadsheet },
 ];
