@@ -24,6 +24,7 @@ export default function MyOrderExport() {
   const [selectedExported, setSelectedExported] = useState<Set<string>>(new Set());
   const [orderSelections, setOrderSelections]   = useState<OrderSelections>({});
   const [editingOrder, setEditingOrder]         = useState<Order | null>(null);
+  const [searchProduct, setSearchProduct]       = useState('');
 
   useEffect(() => { loadOrders(); loadExportedOrders(); }, []);
 
@@ -106,9 +107,10 @@ export default function MyOrderExport() {
 
   const togglePending  = (id: string) => setSelectedPending(s  => { const n = new Set(s); n.has(id)?n.delete(id):n.add(id); return n; });
   const toggleExported = (id: string) => setSelectedExported(s => { const n = new Set(s); n.has(id)?n.delete(id):n.add(id); return n; });
-  const allPendingSelected  = orders.length>0 && orders.every(o => selectedPending.has(o.id));
+  const filteredOrders     = searchProduct.trim() ? orders.filter(o => (o.raw_prod||'').toLowerCase().includes(searchProduct.toLowerCase())) : orders;
+  const allPendingSelected  = filteredOrders.length>0 && filteredOrders.every(o => selectedPending.has(o.id));
   const allExportedSelected = exportedOrders.length>0 && exportedOrders.every(o => selectedExported.has(o.id));
-  const pendingTarget  = selectedPending.size  > 0 ? orders.filter(o => selectedPending.has(o.id))  : orders;
+  const pendingTarget  = selectedPending.size  > 0 ? orders.filter(o => selectedPending.has(o.id))  : filteredOrders;
   const exportedCount  = selectedExported.size > 0 ? selectedExported.size : exportedOrders.length;
 
   if (loading) return <div className="p-6">กำลังโหลด...</div>;
@@ -130,7 +132,15 @@ export default function MyOrderExport() {
       {/* ── Tab: รอส่งออก ── */}
       {tab === 'pending' && (
         <>
-          <div className="flex gap-3 mb-3 shrink-0 flex-wrap">
+          <div className="flex gap-3 mb-3 shrink-0 flex-wrap items-center">
+            {/* Search */}
+            <div className="relative flex-1 min-w-[200px]">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
+              <input type="text" value={searchProduct} onChange={e => setSearchProduct(e.target.value)}
+                placeholder="ค้นหาชื่อสินค้า เช่น ครีม Secret Rose(1 แถม 1)..."
+                className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+            </div>
+            {searchProduct && <span className="text-xs text-slate-500 shrink-0">พบ {filteredOrders.length} รายการ</span>}
             <button onClick={() => handleExport(pendingTarget)} disabled={orders.length===0||exporting}
               className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 flex items-center gap-2 disabled:opacity-50 text-sm">
               <Download size={16}/> {exporting?'กำลังส่งออก...':`ส่งออก MyOrder (${pendingTarget.length} รายการ)`}
@@ -144,7 +154,7 @@ export default function MyOrderExport() {
                 <tr>
                   <th className="p-3 w-8">
                     <input type="checkbox" checked={allPendingSelected}
-                      onChange={e => setSelectedPending(e.target.checked ? new Set(orders.map(o=>o.id)) : new Set())}
+                      onChange={e => setSelectedPending(e.target.checked ? new Set(filteredOrders.map(o=>o.id)) : new Set())}
                       className="rounded"/>
                   </th>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
@@ -158,8 +168,8 @@ export default function MyOrderExport() {
                 </tr>
               </thead>
               <tbody>
-                {orders.length===0 && <tr><td colSpan={9} className="p-8 text-center text-slate-400">ไม่มีออเดอร์รอส่งออก</td></tr>}
-                {orders.map(o => (
+                {filteredOrders.length===0 && <tr><td colSpan={9} className="p-8 text-center text-slate-400">{searchProduct ? `ไม่พบสินค้า "${searchProduct}"` : 'ไม่มีออเดอร์รอส่งออก'}</td></tr>}
+                {filteredOrders.map(o => (
                   <tr key={o.id} className={`border-b hover:bg-slate-50 ${selectedPending.has(o.id)?'bg-purple-50':''}`}>
                     <td className="p-3 text-center">
                       <input type="checkbox" checked={selectedPending.has(o.id)} onChange={()=>togglePending(o.id)} className="rounded"/>
