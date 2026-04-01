@@ -73,6 +73,9 @@ function getAutoStatus(order: Order): { label: string; color: string } {
   const s = order.order_status;
   if (s === 'ส่งแฟลช')     return { label: 'ส่งแฟลช',     color: 'bg-yellow-100 text-yellow-800' };
   if (s === 'ส่งไปรษณีย์') return { label: 'ส่งไปรษณีย์', color: 'bg-purple-100 text-purple-800' };
+  if (s === 'ส่งสินค้าแล้ว') return { label: 'ส่งสินค้าแล้ว', color: 'bg-green-100 text-green-800' };
+  if (s === 'ปริ้นแล้ว')   return { label: 'ปริ้นแล้ว',   color: 'bg-blue-100 text-blue-700' };
+  if (s === 'กำลังแพ็ค')   return { label: 'กำลังแพ็ค',   color: 'bg-orange-100 text-orange-700' };
   if (order.tracking_no)    return { label: 'ส่งสินค้าแล้ว', color: 'bg-green-100 text-green-800' };
   return { label: 'รอแพ็ค', color: 'bg-yellow-100 text-yellow-700' };
 }
@@ -161,11 +164,29 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           address: String(row[7] || ''), subdistrict: String(row[8] || ''),
           district: String(row[9] || ''), province: String(row[10] || ''),
           postal_code: String(row[11] || ''), raw_prod: String(row[14] || ''),
-          // quantities — เก็บ string ต้นฉบับ "1|2|1" และคำนวณ total
           quantities: String(row[15] || '1'),
           quantity: String(row[15] || '1').split('|').reduce((s, n) => s + (Number(n.trim()) || 1), 0),
           weight_kg: (Number(row[16]) || 0) / 1000,
-          tracking_no: String(row[17] || ''), total_thb: Number(row[21]) || 0,
+          // parse tracking "WA112826198TH (THAI_POST)" → tracking + courier
+          tracking_no: (() => {
+            const raw = String(row[17] || '');
+            const m = raw.match(/^([^\s(]+)/);
+            return m ? m[1] : (raw || '');
+          })(),
+          courier: (() => {
+            const raw = String(row[17] || '');
+            const m = raw.match(/\(([^)]+)\)/);
+            if (!m) return '';
+            const c = m[1].toUpperCase();
+            if (c.includes('THAI_POST') || c.includes('THAILAND_POST') || c.includes('EMS')) return 'ไปรษณีย์';
+            if (c.includes('FLASH')) return 'FLASH';
+            if (c.includes('KERRY')) return 'Kerry';
+            if (c.includes('J&T') || c.includes('JT')) return 'J&T';
+            if (c.includes('LAZADA')) return 'Lazada';
+            if (c.includes('SHOPEE')) return 'Shopee';
+            return m[1];
+          })(),
+          total_thb: Number(row[21]) || 0,
           payment_method: String(row[22] || 'COD'), payment_status: String(row[24] || 'รอชำระเงิน'),
         });
       }
@@ -240,7 +261,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         const hasTrack   = order.tracking_no && String(order.tracking_no).length > 3;
         const isTourist  = TOURIST_ZIPS.has(String(order.postal_code));
         const route      = hasTrack ? 'A' : isTourist ? 'C' : 'B';
-        const orderStatus = hasTrack ? 'ส่งสินค้าแล้ว' : 'รอแพ็ค';
+        // ทุกออเดอร์เริ่มต้นที่ "กำลังแพ็ค" (จะเปลี่ยนเป็น "ปริ้นแล้ว" หลังเสร็จหน้าแพ็ค)
+        const orderStatus = 'กำลังแพ็ค';
 
         const { error: oe } = await supabase.from('orders').insert([{
           order_no: String(order.order_no), customer_id: customerId, channel: order.channel,
@@ -249,7 +271,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           quantity: order.quantity,
           quantities: String(order.quantities || order.quantity || '1'),
           weight_kg: order.weight_kg,
-          tracking_no: hasTrack ? order.tracking_no : null,
+          tracking_no: hasTrack ? String(order.tracking_no).trim() : null,
+          courier: order.courier || null,
           total_thb: order.total_thb, payment_method: order.payment_method,
           payment_status: order.payment_status, order_status: orderStatus, route,
         }]);
@@ -492,7 +515,13 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                     </td>
                     {/* ขนส่ง */}
                     <td className="p-3 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${carrier.color}`}>{carrier.label}</span>
+                      {(() => {
+                        // ถ้ามี courier จากไฟล์ให้แสดงตรงๆ
+                        const c = (o as any).courier;
+                        if (c) return <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${c === 'ไปรษณีย์' ? 'bg-purple-100 text-purple-800' : c === 'FLASH' ? 'bg-yellow-100 text-yellow-800' : 'bg-slate-100 text-slate-600'}`}>{c}</span>;
+                        const carrier = getCarrierLabel(o.route);
+                        return <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${carrier.color}`}>{carrier.label}</span>;
+                      })()}
                     </td>
                     {/* สถานะชำระ */}
                     <td className="p-3 text-center">
