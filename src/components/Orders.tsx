@@ -192,34 +192,54 @@ export default function Orders() {
   };
 
   const handleVerifyComplete = async () => {
-    let ok = 0, fail = 0;
+    let ok = 0, skip = 0, fail = 0;
+    const errors: string[] = [];
+
     for (const order of importedOrders) {
       try {
-        const { data: cust } = await supabase.from('customers').select('id').eq('tel', order.tel).maybeSingle();
-        let customerId = cust?.id;
-        if (!cust) {
-          const { data: nc, error: ce } = await supabase.from('customers').insert([{
-            name: order.customer_name, tel: order.tel, address: order.address,
+        // หาลูกค้าจากเบอร์โทร
+        let customerId: string | undefined;
+        const { data: cust } = await supabase
+          .from('customers').select('id').eq('tel', String(order.tel)).maybeSingle();
+
+        if (cust?.id) {
+          // มีลูกค้าอยู่แล้ว — อัพเดตที่อยู่
+          customerId = cust.id;
+          await supabase.from('customers').update({
+            name: order.customer_name, address: order.address,
             subdistrict: order.subdistrict, district: order.district,
             province: order.province, postal_code: order.postal_code,
-            channel: order.channel, tag: 'ใหม่',
+          }).eq('id', cust.id);
+        } else {
+          // ลูกค้าใหม่ — insert
+          const { data: nc, error: ce } = await supabase.from('customers').insert([{
+            name: order.customer_name, tel: String(order.tel),
+            address: order.address, subdistrict: order.subdistrict,
+            district: order.district, province: order.province,
+            postal_code: order.postal_code, channel: order.channel, tag: 'ใหม่',
           }]).select('id').single();
-          if (ce) { fail++; continue; }
+          if (ce) {
+            errors.push(`customer: ${order.customer_name} — ${ce.message}`);
+            fail++; continue;
+          }
           customerId = nc?.id;
         }
-        // split ด้วย | เพื่อให้รองรับสินค้าหลายรายการในออเดอร์เดียว
+
+        // จับคู่สินค้า
         const rawProds = String(order.raw_prod).split('|').map((s: string) => s.trim()).filter(Boolean);
         const promoIds: string[] = [];
         for (const rp of rawProds) {
           const { data: mp } = await supabase.from('product_mappings').select('promo_id').eq('raw_name', rp).maybeSingle();
           if (mp?.promo_id) promoIds.push(mp.promo_id);
         }
-        const hasTrack  = order.tracking_no && String(order.tracking_no).length > 3;
-        const isTourist = TOURIST_ZIPS.has(String(order.postal_code));
-        const route       = hasTrack ? 'A' : isTourist ? 'C' : 'B';
+
+        const hasTrack   = order.tracking_no && String(order.tracking_no).length > 3;
+        const isTourist  = TOURIST_ZIPS.has(String(order.postal_code));
+        const route      = hasTrack ? 'A' : isTourist ? 'C' : 'B';
         const orderStatus = hasTrack ? 'ส่งสินค้าแล้ว' : 'รอแพ็ค';
+
         const { error: oe } = await supabase.from('orders').insert([{
-          order_no: order.order_no, customer_id: customerId, channel: order.channel,
+          order_no: String(order.order_no), customer_id: customerId, channel: order.channel,
           order_date: order.order_date, order_time: order.order_time || null,
           raw_prod: order.raw_prod, promo_ids: promoIds,
           quantity: order.quantity, weight_kg: order.weight_kg,
@@ -227,10 +247,23 @@ export default function Orders() {
           total_thb: order.total_thb, payment_method: order.payment_method,
           payment_status: order.payment_status, order_status: orderStatus, route,
         }]);
-        if (oe) { if (oe.code !== '23505') fail++; } else ok++;
-      } catch { fail++; }
+
+        if (oe) {
+          if (oe.code === '23505') { skip++; }  // ออเดอร์ซ้ำ — ข้าม
+          else { errors.push(`order ${order.order_no}: ${oe.message}`); fail++; }
+        } else { ok++; }
+
+      } catch (err: any) {
+        errors.push(`catch: ${err?.message || err}`);
+        fail++;
+      }
     }
-    showToast(`✓ นำเข้าสำเร็จ ${ok} ออเดอร์${fail > 0 ? ` (ข้าม ${fail})` : ''}`, ok > 0 ? 'success' : 'error');
+
+    console.log('Import errors:', errors);
+    const msg = ok > 0
+      ? `✓ นำเข้าสำเร็จ ${ok} ออเดอร์${skip > 0 ? ` · ข้าม ${skip} ซ้ำ` : ''}${fail > 0 ? ` · ล้มเหลว ${fail}` : ''}`
+      : `นำเข้าไม่สำเร็จ — ออเดอร์ซ้ำ ${skip} รายการ${fail > 0 ? ` · error ${fail}` : ''}`;
+    showToast(msg, ok > 0 ? 'success' : skip > 0 ? 'success' : 'error');
     setShowVerify(false); setImportedOrders([]); setMappings({}); setAutoMatched(new Set()); loadOrders();
   };
 
@@ -540,11 +573,16 @@ export default function Orders() {
 
       {/* Toast Notification */}
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-4 rounded-xl shadow-xl text-white text-sm font-medium ${
-          toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
-        }`} style={{minWidth:'260px'}}>
-          <span className="text-lg shrink-0">{toast.type === 'success' ? '✅' : '❌'}</span>
-          <span>{toast.msg}</span>
+        <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-4 rounded-xl shadow-2xl text-white text-sm font-medium transition-all ${
+          toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500'
+        }`} style={{minWidth:'280px', maxWidth:'400px'}}>
+          <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-base ${
+            toast.type === 'success' ? 'bg-emerald-400' : 'bg-red-400'
+          }`}>
+            {toast.type === 'success' ? '✓' : '✕'}
+          </div>
+          <span className="flex-1 leading-snug">{toast.msg}</span>
+          <button onClick={() => setToast(null)} className="shrink-0 opacity-70 hover:opacity-100 text-lg leading-none">×</button>
         </div>
       )}
     </div>
