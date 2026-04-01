@@ -101,6 +101,12 @@ export default function Orders() {
   const [autoMatched, setAutoMatched] = useState<Set<string>>(new Set());
   // map promo_id → {short_name, name} สำหรับแสดงในตาราง
   const [promoMap, setPromoMap] = useState<Record<string, { short_name: string | null; name: string }>>({});
+  // Toast notification
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   useEffect(() => { loadOrders(); loadPromoOptions(); }, []);
 
@@ -172,7 +178,7 @@ export default function Orders() {
         if (ex?.promo_id) { autoMap[rp] = ex.promo_id; matched.add(rp); }
       }
       setMappings(autoMap); setAutoMatched(matched); setShowMapping(true);
-    } catch (err) { console.error(err); alert('เกิดข้อผิดพลาดในการนำเข้าข้อมูล'); }
+    } catch (err) { console.error(err); showToast('เกิดข้อผิดพลาดในการนำเข้าข้อมูล', 'error'); }
   };
 
   const handleMappingComplete = async () => {
@@ -224,7 +230,7 @@ export default function Orders() {
         if (oe) { if (oe.code !== '23505') fail++; } else ok++;
       } catch { fail++; }
     }
-    alert(`นำเข้าสำเร็จ ${ok} ออเดอร์${fail > 0 ? ` (ข้าม ${fail})` : ''}`);
+    showToast(`✓ นำเข้าสำเร็จ ${ok} ออเดอร์${fail > 0 ? ` (ข้าม ${fail})` : ''}`, ok > 0 ? 'success' : 'error');
     setShowVerify(false); setImportedOrders([]); setMappings({}); setAutoMatched(new Set()); loadOrders();
   };
 
@@ -529,6 +535,16 @@ export default function Orders() {
               <button onClick={() => setShowVerify(false)} className="px-4 py-2 bg-slate-200 rounded-lg text-sm">ยกเลิก</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-4 rounded-xl shadow-xl text-white text-sm font-medium ${
+          toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+        }`} style={{minWidth:'260px'}}>
+          <span className="text-lg shrink-0">{toast.type === 'success' ? '✅' : '❌'}</span>
+          <span>{toast.msg}</span>
         </div>
       )}
     </div>
