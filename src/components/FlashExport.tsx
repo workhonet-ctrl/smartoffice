@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Order } from '../lib/types';
-import { Download, Eye, X, Trash2 } from 'lucide-react';
+import { Download, Eye, X, Trash2, Edit2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 type PreviewRow = {
@@ -10,6 +10,10 @@ type PreviewRow = {
   item_type: string; weight_kg: string; box_lwh: string; product_type: string;
 };
 
+// สินค้าแต่ละรายการใน order ที่แก้ได้
+type OrderItem = { rawProd: string; qty: number; selected: boolean; };
+type OrderSelections = Record<string, OrderItem[]>; // orderId → items
+
 function extractQty(promoName: string): number {
   const t = promoName.match(/(\d+)\s*แถม\s*(\d+)/);
   if (t) return parseInt(t[1]) + parseInt(t[2]);
@@ -17,6 +21,14 @@ function extractQty(promoName: string): number {
   if (u) return parseInt(u[1]);
   const f = promoName.match(/(\d+)/);
   return f ? parseInt(f[1]) : 1;
+}
+
+// สร้าง default items จาก order
+function makeItems(order: Order): OrderItem[] {
+  const prods = (order.raw_prod || '').split('|').map(s => s.trim()).filter(Boolean);
+  const qtys  = String((order as any).quantities || order.quantity || '1').split('|');
+  if (prods.length === 0) return [{ rawProd: order.raw_prod || '-', qty: 1, selected: true }];
+  return prods.map((p, i) => ({ rawProd: p, qty: Number(qtys[i]?.trim()) || 1, selected: true }));
 }
 
 export default function FlashExport() {
@@ -29,9 +41,11 @@ export default function FlashExport() {
   const [previewRows, setPreviewRows]     = useState<PreviewRow[]>([]);
   const [showPreview, setShowPreview]     = useState(false);
   const [tab, setTab]                     = useState<'pending' | 'exported'>('pending');
-  // checkboxes
   const [selectedPending,  setSelectedPending]  = useState<Set<string>>(new Set());
   const [selectedExported, setSelectedExported] = useState<Set<string>>(new Set());
+  // per-order product selections
+  const [orderSelections, setOrderSelections] = useState<OrderSelections>({});
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
 
   useEffect(() => { loadOrders(); loadExportedOrders(); }, []);
 
@@ -40,7 +54,13 @@ export default function FlashExport() {
     try {
       const { data } = await supabase.from('orders').select('*, customers(*)')
         .eq('route', 'B').neq('order_status', 'ส่งแฟลช').order('created_at', { ascending: false });
-      if (data) setOrders(data);
+      if (data) {
+        setOrders(data);
+        // initialize selections
+        const sel: OrderSelections = {};
+        data.forEach((o: Order) => { sel[o.id] = makeItems(o); });
+        setOrderSelections(sel);
+      }
     } finally { setLoading(false); }
   };
 
@@ -65,14 +85,21 @@ export default function FlashExport() {
         order.customers?.province    ? `จ.${order.customers.province}` : null,
       ].filter(Boolean).join(' ');
       const orderNoWithName = `${order.order_no} ${order.raw_prod || ''}`.trim();
-      const rawProds = (order.raw_prod || '').split('|').map((s: string) => s.trim()).filter(Boolean);
-      const rawQtys  = String((order as any).quantities || order.quantity || '1').split('|');
+
+      // ใช้ selections ที่ผู้ใช้เลือกไว้ (กรองเฉพาะ selected=true)
+      const items = (orderSelections[order.id] || makeItems(order)).filter(it => it.selected);
+      const rawProds = items.map(it => it.rawProd);
+      const rawQtys  = items.map(it => it.qty);
+
       const itemDescs: string[] = [];
       let totalWeightKg = 0, flashItemType = 'พัสดุ', boxL = 1, boxW = 1, boxH = 1;
 
       for (let i = 0; i < Math.min(rawProds.length, 5); i++) {
-        const qtyFromFile = Number(rawQtys[i]?.trim()) || 1;
-        const pid = order.promo_ids?.[i];
+        const qtyFromSel = rawQtys[i] || 1;
+        // หา index ใน promo_ids จาก rawProd ต้นฉบับ
+        const origProds = (order.raw_prod || '').split('|').map((s: string) => s.trim());
+        const origIdx   = origProds.indexOf(rawProds[i]);
+        const pid = origIdx >= 0 ? order.promo_ids?.[origIdx] : order.promo_ids?.[i];
         let p: any = null;
         if (pid) {
           const { data } = await supabase.from('products_promo')
@@ -80,7 +107,7 @@ export default function FlashExport() {
           p = data;
         }
         const shortName = p?.short_name || p?.name || rawProds[i];
-        const qty = p?.name ? extractQty(p.name) : qtyFromFile;
+        const qty = qtyFromSel; // ใช้จำนวนที่ผู้ใช้กำหนด
         itemDescs.push(`${shortName}|-|-|${qty}`);
         if (p?.products_master?.weight_g) totalWeightKg += (Number(p.products_master.weight_g) * qty) / 1000;
         if (i === 0) { boxL = Number(p?.boxes?.length_cm)||1; boxW = Number(p?.boxes?.width_cm)||1; boxH = Number(p?.boxes?.height_cm)||1; flashItemType = p?.item_type||'พัสดุ'; }
@@ -202,7 +229,8 @@ export default function FlashExport() {
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left">ลูกค้า</th>
-                  <th className="p-3 text-left">สินค้า (raw)</th>
+                  <th className="p-3 text-left">สินค้า</th>
+                  <th className="p-3 text-center w-10">แก้</th>
                   <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
                   <th className="p-3 text-left">ที่อยู่</th>
                 </tr>
@@ -220,7 +248,22 @@ export default function FlashExport() {
                     </td>
                     <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 whitespace-nowrap">{o.customers?.name||'-'}</td>
-                    <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod}</td>
+                    <td className="p-3 text-xs text-slate-500 max-w-[160px]">
+                      {/* แสดงสินค้าที่เลือก */}
+                      <div className="space-y-0.5">
+                        {(orderSelections[o.id] || makeItems(o)).map((item, idx) => (
+                          <div key={idx} className={`flex items-center gap-1 ${!item.selected ? 'opacity-30 line-through' : ''}`}>
+                            <span className="truncate text-slate-700">{item.rawProd}</span>
+                            <span className="shrink-0 text-xs text-slate-400">×{item.qty}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-3 text-center">
+                      <button onClick={() => setEditingOrder(o)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="แก้ไขสินค้า">
+                        <Edit2 size={14}/>
+                      </button>
+                    </td>
                     <td className="p-3 text-right font-bold">฿{Number(o.total_thb).toLocaleString()}</td>
                     <td className="p-3 text-xs text-slate-400 max-w-[200px] truncate">{[o.customers?.address,o.customers?.district,o.customers?.province].filter(Boolean).join(' ')}</td>
                   </tr>
@@ -292,6 +335,67 @@ export default function FlashExport() {
             </table>
           </div>
         </>
+      )}
+
+      {/* ── Modal แก้ไขสินค้า ── */}
+      {editingOrder && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-lg w-full">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">แก้ไขสินค้าในออเดอร์</h3>
+                <p className="text-sm text-slate-500 font-mono">{editingOrder.order_no}</p>
+              </div>
+              <button onClick={() => setEditingOrder(null)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+            </div>
+
+            <div className="space-y-3 mb-5">
+              {(orderSelections[editingOrder.id] || makeItems(editingOrder)).map((item, idx) => (
+                <div key={idx} className={`flex items-center gap-3 p-3 rounded-lg border transition ${item.selected ? 'border-cyan-200 bg-cyan-50' : 'border-slate-100 bg-slate-50 opacity-60'}`}>
+                  {/* checkbox */}
+                  <input type="checkbox" checked={item.selected}
+                    onChange={e => {
+                      const cur = orderSelections[editingOrder.id] || makeItems(editingOrder);
+                      const next = cur.map((it, i) => i === idx ? { ...it, selected: e.target.checked } : it);
+                      setOrderSelections(s => ({ ...s, [editingOrder.id]: next }));
+                    }}
+                    className="w-4 h-4 rounded accent-cyan-500"/>
+                  {/* ชื่อสินค้า */}
+                  <span className="flex-1 text-sm text-slate-700 min-w-0 truncate">{item.rawProd}</span>
+                  {/* จำนวน */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => {
+                        const cur = orderSelections[editingOrder.id] || makeItems(editingOrder);
+                        const next = cur.map((it, i) => i === idx ? { ...it, qty: Math.max(1, it.qty - 1) } : it);
+                        setOrderSelections(s => ({ ...s, [editingOrder.id]: next }));
+                      }}
+                      className="w-6 h-6 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-600 flex items-center justify-center font-bold text-sm">−</button>
+                    <span className="w-6 text-center text-sm font-bold text-slate-800">{item.qty}</span>
+                    <button
+                      onClick={() => {
+                        const cur = orderSelections[editingOrder.id] || makeItems(editingOrder);
+                        const next = cur.map((it, i) => i === idx ? { ...it, qty: it.qty + 1 } : it);
+                        setOrderSelections(s => ({ ...s, [editingOrder.id]: next }));
+                      }}
+                      className="w-6 h-6 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-600 flex items-center justify-center font-bold text-sm">+</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-between items-center pt-3 border-t">
+              <button onClick={() => {
+                // reset กลับค่าเดิม
+                setOrderSelections(s => ({ ...s, [editingOrder.id]: makeItems(editingOrder) }));
+              }} className="text-sm text-slate-400 hover:text-slate-600">รีเซ็ต</button>
+              <div className="flex gap-2">
+                <button onClick={() => setEditingOrder(null)} className="px-4 py-2 bg-slate-200 rounded-lg text-sm hover:bg-slate-300">ยกเลิก</button>
+                <button onClick={() => setEditingOrder(null)} className="px-4 py-2 bg-cyan-500 text-white rounded-lg text-sm hover:bg-cyan-600">บันทึก</button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Preview Modal */}
