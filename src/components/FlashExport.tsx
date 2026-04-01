@@ -82,17 +82,6 @@ export default function FlashExport() {
     const previews: PreviewRow[] = [];
 
     for (const order of orders) {
-      const promoId = order.promo_ids?.[0];
-      let promo: any = null;
-      if (promoId) {
-        const { data } = await supabase
-          .from('products_promo')
-          .select('*, boxes(*), bubbles(*), products_master(*)')
-          .eq('id', promoId)
-          .maybeSingle();
-        promo = data;
-      }
-
       const isCOD     = order.payment_status !== 'ชำระแล้ว';
       const codAmount = isCOD ? Math.floor(order.total_thb) : '';
 
@@ -103,21 +92,59 @@ export default function FlashExport() {
         order.customers?.province    ? `จ.${order.customers.province}`    : null,
       ].filter(Boolean).join(' ');
 
-      const itemShortName  = promo?.short_name || promo?.name || '';
-      const itemQty        = promo?.name ? extractQty(promo.name) : (order.quantity || 1);
-      const itemDesc       = `${itemShortName}|-|-|${itemQty}`;
       const orderNoWithName = `${order.order_no} ${order.raw_prod || ''}`.trim();
 
-      const masterWeightG = Number(promo?.products_master?.weight_g ?? 0);
-      const totalWeightKg = masterWeightG > 0
-        ? Math.max((masterWeightG * itemQty) / 1000, 0.1).toFixed(2)
-        : Math.max(Number(order.weight_kg ?? 0), 0.1).toFixed(2);
+      // ── แยกสินค้าหลายรายการ (split by |) ──
+      const rawProds = (order.raw_prod || '').split('|').map((s: string) => s.trim()).filter(Boolean);
+      const rawQtys  = String((order as any).quantities || order.quantity || '1').split('|');
 
-      const boxL = Number(promo?.boxes?.length_cm) || 1;
-      const boxW = Number(promo?.boxes?.width_cm)  || 1;
-      const boxH = Number(promo?.boxes?.height_cm) || 1;
+      // โหลด promo แต่ละรายการ
+      const itemDescs: string[] = [];
+      let totalWeightKg = 0;
+      let flashItemType = 'พัสดุ';
+      let boxL = 1, boxW = 1, boxH = 1;
+
+      for (let i = 0; i < rawProds.length && i < 5; i++) {
+        const qtyFromFile = Number(rawQtys[i]?.trim()) || 1;
+
+        // หา promo จาก promo_ids ที่ map ไว้
+        const pid = order.promo_ids?.[i];
+        let p: any = null;
+        if (pid) {
+          const { data } = await supabase
+            .from('products_promo')
+            .select('*, boxes(*), bubbles(*), products_master(*)')
+            .eq('id', pid).maybeSingle();
+          p = data;
+        }
+
+        const shortName = p?.short_name || p?.name || rawProds[i];
+        // จำนวนใช้จากไฟล์ต้นฉบับ ถ้าไม่มีใช้ extractQty จากชื่อโปร
+        const qty = qtyFromFile;
+        itemDescs.push(`${shortName}|-|-|${qty}`);
+
+        // น้ำหนักรวมทุก item
+        if (p?.products_master?.weight_g) {
+          totalWeightKg += (Number(p.products_master.weight_g) * qty) / 1000;
+        }
+
+        // ใช้กล่อง/ประเภทจาก item แรก
+        if (i === 0) {
+          boxL = Number(p?.boxes?.length_cm) || 1;
+          boxW = Number(p?.boxes?.width_cm)  || 1;
+          boxH = Number(p?.boxes?.height_cm) || 1;
+          flashItemType = p?.item_type || 'พัสดุ';
+        }
+      }
+
+      // ถ้าน้ำหนักคำนวณไม่ได้ใช้จาก order
+      if (totalWeightKg === 0) totalWeightKg = Math.max(Number(order.weight_kg ?? 0), 0.1);
+      const weightKgStr = Math.max(totalWeightKg, 0.1).toFixed(2);
+
+      // Item Desc 1-5 (pad ด้วย '' ถ้าน้อยกว่า 5)
+      const [d1='', d2='', d3='', d4='', d5=''] = [...itemDescs, '', '', '', '', ''];
+
       const phone = (order.customers?.tel || '').replace(/[^0-9]/g, '');
-      const flashItemType = promo?.item_type || 'พัสดุ';
 
       // Excel row
       rows.push([
@@ -128,10 +155,9 @@ export default function FlashExport() {
         phone,
         '',
         codAmount,
-        itemDesc,
-        '', '', '', '',
+        d1, d2, d3, d4, d5,
         flashItemType,
-        totalWeightKg,
+        weightKgStr,
         boxL, boxW, boxH,
         '', '',
         '',
@@ -139,7 +165,7 @@ export default function FlashExport() {
         '', '', '',
       ]);
 
-      // Preview row (เฉพาะคอลัมน์หลัก)
+      // Preview row
       previews.push({
         order_no:     orderNoWithName,
         name:         order.customers?.name || '-',
@@ -147,9 +173,9 @@ export default function FlashExport() {
         postal_code:  order.customers?.postal_code || '-',
         phone:        phone,
         cod:          codAmount,
-        item_desc:    itemDesc,
+        item_desc:    itemDescs.join(' | ') || '-',
         item_type:    flashItemType,
-        weight_kg:    totalWeightKg,
+        weight_kg:    weightKgStr,
         box_lwh:      `${boxL}×${boxW}×${boxH}`,
         product_type: 'Happy Return',
       });
