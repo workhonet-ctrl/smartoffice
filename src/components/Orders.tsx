@@ -161,7 +161,10 @@ export default function Orders() {
           address: String(row[7] || ''), subdistrict: String(row[8] || ''),
           district: String(row[9] || ''), province: String(row[10] || ''),
           postal_code: String(row[11] || ''), raw_prod: String(row[14] || ''),
-          quantity: Number(row[15]) || 1, weight_kg: (Number(row[16]) || 0) / 1000,
+          // quantities — เก็บ string ต้นฉบับ "1|2|1" และคำนวณ total
+          quantities: String(row[15] || '1'),
+          quantity: String(row[15] || '1').split('|').reduce((s, n) => s + (Number(n.trim()) || 1), 0),
+          weight_kg: (Number(row[16]) || 0) / 1000,
           tracking_no: String(row[17] || ''), total_thb: Number(row[21]) || 0,
           payment_method: String(row[22] || 'COD'), payment_status: String(row[24] || 'รอชำระเงิน'),
         });
@@ -242,7 +245,9 @@ export default function Orders() {
           order_no: String(order.order_no), customer_id: customerId, channel: order.channel,
           order_date: order.order_date, order_time: order.order_time || null,
           raw_prod: order.raw_prod, promo_ids: promoIds,
-          quantity: order.quantity, weight_kg: order.weight_kg,
+          quantity: order.quantity,
+          quantities: String(order.quantities || order.quantity || '1'),
+          weight_kg: order.weight_kg,
           tracking_no: hasTrack ? order.tracking_no : null,
           total_thb: order.total_thb, payment_method: order.payment_method,
           payment_status: order.payment_status, order_status: orderStatus, route,
@@ -418,24 +423,41 @@ export default function Orders() {
                     </td>
                     {/* ไปรษณีย์ */}
                     <td className="p-3 text-center font-mono text-xs">{o.customers?.postal_code || '-'}</td>
-                    {/* สินค้า — แสดง short_name จาก promo ถ้ามี */}
-                    <td className="p-3 text-xs max-w-[160px]">
+                    {/* สินค้า — แสดงทุกรายการ */}
+                    <td className="p-3 text-xs max-w-[180px]">
                       {(() => {
-                        const promoId = o.promo_ids?.[0];
-                        const promo   = promoId ? promoMap[promoId] : null;
-                        if (promo) {
-                          return <span className="text-slate-800 font-medium">{promo.short_name || promo.name}</span>;
+                        const prods = (o.raw_prod || '').split('|').map((s: string) => s.trim()).filter(Boolean);
+                        const qtys  = String((o as any).quantities || o.quantity || '1').split('|');
+                        if (prods.length <= 1) {
+                          const promoId = o.promo_ids?.[0];
+                          const promo   = promoId ? promoMap[promoId] : null;
+                          return <span className={promo ? 'text-slate-800 font-medium' : 'text-slate-400'}>{promo ? (promo.short_name || promo.name) : (o.raw_prod || '-')}</span>;
                         }
-                        return <span className="text-slate-400 truncate block">{o.raw_prod || '-'}</span>;
+                        // หลายรายการ
+                        return (
+                          <div className="space-y-0.5">
+                            {prods.map((rp: string, idx: number) => {
+                              const promoId = o.promo_ids?.[idx];
+                              const promo   = promoId ? promoMap[promoId] : null;
+                              const name    = promo ? (promo.short_name || promo.name) : rp;
+                              const qty     = qtys[idx] || '1';
+                              return (
+                                <div key={idx} className="flex items-center gap-1">
+                                  <span className="text-slate-700 truncate">{name}</span>
+                                  <span className="shrink-0 px-1 py-0.5 bg-slate-100 rounded text-xs font-bold text-slate-600">×{qty}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
                       })()}
                     </td>
-                    {/* จำนวน */}
+                    {/* จำนวน — รวม */}
                     <td className="p-3 text-center">
                       {(() => {
-                        const promoId = o.promo_ids?.[0];
-                        const promo   = promoId ? promoMap[promoId] : null;
-                        const qty     = promo ? extractQty(promo.name) : (o.quantity || 1);
-                        return <span className="px-2 py-0.5 bg-slate-100 rounded-full text-xs font-bold text-slate-700">{qty}</span>;
+                        const qtys = String((o as any).quantities || o.quantity || '1').split('|');
+                        const total = qtys.reduce((s: number, n: string) => s + (Number(n.trim()) || 1), 0);
+                        return <span className="px-2 py-0.5 bg-slate-100 rounded-full text-xs font-bold text-slate-700">{total}</span>;
                       })()}
                     </td>
                     {/* ขนส่ง */}
