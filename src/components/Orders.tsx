@@ -161,7 +161,10 @@ export default function Orders() {
         });
       }
       setImportedOrders(rows);
-      const rawProds = [...new Set(rows.flatMap(o => String(o.raw_prod).split(',').map((s: string) => s.trim())))];
+      // split ด้วย | (pipe) เป็นตัวคั่นระหว่างสินค้า
+      const rawProds = [...new Set(rows.flatMap(o =>
+        String(o.raw_prod).split('|').map((s: string) => s.trim()).filter(Boolean)
+      ))];
       const autoMap: Record<string, string> = {};
       const matched = new Set<string>();
       for (const rp of rawProds) {
@@ -198,7 +201,8 @@ export default function Orders() {
           if (ce) { fail++; continue; }
           customerId = nc?.id;
         }
-        const rawProds = String(order.raw_prod).split(',').map((s: string) => s.trim());
+        // split ด้วย | เพื่อให้รองรับสินค้าหลายรายการในออเดอร์เดียว
+        const rawProds = String(order.raw_prod).split('|').map((s: string) => s.trim()).filter(Boolean);
         const promoIds: string[] = [];
         for (const rp of rawProds) {
           const { data: mp } = await supabase.from('product_mappings').select('promo_id').eq('raw_name', rp).maybeSingle();
@@ -236,7 +240,9 @@ export default function Orders() {
     loadOrders();
   };
 
-  const uniqueRawProds = [...new Set(importedOrders.flatMap(o => String(o.raw_prod).split(',').map((s: string) => s.trim())))];
+  const uniqueRawProds = [...new Set(importedOrders.flatMap(o =>
+    String(o.raw_prod).split('|').map((s: string) => s.trim()).filter(Boolean)
+  ))];
   const allMapped = uniqueRawProds.every(rp => !!mappings[rp]);
 
   // filter ด้วย search + วันที่
@@ -440,19 +446,32 @@ export default function Orders() {
           <div className="bg-white rounded-xl p-6 max-w-2xl w-full max-h-[90vh] flex flex-col">
             <div className="mb-4">
               <h3 className="text-xl font-bold text-slate-800">จับคู่สินค้า</h3>
-              <p className="text-sm text-slate-500 mt-1">พบสินค้า {uniqueRawProds.length} รายการ{autoMatched.size > 0 && <span className="ml-2 text-green-600">✓ อัตโนมัติ {autoMatched.size} รายการ</span>}</p>
+              <p className="text-sm text-slate-500 mt-1">
+                พบสินค้า <span className="font-semibold text-slate-700">{uniqueRawProds.length}</span> รายการ
+                {autoMatched.size > 0 && <span className="ml-2 text-green-600">✓ จับคู่อัตโนมัติ {autoMatched.size} รายการ</span>}
+              </p>
+              <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700">
+                💡 สินค้าที่มี <code className="bg-blue-100 px-1 rounded">|</code> คือออเดอร์ที่สั่งหลายรายการพร้อมกัน — จับคู่ทีละรายการได้เลย
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-              {uniqueRawProds.map(rawProd => (
-                <div key={rawProd} className={`rounded-lg border p-3 ${autoMatched.has(rawProd) ? 'border-green-200 bg-green-50' : mappings[rawProd] ? 'border-cyan-200 bg-cyan-50' : 'border-slate-200'}`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    {mappings[rawProd] ? <CheckCircle size={15} className="text-green-500 shrink-0"/> : <AlertCircle size={15} className="text-orange-400 shrink-0"/>}
-                    <span className="text-sm font-medium text-slate-700 truncate">{rawProd}</span>
-                    {autoMatched.has(rawProd) && <span className="ml-auto text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full shrink-0">อัตโนมัติ</span>}
+              {uniqueRawProds.map(rawProd => {
+                // นับว่า rawProd นี้พบในกี่ออเดอร์
+                const orderCount = importedOrders.filter(o =>
+                  String(o.raw_prod).split('|').map((s: string) => s.trim()).includes(rawProd)
+                ).length;
+                return (
+                  <div key={rawProd} className={`rounded-lg border p-3 ${autoMatched.has(rawProd) ? 'border-green-200 bg-green-50' : mappings[rawProd] ? 'border-cyan-200 bg-cyan-50' : 'border-slate-200'}`}>
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      {mappings[rawProd] ? <CheckCircle size={15} className="text-green-500 shrink-0"/> : <AlertCircle size={15} className="text-orange-400 shrink-0"/>}
+                      <span className="text-sm font-medium text-slate-700 flex-1 min-w-0 truncate">{rawProd}</span>
+                      <span className="text-xs text-slate-400 shrink-0">{orderCount} ออเดอร์</span>
+                      {autoMatched.has(rawProd) && <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full shrink-0">อัตโนมัติ</span>}
+                    </div>
+                    <SearchableSelect options={promoOptions} value={mappings[rawProd] || ''} onChange={val => setMappings(prev => ({ ...prev, [rawProd]: val }))} placeholder="ค้นหารหัส หรือชื่อสินค้า..."/>
                   </div>
-                  <SearchableSelect options={promoOptions} value={mappings[rawProd] || ''} onChange={val => setMappings(prev => ({ ...prev, [rawProd]: val }))} placeholder="ค้นหารหัส หรือชื่อสินค้า..."/>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <div className="mt-5 flex gap-3 pt-4 border-t">
               <button onClick={handleMappingComplete} disabled={!allMapped}
