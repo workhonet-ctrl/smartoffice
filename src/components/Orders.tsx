@@ -85,7 +85,7 @@ function getCarrierLabel(route: string | null) {
   return { label: '-', color: 'bg-slate-100 text-slate-500' };
 }
 
-export default function Orders() {
+export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]) => void }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -197,6 +197,7 @@ export default function Orders() {
   const handleVerifyComplete = async () => {
     let ok = 0, skip = 0, fail = 0;
     const errors: string[] = [];
+    const newOrderIds: string[] = []; // เก็บ id ออเดอร์ที่เพิ่งนำเข้าสำเร็จ
 
     for (const order of importedOrders) {
       try {
@@ -254,9 +255,14 @@ export default function Orders() {
         }]);
 
         if (oe) {
-          if (oe.code === '23505') { skip++; }  // ออเดอร์ซ้ำ — ข้าม
+          if (oe.code === '23505') { skip++; }
           else { errors.push(`order ${order.order_no}: ${oe.message}`); fail++; }
-        } else { ok++; }
+        } else {
+          ok++;
+          // เก็บ id ออเดอร์ใหม่ (ต้อง query กลับมา)
+          const { data: newO } = await supabase.from('orders').select('id').eq('order_no', String(order.order_no)).maybeSingle();
+          if (newO?.id) newOrderIds.push(newO.id);
+        }
 
       } catch (err: any) {
         errors.push(`catch: ${err?.message || err}`);
@@ -269,7 +275,14 @@ export default function Orders() {
       ? `✓ นำเข้าสำเร็จ ${ok} ออเดอร์${skip > 0 ? ` · ข้าม ${skip} ซ้ำ` : ''}${fail > 0 ? ` · ล้มเหลว ${fail}` : ''}`
       : `นำเข้าไม่สำเร็จ — ออเดอร์ซ้ำ ${skip} รายการ${fail > 0 ? ` · error ${fail}` : ''}`;
     showToast(msg, ok > 0 ? 'success' : skip > 0 ? 'success' : 'error');
-    setShowVerify(false); setImportedOrders([]); setMappings({}); setAutoMatched(new Set()); loadOrders();
+    setShowVerify(false); setImportedOrders([]); setMappings({}); setAutoMatched(new Set());
+
+    // ถ้า import สำเร็จ → ไปหน้าแพ็คสินค้าอัตโนมัติ
+    if (ok > 0 && onImportDone && newOrderIds.length > 0) {
+      setTimeout(() => onImportDone(newOrderIds), 1200);
+    } else {
+      loadOrders();
+    }
   };
 
   // อัพเดต tracking → อัพเดต order_status อัตโนมัติ
