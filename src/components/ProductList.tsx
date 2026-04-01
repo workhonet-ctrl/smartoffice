@@ -105,16 +105,16 @@ export default function ProductList() {
   );
 
   return (
-    <div className="p-6">
+    <div className="flex flex-col h-screen p-6 pb-2">
       {/* Header */}
-      <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">รายการสินค้าทั้งหมด</h2>
           <p className="text-sm text-slate-500 mt-1">
             {filtered.length} Master · {filtered.reduce((s, m) => s + m.promos.length, 0)} Promo
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button onClick={() => toggleAll(true)}  className="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600">ขยายทั้งหมด</button>
           <button onClick={() => toggleAll(false)} className="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600">ย่อทั้งหมด</button>
           <button onClick={loadData}               className="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600 flex items-center gap-1"><RefreshCw size={13} />รีเฟรช</button>
@@ -122,7 +122,7 @@ export default function ProductList() {
       </div>
 
       {/* Search */}
-      <div className="relative mb-5">
+      <div className="relative mb-4 shrink-0">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
           type="text"
@@ -133,120 +133,109 @@ export default function ProductList() {
         />
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl shadow overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-800 text-slate-200 text-xs uppercase tracking-wide">
-              <tr>
-                <th className="p-3 text-left w-8"></th>
-                <th className="p-3 text-left">รหัส</th>
-                <th className="p-3 text-left">ชื่อสั้น</th>
-                <th className="p-3 text-left">ชื่อโปร / ชื่อสินค้า</th>
-                <th className="p-3 text-center">จำนวน</th>
-                <th className="p-3 text-right">ราคาขาย</th>
-                <th className="p-3 text-right">ต้นทุนรวม</th>
-                <th className="p-3 text-left">กล่อง</th>
-                <th className="p-3 text-left">บั้บเบิ้ล</th>
-                <th className="p-3 text-right">น้ำหนัก (kg)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr><td colSpan={10} className="p-8 text-center text-slate-400">ไม่พบสินค้าที่ค้นหา</td></tr>
-              )}
+      {/* Table — เต็มพื้นที่เหลือ scroll ได้ทั้ง X และ Y */}
+      <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+        <table className="text-sm" style={{ minWidth: '900px', width: '100%' }}>
+          <thead className="bg-slate-800 text-slate-200 text-xs uppercase tracking-wide sticky top-0 z-10">
+            <tr>
+              <th className="p-3 text-left w-8"></th>
+              <th className="p-3 text-left whitespace-nowrap">รหัส</th>
+              <th className="p-3 text-left whitespace-nowrap">ชื่อสั้น</th>
+              <th className="p-3 text-left whitespace-nowrap">ชื่อโปร / ชื่อสินค้า</th>
+              <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
+              <th className="p-3 text-right whitespace-nowrap">ราคาขาย</th>
+              <th className="p-3 text-right whitespace-nowrap">ต้นทุนรวม</th>
+              <th className="p-3 text-left whitespace-nowrap">กล่อง</th>
+              <th className="p-3 text-left whitespace-nowrap">บั้บเบิ้ล</th>
+              <th className="p-3 text-right whitespace-nowrap">น้ำหนัก (kg)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={10} className="p-8 text-center text-slate-400">ไม่พบสินค้าที่ค้นหา</td></tr>
+            )}
 
-              {filtered.map(master => {
-                const isOpen = openMasters.has(master.id);
-                return (
-                  <>
-                    {/* ── แถว Master ── */}
-                    <tr
-                      key={master.id}
-                      onClick={() => toggleMaster(master.id)}
-                      className="bg-cyan-50 border-b border-cyan-100 cursor-pointer hover:bg-cyan-100 transition"
-                    >
-                      <td className="p-3 text-cyan-600">
-                        {isOpen
-                          ? <ChevronDown size={16} />
-                          : <ChevronRight size={16} />
-                        }
-                      </td>
-                      <td className="p-3">
-                        <span className="font-mono font-bold text-cyan-700 text-sm">{master.id}</span>
-                      </td>
-                      <td className="p-3 text-slate-500 text-xs">-</td>
-                      <td className="p-3 font-semibold text-slate-800" colSpan={1}>
-                        {master.name}
-                      </td>
-                      <td className="p-3 text-center text-slate-400 text-xs">-</td>
-                      <td className="p-3 text-right text-slate-400 text-xs">-</td>
-                      {/* ต้นทุน Master */}
-                      <td className="p-3 text-right text-xs text-slate-500">฿{Number(master.cost_thb).toFixed(2)}</td>
-                      <td className="p-3 text-xs text-slate-400">-</td>
-                      <td className="p-3 text-xs text-slate-400">-</td>
-                      {/* น้ำหนักต่อหน่วย */}
-                      <td className="p-3 text-right text-xs text-slate-500">
-                        {master.weight_g ? `${(master.weight_g / 1000).toFixed(3)} /ชิ้น` : '-'}
-                      </td>
-                    </tr>
+            {filtered.map(master => {
+              const isOpen = openMasters.has(master.id);
+              return (
+                <>
+                  {/* ── แถว Master ── */}
+                  <tr
+                    key={master.id}
+                    onClick={() => toggleMaster(master.id)}
+                    className="bg-cyan-50 border-b border-cyan-100 cursor-pointer hover:bg-cyan-100 transition"
+                  >
+                    <td className="p-3 text-cyan-600">
+                      {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </td>
+                    <td className="p-3">
+                      <span className="font-mono font-bold text-cyan-700 text-sm whitespace-nowrap">{master.id}</span>
+                    </td>
+                    <td className="p-3 text-slate-500 text-xs">-</td>
+                    <td className="p-3 font-semibold text-slate-800 whitespace-nowrap">{master.name}</td>
+                    <td className="p-3 text-center text-slate-400 text-xs">-</td>
+                    <td className="p-3 text-right text-slate-400 text-xs">-</td>
+                    {/* ต้นทุนต่อชิ้น */}
+                    <td className="p-3 text-right text-xs text-slate-500 whitespace-nowrap">฿{Number(master.cost_thb).toFixed(2)}</td>
+                    <td className="p-3 text-xs text-slate-400">-</td>
+                    <td className="p-3 text-xs text-slate-400">-</td>
+                    {/* น้ำหนักต่อชิ้น — แสดงหน่วยที่เหมาะสม */}
+                    <td className="p-3 text-right text-xs text-slate-500 whitespace-nowrap">
+                      {master.weight_g
+                        ? `${parseFloat((master.weight_g / 1000).toFixed(3))} /ชิ้น`
+                        : '-'}
+                    </td>
+                  </tr>
 
-                    {isOpen && master.promos.map(promo => {
-                      const qty        = extractQty(promo.name);
-                      const weightKg   = ((master.weight_g * qty) / 1000);
-                      const costBase   = Number(master.cost_thb);
-                      const costBox    = Number(promo.boxes?.price_thb ?? 0);
-                      const costBubble = Number(promo.bubbles?.price_thb ?? 0);
-                      const costTotal  = costBase * qty + costBox + costBubble;
-                      const missingQty = qty === 1 && !promo.name.match(/1\s*(?:กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน|แถม)/i);
+                  {isOpen && master.promos.map(promo => {
+                    const qty      = extractQty(promo.name);
+                    // FIX: ต้นทุนรวม = qty × cost_thb (ต้นทุนต่อชิ้น × จำนวน)
+                    const costTotal = Number(master.cost_thb) * qty;
+                    // FIX: น้ำหนัก = qty × weight_g → kg แสดงทศนิยมพอดี
+                    const weightKg  = (master.weight_g * qty) / 1000;
+                    const weightStr = parseFloat(weightKg.toFixed(3)).toString(); // 0.5 ไม่ใช่ 0.500
+                    const missingQty = qty === 1 && !promo.name.match(/1\s*(?:กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน|แถม)/i);
 
-                      return (
-                        <tr key={promo.id} className={`border-b hover:bg-slate-50 transition ${!promo.active ? 'opacity-40' : ''}`}>
-                          <td className="p-3"></td>
-                          {/* รหัส P */}
-                          <td className="p-3 pl-6">
-                            <span className="font-mono text-xs font-bold text-slate-600">{promo.id}</span>
-                          </td>
-                          {/* ชื่อสั้น */}
-                          <td className="p-3 text-slate-500 text-xs">{promo.short_name || <span className="text-orange-400 flex items-center gap-1"><AlertCircle size={12}/>ไม่มี</span>}</td>
-                          {/* ชื่อโปร */}
-                          <td className="p-3 text-slate-700">{promo.name}</td>
-                          {/* จำนวน */}
-                          <td className="p-3 text-center">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${missingQty ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-700'}`}>
-                              {qty}
-                              {missingQty && <span className="ml-1 text-orange-400" title="ตรวจสอบจำนวน">?</span>}
-                            </span>
-                          </td>
-                          {/* ราคาขาย */}
-                          <td className="p-3 text-right font-bold text-slate-800">
-                            ฿{Number(promo.price_thb).toLocaleString()}
-                          </td>
-                          {/* ต้นทุนรวม — ตัวเลขเดียว ไม่มีสูตร */}
-                          <td className="p-3 text-right text-slate-500 text-sm">
-                            ฿{costTotal.toFixed(2)}
-                          </td>
-                          {/* กล่อง */}
-                          <td className="p-3 text-xs text-slate-600 whitespace-nowrap">
-                            {promo.boxes?.name || <span className="text-orange-400">ไม่มีกล่อง</span>}
-                          </td>
-                          {/* บั้บเบิ้ล */}
-                          <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
-                            {promo.bubbles ? `ยาว ${Number(promo.bubbles.length_cm ?? 0)} cm` : <span className="text-slate-400">-</span>}
-                          </td>
-                          {/* น้ำหนักรวม — ตัวเลขเดียว ไม่มีสูตร */}
-                          <td className="p-3 text-right text-sm font-medium text-slate-700">
-                            {weightKg.toFixed(3)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    return (
+                      <tr key={promo.id} className={`border-b hover:bg-slate-50 transition ${!promo.active ? 'opacity-40' : ''}`}>
+                        <td className="p-3"></td>
+                        <td className="p-3 pl-6">
+                          <span className="font-mono text-xs font-bold text-slate-600 whitespace-nowrap">{promo.id}</span>
+                        </td>
+                        <td className="p-3 text-slate-500 text-xs whitespace-nowrap">
+                          {promo.short_name || <span className="text-orange-400 flex items-center gap-1"><AlertCircle size={12}/>ไม่มี</span>}
+                        </td>
+                        <td className="p-3 text-slate-700 whitespace-nowrap">{promo.name}</td>
+                        <td className="p-3 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${missingQty ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-700'}`}>
+                            {qty}{missingQty && <span className="ml-1 text-orange-400">?</span>}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-bold text-slate-800 whitespace-nowrap">
+                          ฿{Number(promo.price_thb).toLocaleString()}
+                        </td>
+                        {/* ต้นทุนรวม = qty × cost_thb */}
+                        <td className="p-3 text-right text-slate-600 font-medium whitespace-nowrap">
+                          ฿{costTotal.toFixed(2)}
+                        </td>
+                        <td className="p-3 text-xs text-slate-600 whitespace-nowrap">
+                          {promo.boxes?.name || <span className="text-orange-400">ไม่มีกล่อง</span>}
+                        </td>
+                        <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                          {promo.bubbles ? `ยาว ${Number(promo.bubbles.length_cm ?? 0)} cm` : <span className="text-slate-400">-</span>}
+                        </td>
+                        {/* น้ำหนัก — 0.5 ไม่ใช่ 0.500 */}
+                        <td className="p-3 text-right text-sm font-medium text-slate-700 whitespace-nowrap">
+                          {weightStr}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
