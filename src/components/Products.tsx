@@ -1,6 +1,52 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, CreditCard as Edit2, Trash2, X } from 'lucide-react';
+import { Plus, CreditCard as Edit2, Trash2, X, Search } from 'lucide-react';
+
+// ── Searchable Dropdown สำหรับกล่อง/บั้บเบิ้ล/ประเภท ──
+function SearchableDropdown({ options, value, onChange, placeholder }: {
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const selected = options.find(o => o.value === value);
+  const filtered = options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => { setOpen(v => !v); setQ(''); }}
+        className={`w-full text-left border rounded px-3 py-2 text-sm flex items-center justify-between ${selected ? 'text-slate-800' : 'text-slate-400'}`}>
+        <span className="truncate">{selected ? selected.label : (placeholder || 'เลือก...')}</span>
+        <span className="text-slate-400 ml-1">▼</span>
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg">
+          <div className="p-2 border-b flex items-center gap-2 bg-slate-50 rounded-t-lg">
+            <Search size={13} className="text-slate-400"/>
+            <input autoFocus type="text" value={q} onChange={e => setQ(e.target.value)}
+              placeholder="พิมพ์เพื่อค้นหา..." className="flex-1 text-sm bg-transparent outline-none"/>
+          </div>
+          <div className="max-h-44 overflow-y-auto">
+            {filtered.length === 0 && <div className="p-3 text-xs text-slate-400 text-center">ไม่พบ</div>}
+            {filtered.map(o => (
+              <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
+                className={`w-full text-left px-3 py-2 text-sm hover:bg-cyan-50 ${value === o.value ? 'bg-cyan-50 font-semibold' : ''}`}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 type ProductMaster = {
   id: string;
@@ -224,6 +270,9 @@ export default function Products() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
+  // Search
+  const [searchMaster, setSearchMaster] = useState('');
+  const [searchPromo, setSearchPromo] = useState('');
 
   useEffect(() => {
     loadData();
@@ -528,110 +577,105 @@ export default function Products() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <div className="bg-white rounded-lg shadow p-4">
-          <h3 className="text-lg font-bold mb-4 text-cyan-600">Master Products (M)</h3>
-          <div className="overflow-x-auto">
+        {/* ── Master Products ── */}
+        <div className="bg-white rounded-xl shadow p-4 flex flex-col" style={{maxHeight:'calc(100vh - 220px)', minHeight:'300px'}}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-bold text-cyan-600">Master Products (M)</h3>
+            <span className="text-xs text-slate-400">{masters.filter(m => !searchMaster || m.id.toLowerCase().includes(searchMaster.toLowerCase()) || m.name.toLowerCase().includes(searchMaster.toLowerCase())).length} รายการ</span>
+          </div>
+          {/* Search */}
+          <div className="relative mb-3">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
+            <input type="text" value={searchMaster} onChange={e => setSearchMaster(e.target.value)}
+              placeholder="ค้นหา รหัส M หรือชื่อสินค้า..."
+              className="w-full pl-8 pr-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-200"/>
+          </div>
+          {/* Table */}
+          <div className="overflow-auto flex-1">
             <table className="w-full text-sm">
-              <thead className="bg-slate-100">
+              <thead className="bg-slate-100 sticky top-0">
                 <tr>
-                  <th className="p-2 text-left">รหัส</th>
+                  <th className="p-2 text-left whitespace-nowrap">รหัส</th>
                   <th className="p-2 text-left">ชื่อ</th>
-                  <th className="p-2 text-right">ต้นทุน</th>
-                  <th className="p-2 text-right">น้ำหนัก (g)</th>
-                  <th className="p-2 text-center">จัดการ</th>
+                  <th className="p-2 text-right whitespace-nowrap">ต้นทุน</th>
+                  <th className="p-2 text-right whitespace-nowrap">น้ำหนัก (g)</th>
+                  <th className="p-2 text-center whitespace-nowrap">จัดการ</th>
                 </tr>
               </thead>
               <tbody>
-                {masters.map((m) => (
+                {masters
+                  .filter(m => !searchMaster || m.id.toLowerCase().includes(searchMaster.toLowerCase()) || m.name.toLowerCase().includes(searchMaster.toLowerCase()))
+                  .map((m) => (
                   <tr key={m.id} className="border-b hover:bg-slate-50">
-                    <td className="p-2">{m.id}</td>
+                    <td className="p-2 font-mono text-xs">{m.id}</td>
                     <td className="p-2">{m.name}</td>
                     <td className="p-2 text-right">{Number(m.cost_thb).toLocaleString()}</td>
                     <td className="p-2 text-right">{m.weight_g}</td>
                     <td className="p-2 text-center">
-                      <button
-                        onClick={() => {
-                          setEditingMaster(m);
-                          setMasterForm({
-                            id: m.id,
-                            name: m.name,
-                            cost_thb: Number(m.cost_thb) || 0,
-                            weight_g: Number(m.weight_g) || 0,
-                          });
-                          setShowMasterForm(true);
-                        }}
-                        className="text-blue-600 hover:text-blue-800 mr-2"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      <button onClick={() => deleteMaster(m.id)} className="text-red-600 hover:text-red-800">
-                        <Trash2 size={16} />
-                      </button>
+                      <button onClick={() => { setEditingMaster(m); setMasterForm({ id: m.id, name: m.name, cost_thb: Number(m.cost_thb) || 0, weight_g: Number(m.weight_g) || 0 }); setShowMasterForm(true); }} className="text-blue-600 hover:text-blue-800 mr-2"><Edit2 size={16}/></button>
+                      <button onClick={() => deleteMaster(m.id)} className="text-red-600 hover:text-red-800"><Trash2 size={16}/></button>
                     </td>
                   </tr>
                 ))}
+                {masters.filter(m => !searchMaster || m.id.toLowerCase().includes(searchMaster.toLowerCase()) || m.name.toLowerCase().includes(searchMaster.toLowerCase())).length === 0 && (
+                  <tr><td colSpan={5} className="p-4 text-center text-slate-400 text-sm">ไม่พบสินค้า</td></tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-4">
-          <h3 className="text-lg font-bold mb-4 text-green-600">Promo Products (P)</h3>
-          <div className="overflow-x-auto">
+        {/* ── Promo Products ── */}
+        <div className="bg-white rounded-xl shadow p-4 flex flex-col" style={{maxHeight:'calc(100vh - 220px)', minHeight:'300px'}}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-bold text-green-600">Promo Products (P)</h3>
+            <span className="text-xs text-slate-400">{promos.filter(p => !searchPromo || p.id.toLowerCase().includes(searchPromo.toLowerCase()) || p.name.toLowerCase().includes(searchPromo.toLowerCase()) || (p.short_name || '').toLowerCase().includes(searchPromo.toLowerCase())).length} รายการ</span>
+          </div>
+          {/* Search */}
+          <div className="relative mb-3">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
+            <input type="text" value={searchPromo} onChange={e => setSearchPromo(e.target.value)}
+              placeholder="ค้นหา รหัส P ชื่อโปร หรือชื่อสั้น..."
+              className="w-full pl-8 pr-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-200"/>
+          </div>
+          {/* Table */}
+          <div className="overflow-auto flex-1">
             <table className="w-full text-sm">
-              <thead className="bg-slate-100">
+              <thead className="bg-slate-100 sticky top-0">
                 <tr>
-                  <th className="p-2 text-left">รหัส</th>
-                  <th className="p-2 text-left">ชื่อโปร</th>
-                  <th className="p-2 text-left">ชื่อสั้น</th>
-                  <th className="p-2 text-center">จำนวน</th>
-                  <th className="p-2 text-right">ราคา</th>
-                  <th className="p-2 text-left">กล่อง</th>
-                  <th className="p-2 text-left">บั้บเบิ้ล</th>
-                  <th className="p-2 text-center">จัดการ</th>
+                  <th className="p-2 text-left whitespace-nowrap">รหัส</th>
+                  <th className="p-2 text-left whitespace-nowrap">ชื่อโปร</th>
+                  <th className="p-2 text-left whitespace-nowrap">ชื่อสั้น</th>
+                  <th className="p-2 text-center whitespace-nowrap">จำนวน</th>
+                  <th className="p-2 text-right whitespace-nowrap">ราคา</th>
+                  <th className="p-2 text-left whitespace-nowrap">กล่อง</th>
+                  <th className="p-2 text-left whitespace-nowrap">บั้บเบิ้ล</th>
+                  <th className="p-2 text-center whitespace-nowrap">จัดการ</th>
                 </tr>
               </thead>
               <tbody>
-                {promos.map((p) => (
+                {promos
+                  .filter(p => !searchPromo || p.id.toLowerCase().includes(searchPromo.toLowerCase()) || p.name.toLowerCase().includes(searchPromo.toLowerCase()) || (p.short_name || '').toLowerCase().includes(searchPromo.toLowerCase()))
+                  .map((p) => (
                   <tr key={p.id} className="border-b hover:bg-slate-50">
-                    <td className="p-2">{p.id}</td>
-                    <td className="p-2">{p.name}</td>
-                    <td className="p-2">{p.short_name}</td>
+                    <td className="p-2 font-mono text-xs">{p.id}</td>
+                    <td className="p-2 max-w-[160px] truncate">{p.name}</td>
+                    <td className="p-2 text-slate-500 text-xs">{p.short_name || '-'}</td>
                     <td className="p-2 text-center">
-                      <span className="px-2 py-0.5 bg-slate-100 rounded-full text-xs font-bold text-slate-700">
-                        {extractQty(p.name)}
-                      </span>
+                      <span className="px-2 py-0.5 bg-slate-100 rounded-full text-xs font-bold text-slate-700">{extractQty(p.name)}</span>
                     </td>
-                    <td className="p-2 text-right">{Number(p.price_thb).toLocaleString()}</td>
-                    <td className="p-2">{p.boxes?.name || '-'}</td>
-                    <td className="p-2">{p.bubbles?.name || '-'}</td>
-                    <td className="p-2 text-center">
-                      <button
-                        onClick={() => {
-                          setEditingPromo(p);
-                          setPromoForm({
-                            id: p.id,
-                            master_id: p.master_id,
-                            name: p.name,
-                            short_name: p.short_name || '',
-                            price_thb: Number(p.price_thb) || 0,
-                            box_id: p.box_id || '',
-                            bubble_id: p.bubble_id || '',
-                            color: p.color || '',
-                            item_type: p.item_type || 'อื่นๆ',
-                          });
-                          setShowPromoForm(true);
-                        }}
-                        className="text-blue-600 hover:text-blue-800 mr-2"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      <button onClick={() => deletePromo(p.id)} className="text-red-600 hover:text-red-800">
-                        <Trash2 size={16} />
-                      </button>
+                    <td className="p-2 text-right font-medium">{Number(p.price_thb).toLocaleString()}</td>
+                    <td className="p-2 text-xs whitespace-nowrap">{p.boxes?.name || '-'}</td>
+                    <td className="p-2 text-xs whitespace-nowrap">{p.bubbles?.name || '-'}</td>
+                    <td className="p-2 text-center whitespace-nowrap">
+                      <button onClick={() => { setEditingPromo(p); setPromoForm({ id: p.id, master_id: p.master_id, name: p.name, short_name: p.short_name || '', price_thb: Number(p.price_thb) || 0, box_id: p.box_id || '', bubble_id: p.bubble_id || '', color: p.color || '', item_type: p.item_type || 'อื่นๆ' }); setShowPromoForm(true); }} className="text-blue-600 hover:text-blue-800 mr-2"><Edit2 size={16}/></button>
+                      <button onClick={() => deletePromo(p.id)} className="text-red-600 hover:text-red-800"><Trash2 size={16}/></button>
                     </td>
                   </tr>
                 ))}
+                {promos.filter(p => !searchPromo || p.id.toLowerCase().includes(searchPromo.toLowerCase()) || p.name.toLowerCase().includes(searchPromo.toLowerCase()) || (p.short_name || '').toLowerCase().includes(searchPromo.toLowerCase())).length === 0 && (
+                  <tr><td colSpan={8} className="p-4 text-center text-slate-400 text-sm">ไม่พบสินค้า</td></tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -819,36 +863,22 @@ export default function Products() {
 
               <div>
                 <label className="block text-sm font-medium mb-1">กล่องพัสดุ</label>
-                <select
+                <SearchableDropdown
                   value={promoForm.box_id}
-                  onChange={(e) => setPromoForm({ ...promoForm, box_id: e.target.value })}
-                  className="w-full border rounded px-3 py-2"
-                >
-                  <option value="">เลือกกล่องพัสดุ</option>
-                  {sortedBoxes.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                      {formatBoxSize(b) ? ` - ${formatBoxSize(b)}` : ''}
-                      {` - ${Number(b.price_thb || 0).toFixed(2)}`}
-                    </option>
-                  ))}
-                </select>
+                  onChange={v => setPromoForm({ ...promoForm, box_id: v })}
+                  placeholder="ค้นหากล่องพัสดุ..."
+                  options={sortedBoxes.map(b => ({ value: b.id, label: `${b.name}${formatBoxSize(b) ? ` - ${formatBoxSize(b)}` : ''} - ฿${Number(b.price_thb || 0).toFixed(2)}` }))}
+                />
               </div>
 
               <div>
                 <label className="block text-sm font-medium mb-1">บั้บเบิ้ล</label>
-                <select
+                <SearchableDropdown
                   value={promoForm.bubble_id}
-                  onChange={(e) => setPromoForm({ ...promoForm, bubble_id: e.target.value })}
-                  className="w-full border rounded px-3 py-2"
-                >
-                  <option value="">เลือกบั้บเบิ้ล</option>
-                  {sortedBubbles.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      ยาว {formatBubbleLength(b)} - {Number(b.price_thb || 0).toFixed(2)}
-                    </option>
-                  ))}
-                </select>
+                  onChange={v => setPromoForm({ ...promoForm, bubble_id: v })}
+                  placeholder="ค้นหาบั้บเบิ้ล..."
+                  options={sortedBubbles.map(b => ({ value: b.id, label: `ยาว ${formatBubbleLength(b)} - ฿${Number(b.price_thb || 0).toFixed(2)}` }))}
+                />
               </div>
 
               <div>
@@ -864,24 +894,11 @@ export default function Products() {
 
               <div>
                 <label className="block text-sm font-medium mb-1">ประเภทสินค้า</label>
-                <select
+                <SearchableDropdown
                   value={promoForm.item_type}
-                  onChange={(e) => setPromoForm({ ...promoForm, item_type: e.target.value })}
-                  className="w-full border rounded px-3 py-2"
-                >
-                  <option>อื่นๆ</option>
-                  <option>เอกสาร</option>
-                  <option>พัสดุ</option>
-                  <option>อาหารแห้ง</option>
-                  <option>ของใช้</option>
-                  <option>อุปกรณ์ไอที</option>
-                  <option>เสื้อผ้า</option>
-                  <option>สินค้าแบรนด์</option>
-                  <option>อะไหล่รถยนต์</option>
-                  <option>รองเท้า-กระเป๋า</option>
-                  <option>เครื่องสำอาง</option>
-                  <option>เฟอร์นิเจอร์</option>
-                </select>
+                  onChange={v => setPromoForm({ ...promoForm, item_type: v })}
+                  options={['พัสดุ','อาหารแห้ง','ของใช้','เครื่องสำอาง','เสื้อผ้า','อุปกรณ์ไอที','สินค้าแบรนด์','อะไหล่รถยนต์','รองเท้า-กระเป๋า','เฟอร์นิเจอร์','เอกสาร','อื่นๆ'].map(t => ({ value: t, label: t }))}
+                />
               </div>
 
               <button onClick={savePromo} className="w-full bg-green-500 text-white py-2 rounded hover:bg-green-600">
@@ -960,30 +977,30 @@ export default function Products() {
                           className="w-full border rounded px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-1 focus:ring-purple-300"/>
                       </td>
                       {/* กล่อง */}
-                      <td className="p-2">
-                        <select value={row.box_id}
-                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], box_id: e.target.value }; setBulkRows(r); }}
-                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300">
-                          <option value="">เลือกกล่อง</option>
-                          {sortedBoxes.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                        </select>
+                      <td className="p-2 min-w-[150px]">
+                        <SearchableDropdown
+                          value={row.box_id}
+                          onChange={v => { const r = [...bulkRows]; r[i] = { ...r[i], box_id: v }; setBulkRows(r); }}
+                          placeholder="เลือกกล่อง..."
+                          options={sortedBoxes.map(b => ({ value: b.id, label: b.name }))}
+                        />
                       </td>
                       {/* บั้บเบิ้ล */}
-                      <td className="p-2">
-                        <select value={row.bubble_id}
-                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], bubble_id: e.target.value }; setBulkRows(r); }}
-                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300">
-                          <option value="">เลือกบั้บเบิ้ล</option>
-                          {sortedBubbles.map(b => <option key={b.id} value={b.id}>ยาว {formatBubbleLength(b)}</option>)}
-                        </select>
+                      <td className="p-2 min-w-[130px]">
+                        <SearchableDropdown
+                          value={row.bubble_id}
+                          onChange={v => { const r = [...bulkRows]; r[i] = { ...r[i], bubble_id: v }; setBulkRows(r); }}
+                          placeholder="เลือกบั้บเบิ้ล..."
+                          options={sortedBubbles.map(b => ({ value: b.id, label: `ยาว ${formatBubbleLength(b)}` }))}
+                        />
                       </td>
                       {/* ประเภท */}
-                      <td className="p-2">
-                        <select value={row.item_type}
-                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], item_type: e.target.value }; setBulkRows(r); }}
-                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300">
-                          {['พัสดุ','อาหารแห้ง','ของใช้','เครื่องสำอาง','เสื้อผ้า','อุปกรณ์ไอที','อื่นๆ'].map(t => <option key={t}>{t}</option>)}
-                        </select>
+                      <td className="p-2 min-w-[120px]">
+                        <SearchableDropdown
+                          value={row.item_type}
+                          onChange={v => { const r = [...bulkRows]; r[i] = { ...r[i], item_type: v }; setBulkRows(r); }}
+                          options={['พัสดุ','อาหารแห้ง','ของใช้','เครื่องสำอาง','เสื้อผ้า','อุปกรณ์ไอที','อื่นๆ'].map(t => ({ value: t, label: t }))}
+                        />
                       </td>
                       {/* ลบแถว */}
                       <td className="p-2 text-center">
