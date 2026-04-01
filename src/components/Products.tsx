@@ -897,7 +897,7 @@ export default function Products() {
                 <SearchableDropdown
                   value={promoForm.item_type}
                   onChange={v => setPromoForm({ ...promoForm, item_type: v })}
-                  options={['พัสดุ','อาหารแห้ง','ของใช้','เครื่องสำอาง','เสื้อผ้า','อุปกรณ์ไอที','สินค้าแบรนด์','อะไหล่รถยนต์','รองเท้า-กระเป๋า','เฟอร์นิเจอร์','เอกสาร','อื่นๆ'].map(t => ({ value: t, label: t }))}
+                  options={['พัสดุ','อาหารแห้ง','ของใช้','เครื่องสำอางค์','เสื้อผ้า','อุปกรณ์ไอที','สินค้าแบรนด์','อะไหล่รถยนต์','รองเท้า-กระเป๋า','เฟอร์นิเจอร์','เอกสาร','อื่นๆ'].map(t => ({ value: t, label: t }))}
                 />
               </div>
 
@@ -999,7 +999,7 @@ export default function Products() {
                         <SearchableDropdown
                           value={row.item_type}
                           onChange={v => { const r = [...bulkRows]; r[i] = { ...r[i], item_type: v }; setBulkRows(r); }}
-                          options={['พัสดุ','อาหารแห้ง','ของใช้','เครื่องสำอาง','เสื้อผ้า','อุปกรณ์ไอที','อื่นๆ'].map(t => ({ value: t, label: t }))}
+                          options={['พัสดุ','อาหารแห้ง','ของใช้','เครื่องสำอางค์','เสื้อผ้า','อุปกรณ์ไอที','อื่นๆ'].map(t => ({ value: t, label: t }))}
                         />
                       </td>
                       {/* ลบแถว */}
