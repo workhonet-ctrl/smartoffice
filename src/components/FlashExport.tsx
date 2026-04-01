@@ -103,10 +103,10 @@ export default function FlashExport() {
         order.customers?.province    ? `จ.${order.customers.province}`    : null,
       ].filter(Boolean).join(' ');
 
-      const itemShortName  = promo?.short_name || promo?.name || order.raw_prod || '-';
+      const itemShortName  = promo?.short_name || promo?.name || '';
       const itemQty        = promo?.name ? extractQty(promo.name) : (order.quantity || 1);
       const itemDesc       = `${itemShortName}|-|-|${itemQty}`;
-      const orderNoWithName = `${order.order_no} ${itemShortName}`;
+      const orderNoWithName = itemShortName ? `${order.order_no} ${itemShortName}` : String(order.order_no);
 
       const masterWeightG = Number(promo?.products_master?.weight_g ?? 0);
       const totalWeightKg = masterWeightG > 0
@@ -251,10 +251,10 @@ export default function FlashExport() {
         const isCOD      = order.payment_status !== 'ชำระแล้ว';
         const codAmount  = isCOD ? Math.floor(order.total_thb) : '';
         const address    = [order.customers?.address, order.customers?.subdistrict ? `ต.${order.customers.subdistrict}` : null, order.customers?.district ? `อ.${order.customers.district}` : null, order.customers?.province ? `จ.${order.customers.province}` : null].filter(Boolean).join(' ');
-        const itemShortName = promo?.short_name || promo?.name || order.raw_prod || '-';
+        const itemShortName = promo?.short_name || promo?.name || '';
         const itemQty       = promo?.name ? extractQty(promo.name) : (order.quantity || 1);
         const itemDesc      = `${itemShortName}|-|-|${itemQty}`;
-        const orderNoWithName = `${order.order_no} ${itemShortName}`;
+        const orderNoWithName = itemShortName ? `${order.order_no} ${itemShortName}` : String(order.order_no);
         const masterWeightG = Number(promo?.products_master?.weight_g ?? 0);
         const totalWeightKg = masterWeightG > 0 ? Math.max((masterWeightG * itemQty) / 1000, 0.1).toFixed(2) : Math.max(Number(order.weight_kg ?? 0), 0.1).toFixed(2);
         const boxL = Number(promo?.boxes?.length_cm) || 1;
