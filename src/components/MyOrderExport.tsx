@@ -1,8 +1,18 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Order } from '../lib/types';
-import { Download, Trash2 } from 'lucide-react';
+import { Download, Trash2, Edit2, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
+
+type OrderItem = { rawProd: string; qty: number; selected: boolean; };
+type OrderSelections = Record<string, OrderItem[]>;
+
+function makeItems(order: Order): OrderItem[] {
+  const prods = (order.raw_prod || '').split('|').map(s => s.trim()).filter(Boolean);
+  const qtys  = String((order as any).quantities || order.quantity || '1').split('|');
+  if (prods.length === 0) return [{ rawProd: order.raw_prod || '-', qty: 1, selected: true }];
+  return prods.map((p, i) => ({ rawProd: p, qty: Number(qtys[i]?.trim()) || 1, selected: true }));
+}
 
 export default function MyOrderExport() {
   const [orders, setOrders]               = useState<Order[]>([]);
@@ -12,6 +22,8 @@ export default function MyOrderExport() {
   const [tab, setTab]                     = useState<'pending' | 'exported'>('pending');
   const [selectedPending,  setSelectedPending]  = useState<Set<string>>(new Set());
   const [selectedExported, setSelectedExported] = useState<Set<string>>(new Set());
+  const [orderSelections, setOrderSelections]   = useState<OrderSelections>({});
+  const [editingOrder, setEditingOrder]         = useState<Order | null>(null);
 
   useEffect(() => { loadOrders(); loadExportedOrders(); }, []);
 
@@ -20,7 +32,12 @@ export default function MyOrderExport() {
     try {
       const { data } = await supabase.from('orders').select('*, customers(*)')
         .eq('route', 'C').neq('order_status', 'ส่งไปรษณีย์').order('created_at', { ascending: false });
-      if (data) setOrders(data);
+      if (data) {
+        setOrders(data);
+        const sel: OrderSelections = {};
+        data.forEach((o: Order) => { sel[o.id] = makeItems(o); });
+        setOrderSelections(sel);
+      }
     } finally { setLoading(false); }
   };
 
@@ -129,13 +146,14 @@ export default function MyOrderExport() {
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left">ลูกค้า</th>
                   <th className="p-3 text-left">สินค้า</th>
+                  <th className="p-3 text-center w-10">แก้</th>
                   <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
                   <th className="p-3 text-left whitespace-nowrap">จังหวัด</th>
                   <th className="p-3 text-left whitespace-nowrap">รหัสไปรษณีย์</th>
                 </tr>
               </thead>
               <tbody>
-                {orders.length===0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">ไม่มีออเดอร์รอส่งออก</td></tr>}
+                {orders.length===0 && <tr><td colSpan={9} className="p-8 text-center text-slate-400">ไม่มีออเดอร์รอส่งออก</td></tr>}
                 {orders.map(o => (
                   <tr key={o.id} className={`border-b hover:bg-slate-50 ${selectedPending.has(o.id)?'bg-purple-50':''}`}>
                     <td className="p-3 text-center">
@@ -147,7 +165,21 @@ export default function MyOrderExport() {
                     </td>
                     <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 whitespace-nowrap">{o.customers?.name||'-'}</td>
-                    <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod}</td>
+                    <td className="p-3 text-xs text-slate-500 max-w-[160px]">
+                      <div className="space-y-0.5">
+                        {(orderSelections[o.id] || makeItems(o)).map((item, idx) => (
+                          <div key={idx} className={`flex items-center gap-1 ${!item.selected ? 'opacity-30 line-through' : ''}`}>
+                            <span className="truncate text-slate-700">{item.rawProd}</span>
+                            <span className="shrink-0 text-xs text-slate-400">×{item.qty}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-3 text-center">
+                      <button onClick={() => setEditingOrder(o)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded">
+                        <Edit2 size={14}/>
+                      </button>
+                    </td>
                     <td className="p-3 text-right font-bold">฿{Number(o.total_thb).toLocaleString()}</td>
                     <td className="p-3 text-xs">{o.customers?.province||'-'}</td>
                     <td className="p-3"><span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-xs">{o.customers?.postal_code||'-'}</span></td>
@@ -223,6 +255,46 @@ export default function MyOrderExport() {
             </table>
           </div>
         </>
+      )}
+
+      {/* ── Modal แก้ไขสินค้า ── */}
+      {editingOrder && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-lg w-full">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">แก้ไขสินค้าในออเดอร์</h3>
+                <p className="text-sm text-slate-500 font-mono">{editingOrder.order_no}</p>
+              </div>
+              <button onClick={() => setEditingOrder(null)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+            </div>
+            <div className="space-y-3 mb-5">
+              {(orderSelections[editingOrder.id] || makeItems(editingOrder)).map((item, idx) => (
+                <div key={idx} className={`flex items-center gap-3 p-3 rounded-lg border transition ${item.selected ? 'border-purple-200 bg-purple-50' : 'border-slate-100 bg-slate-50 opacity-60'}`}>
+                  <input type="checkbox" checked={item.selected}
+                    onChange={e => {
+                      const cur = orderSelections[editingOrder.id] || makeItems(editingOrder);
+                      const next = cur.map((it, i) => i === idx ? { ...it, selected: e.target.checked } : it);
+                      setOrderSelections(s => ({ ...s, [editingOrder.id]: next }));
+                    }} className="w-4 h-4 rounded accent-purple-500"/>
+                  <span className="flex-1 text-sm text-slate-700 min-w-0 truncate">{item.rawProd}</span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={() => { const cur = orderSelections[editingOrder.id]||makeItems(editingOrder); setOrderSelections(s=>({...s,[editingOrder.id]:cur.map((it,i)=>i===idx?{...it,qty:Math.max(1,it.qty-1)}:it)})); }} className="w-6 h-6 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-600 flex items-center justify-center font-bold text-sm">−</button>
+                    <span className="w-6 text-center text-sm font-bold text-slate-800">{item.qty}</span>
+                    <button onClick={() => { const cur = orderSelections[editingOrder.id]||makeItems(editingOrder); setOrderSelections(s=>({...s,[editingOrder.id]:cur.map((it,i)=>i===idx?{...it,qty:it.qty+1}:it)})); }} className="w-6 h-6 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-600 flex items-center justify-center font-bold text-sm">+</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-between items-center pt-3 border-t">
+              <button onClick={() => setOrderSelections(s=>({...s,[editingOrder.id]:makeItems(editingOrder)}))} className="text-sm text-slate-400 hover:text-slate-600">รีเซ็ต</button>
+              <div className="flex gap-2">
+                <button onClick={() => setEditingOrder(null)} className="px-4 py-2 bg-slate-200 rounded-lg text-sm hover:bg-slate-300">ยกเลิก</button>
+                <button onClick={() => setEditingOrder(null)} className="px-4 py-2 bg-purple-500 text-white rounded-lg text-sm hover:bg-purple-600">บันทึก</button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
