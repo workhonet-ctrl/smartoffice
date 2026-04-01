@@ -44,7 +44,12 @@ export default function MyOrderExport() {
   const loadExportedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
       .eq('route', 'C').eq('order_status', 'ส่งไปรษณีย์').order('updated_at', { ascending: false });
-    if (data) setExportedOrders(data);
+    if (data) {
+      setExportedOrders(data);
+      const sel: any = {};
+      data.forEach((o: Order) => { sel[o.id] = makeItems(o); });
+      setOrderSelections(s => ({ ...s, ...sel }));
+    }
   };
 
   const handleExport = async (targetOrders: Order[]) => {
@@ -227,13 +232,14 @@ export default function MyOrderExport() {
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left">ลูกค้า</th>
                   <th className="p-3 text-left">สินค้า</th>
+                  <th className="p-3 text-center w-10">แก้</th>
                   <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
                   <th className="p-3 text-left whitespace-nowrap">จังหวัด</th>
                   <th className="p-3 text-left whitespace-nowrap">รหัสไปรษณีย์</th>
                 </tr>
               </thead>
               <tbody>
-                {exportedOrders.length===0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์ที่ส่งออก</td></tr>}
+                {exportedOrders.length===0 && <tr><td colSpan={9} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์ที่ส่งออก</td></tr>}
                 {exportedOrders.map(o => (
                   <tr key={o.id} className={`border-b hover:bg-green-50 ${selectedExported.has(o.id)?'bg-green-50':''}`}>
                     <td className="p-3 text-center">
@@ -245,7 +251,21 @@ export default function MyOrderExport() {
                     </td>
                     <td className="p-3 font-mono text-xs text-green-700 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 whitespace-nowrap">{o.customers?.name||'-'}</td>
-                    <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod}</td>
+                    <td className="p-3 text-xs text-slate-500 max-w-[160px]">
+                      <div className="space-y-0.5">
+                        {(orderSelections[o.id] || makeItems(o)).map((item, idx) => (
+                          <div key={idx} className={`flex items-center gap-1 ${!item.selected?'opacity-30 line-through':''}`}>
+                            <span className="truncate text-slate-700">{item.rawProd}</span>
+                            <span className="shrink-0 text-xs text-slate-400">×{item.qty}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-3 text-center">
+                      <button onClick={() => setEditingOrder(o)} className="p-1 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded">
+                        <Edit2 size={14}/>
+                      </button>
+                    </td>
                     <td className="p-3 text-right font-bold">฿{Number(o.total_thb).toLocaleString()}</td>
                     <td className="p-3 text-xs">{o.customers?.province||'-'}</td>
                     <td className="p-3"><span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs">{o.customers?.postal_code||'-'}</span></td>
