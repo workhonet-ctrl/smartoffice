@@ -57,7 +57,7 @@ export default function Packaging({ orderIds, onDone }: { orderIds: string[]; on
       // โหลด orders
       const query = orderIds.length > 0
         ? supabase.from('orders').select('*, customers(name, tel)').in('id', orderIds)
-        : supabase.from('orders').select('*, customers(name, tel)').eq('order_status', 'รอแพ็ค').eq('order_date', new Date().toISOString().split('T')[0]);
+        : supabase.from('orders').select('*, customers(name, tel)').eq('order_status', 'กำลังแพ็ค');
 
       const { data: ordersData } = await query.order('created_at', { ascending: true });
       if (!ordersData) return;
