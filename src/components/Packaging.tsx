@@ -172,14 +172,14 @@ export default function Packaging({ orderIds, onDone }: { orderIds: string[]; on
       {/* ── Tab 1: จัดเตรียมสินค้า ── */}
       {tab === 'prep' && (
         <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-          <table className="text-sm w-full" style={{minWidth:'900px'}}>
+          <table className="text-sm w-full" style={{minWidth:'1000px'}}>
             <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
               <tr>
-                <th className="p-3 text-center w-10">#</th>
+                <th className="p-3 text-center w-10 whitespace-nowrap">#</th>
                 <th className="p-3 text-left whitespace-nowrap">วันที่แพ็ค</th>
                 <th className="p-3 text-left whitespace-nowrap">รายชื่อ</th>
                 <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
-                <th className="p-3 text-left">รายการสินค้า</th>
+                <th className="p-3 text-left whitespace-nowrap">ชื่อสินค้า / โปรโมชั่น</th>
                 <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
                 <th className="p-3 text-left whitespace-nowrap">กล่อง</th>
                 <th className="p-3 text-left whitespace-nowrap">บั้บเบิ้ล</th>
@@ -192,69 +192,78 @@ export default function Packaging({ orderIds, onDone }: { orderIds: string[]; on
                 const multi = isMultiProduct(o);
                 const totalQty = o.promos.reduce((s, p) => s + p.qty, 0);
                 return (
-                  <tr key={o.id} className={`border-b ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-cyan-50`}>
-                    <td className="p-3 text-center font-bold text-slate-500">{idx + 1}</td>
+                  <tr key={o.id} className={`border-b align-top ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-cyan-50`}>
+                    <td className="p-3 text-center font-bold text-slate-500 whitespace-nowrap">{idx + 1}</td>
                     <td className="p-3 text-xs text-slate-600 whitespace-nowrap">
                       {packDate}
                       {o.order_time && <div className="text-slate-400">{o.order_time}</div>}
                     </td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
-                    {/* สินค้า */}
-                    <td className="p-3">
+
+                    {/* สินค้า — แสดง short_name + ชื่อโปร */}
+                    <td className="p-3 min-w-[200px]">
                       {multi ? (
-                        <div className="space-y-1">
+                        <div className="space-y-2">
                           {o.promos.map((p, pi) => (
-                            <div key={pi} className="flex items-center gap-2">
-                              <span className="w-4 h-4 rounded-full bg-cyan-100 text-cyan-700 text-[10px] font-bold flex items-center justify-center shrink-0">{pi+1}</span>
-                              <span className="text-slate-700">{p.short_name || p.name}</span>
-                              <span className="text-xs text-slate-400">×{p.qty}</span>
+                            <div key={pi} className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-cyan-100 text-cyan-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{pi+1}</span>
+                              <div className="min-w-0">
+                                {p.short_name && <div className="font-medium text-slate-800 text-sm">{p.short_name}</div>}
+                                <div className="text-xs text-slate-500">{p.name}</div>
+                                <div className="text-xs text-cyan-600 font-bold">จำนวน {p.qty} ชิ้น</div>
+                              </div>
                             </div>
                           ))}
                         </div>
                       ) : (
-                        <span className="text-slate-700">{o.promos[0]?.short_name || o.promos[0]?.name || o.raw_prod || '-'}</span>
+                        <div>
+                          {o.promos[0]?.short_name && <div className="font-medium text-slate-800">{o.promos[0].short_name}</div>}
+                          <div className="text-xs text-slate-500">{o.promos[0]?.name || o.raw_prod || '-'}</div>
+                        </div>
                       )}
                     </td>
+
                     {/* จำนวนรวม */}
-                    <td className="p-3 text-center">
-                      <span className="px-2 py-0.5 bg-slate-100 rounded-full text-xs font-bold text-slate-700">
-                        {totalQty}
-                        {multi && <span className="ml-1 text-slate-400">({o.promos.length} ร.)</span>}
-                      </span>
+                    <td className="p-3 text-center whitespace-nowrap">
+                      <div className="font-bold text-slate-700 text-sm">{totalQty}</div>
+                      {multi && <div className="text-[10px] text-slate-400">{o.promos.length} รายการ</div>}
                     </td>
+
                     {/* กล่อง */}
-                    <td className="p-3 text-xs whitespace-nowrap">
+                    <td className="p-3 whitespace-nowrap">
                       {multi ? (
                         <select value={override[o.id]?.box_id || ''}
                           onChange={e => setOverride(prev => ({ ...prev, [o.id]: { ...prev[o.id], box_id: e.target.value } }))}
-                          className="border rounded px-2 py-1 text-xs w-32 focus:outline-none focus:ring-1 focus:ring-cyan-300">
+                          className="border rounded px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-1 focus:ring-cyan-300">
                           <option value="">เลือกกล่อง...</option>
                           {boxes.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                         </select>
                       ) : (
-                        <span className="text-slate-600">{o.promos[0]?.box_name || '-'}</span>
+                        <span className="text-sm text-slate-700">{o.promos[0]?.box_name || '-'}</span>
                       )}
                     </td>
+
                     {/* บั้บเบิ้ล */}
-                    <td className="p-3 text-xs whitespace-nowrap">
+                    <td className="p-3 whitespace-nowrap">
                       {multi ? (
                         <select value={override[o.id]?.bubble_id || ''}
                           onChange={e => setOverride(prev => ({ ...prev, [o.id]: { ...prev[o.id], bubble_id: e.target.value } }))}
-                          className="border rounded px-2 py-1 text-xs w-32 focus:outline-none focus:ring-1 focus:ring-cyan-300">
+                          className="border rounded px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-1 focus:ring-cyan-300">
                           <option value="">เลือกบั้บเบิ้ล...</option>
                           {bubbles.map(b => <option key={b.id} value={b.id}>ยาว {Number(b.length_cm)} cm</option>)}
                         </select>
                       ) : (
-                        <span className="text-slate-600">{o.promos[0]?.bubble_name || '-'}</span>
+                        <span className="text-sm text-slate-700">{o.promos[0]?.bubble_name || '-'}</span>
                       )}
                     </td>
+
                     {/* ผู้รับผิดชอบ */}
-                    <td className="p-3">
+                    <td className="p-3 whitespace-nowrap">
                       <input type="text" value={responsible[o.id] || ''}
                         onChange={e => setResponsible(prev => ({ ...prev, [o.id]: e.target.value }))}
                         placeholder="ชื่อ..."
-                        className="border-b border-dashed border-slate-300 text-sm w-24 focus:outline-none focus:border-cyan-400 bg-transparent px-1"/>
+                        className="border-b border-dashed border-slate-300 text-sm w-28 focus:outline-none focus:border-cyan-400 bg-transparent px-1"/>
                     </td>
                   </tr>
                 );
@@ -267,12 +276,12 @@ export default function Packaging({ orderIds, onDone }: { orderIds: string[]; on
       {/* ── Tab 2: ใบสรุป ── */}
       {tab === 'summary' && (
         <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-          <table className="text-sm w-full" style={{minWidth:'800px'}}>
+          <table className="text-sm w-full" style={{minWidth:'900px'}}>
             <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
               <tr>
-                <th className="p-3 text-center w-10">#</th>
+                <th className="p-3 text-center w-10 whitespace-nowrap">#</th>
                 <th className="p-3 text-left whitespace-nowrap">วันที่แพ็ค</th>
-                <th className="p-3 text-left">รายการสินค้า</th>
+                <th className="p-3 text-left whitespace-nowrap">รายการสินค้า</th>
                 <th className="p-3 text-center whitespace-nowrap">จำนวน (ออเดอร์)</th>
                 <th className="p-3 text-left whitespace-nowrap">กล่อง</th>
                 <th className="p-3 text-left whitespace-nowrap">บั้บเบิ้ล</th>
@@ -282,20 +291,22 @@ export default function Packaging({ orderIds, onDone }: { orderIds: string[]; on
             <tbody>
               {/* Single-product groups */}
               {summaryGroups.grouped.map((g, idx) => (
-                <tr key={g.promoId} className={`border-b ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-cyan-50`}>
-                  <td className="p-3 text-center font-bold text-slate-500">{idx + 1}</td>
+                <tr key={g.promoId} className={`border-b align-top ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-cyan-50`}>
+                  <td className="p-3 text-center font-bold text-slate-500 whitespace-nowrap">{idx + 1}</td>
                   <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{packDate}</td>
-                  <td className="p-3 font-medium text-slate-800">{g.name}</td>
-                  <td className="p-3 text-center">
+                  <td className="p-3 min-w-[160px]">
+                    <div className="font-semibold text-slate-800 whitespace-nowrap">{g.name}</div>
+                  </td>
+                  <td className="p-3 text-center whitespace-nowrap">
                     <span className="px-3 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-sm font-bold">{g.count} ออเดอร์</span>
                   </td>
-                  <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{g.box_name}</td>
-                  <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{g.bubble_name}</td>
-                  <td className="p-3">
+                  <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.box_name}</td>
+                  <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.bubble_name}</td>
+                  <td className="p-3 whitespace-nowrap">
                     <input type="text" value={responsible[`sum-${g.promoId}`] || ''}
                       onChange={e => setResponsible(prev => ({ ...prev, [`sum-${g.promoId}`]: e.target.value }))}
                       placeholder="ชื่อ..."
-                      className="border-b border-dashed border-slate-300 text-sm w-24 focus:outline-none focus:border-cyan-400 bg-transparent px-1"/>
+                      className="border-b border-dashed border-slate-300 text-sm w-28 focus:outline-none focus:border-cyan-400 bg-transparent px-1"/>
                   </td>
                 </tr>
               ))}
@@ -305,49 +316,50 @@ export default function Packaging({ orderIds, onDone }: { orderIds: string[]; on
                 const rowIdx = summaryGroups.grouped.length + idx;
                 const selBox = override[o.id]?.box_id;
                 const selBub = override[o.id]?.bubble_id;
-                const boxLabel = selBox ? boxes.find(b => b.id === selBox)?.name || selBox : '';
-                const bubLabel = selBub ? bubbles.find(b => b.id === selBub) ? `ยาว ${bubbles.find(b => b.id === selBub)?.length_cm} cm` : '' : '';
                 return (
-                  <tr key={o.id} className={`border-b ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-amber-50'} hover:bg-amber-100`}>
-                    <td className="p-3 text-center font-bold text-amber-600">{rowIdx + 1}</td>
+                  <tr key={o.id} className={`border-b align-top bg-amber-50 hover:bg-amber-100`}>
+                    <td className="p-3 text-center font-bold text-amber-600 whitespace-nowrap">{rowIdx + 1}</td>
                     <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{packDate}</td>
-                    <td className="p-3">
-                      <div className="space-y-0.5">
+                    <td className="p-3 min-w-[180px]">
+                      <div className="space-y-1.5 mb-1">
                         {o.promos.map((p, pi) => (
-                          <div key={pi} className="flex items-center gap-2 text-slate-700">
-                            <span className="text-xs text-amber-600 font-bold">·</span>
-                            {p.short_name || p.name} <span className="text-xs text-slate-400">×{p.qty}</span>
+                          <div key={pi} className="flex items-start gap-1.5">
+                            <span className="w-4 h-4 rounded-full bg-amber-200 text-amber-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{pi+1}</span>
+                            <div>
+                              {p.short_name && <div className="font-medium text-slate-800 text-sm whitespace-nowrap">{p.short_name}</div>}
+                              <div className="text-xs text-slate-500 whitespace-nowrap">{p.name} <span className="text-amber-600 font-bold">×{p.qty}</span></div>
+                            </div>
                           </div>
                         ))}
                       </div>
-                      <span className="text-xs text-amber-600 font-medium mt-1 block">แพ็คพิเศษ</span>
+                      <span className="text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-0.5 rounded-full">⭐ แพ็คพิเศษ</span>
                     </td>
-                    <td className="p-3 text-center">
+                    <td className="p-3 text-center whitespace-nowrap">
                       <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">1 ออเดอร์</span>
                     </td>
                     {/* กล่อง — เลือกเองได้ */}
-                    <td className="p-3">
+                    <td className="p-3 whitespace-nowrap">
                       <select value={selBox || ''}
                         onChange={e => setOverride(prev => ({ ...prev, [o.id]: { ...prev[o.id], box_id: e.target.value } }))}
-                        className="border rounded px-2 py-1 text-xs w-32 focus:outline-none focus:ring-1 focus:ring-amber-300">
-                        <option value="">{boxLabel || 'เลือกกล่อง...'}</option>
+                        className="border rounded px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-1 focus:ring-amber-300 bg-white">
+                        <option value="">เลือกกล่อง...</option>
                         {boxes.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
                     </td>
                     {/* บั้บเบิ้ล — เลือกเองได้ */}
-                    <td className="p-3">
+                    <td className="p-3 whitespace-nowrap">
                       <select value={selBub || ''}
                         onChange={e => setOverride(prev => ({ ...prev, [o.id]: { ...prev[o.id], bubble_id: e.target.value } }))}
-                        className="border rounded px-2 py-1 text-xs w-32 focus:outline-none focus:ring-1 focus:ring-amber-300">
-                        <option value="">{bubLabel || 'เลือกบั้บเบิ้ล...'}</option>
+                        className="border rounded px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-1 focus:ring-amber-300 bg-white">
+                        <option value="">เลือกบั้บเบิ้ล...</option>
                         {bubbles.map(b => <option key={b.id} value={b.id}>ยาว {Number(b.length_cm)} cm</option>)}
                       </select>
                     </td>
-                    <td className="p-3">
+                    <td className="p-3 whitespace-nowrap">
                       <input type="text" value={responsible[`sum-multi-${o.id}`] || ''}
                         onChange={e => setResponsible(prev => ({ ...prev, [`sum-multi-${o.id}`]: e.target.value }))}
                         placeholder="ชื่อ..."
-                        className="border-b border-dashed border-slate-300 text-sm w-24 focus:outline-none focus:border-amber-400 bg-transparent px-1"/>
+                        className="border-b border-dashed border-slate-300 text-sm w-28 focus:outline-none focus:border-amber-400 bg-transparent px-1"/>
                     </td>
                   </tr>
                 );
