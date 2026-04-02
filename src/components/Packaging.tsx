@@ -124,7 +124,7 @@ export default function Packaging({ orderIds, onDone }: { orderIds: string[]; on
       if (grouped[key]) {
         grouped[key].count++;
       } else {
-        grouped[key] = { promoId: p.id, name: p.short_name || p.name, box_name: p.box_name, box_id: p.box_id, bubble_name: p.bubble_name, bubble_id: p.bubble_id, count: 1 };
+        grouped[key] = { promoId: p.id, short_name: p.short_name || '', promo_name: p.name, box_name: p.box_name, box_id: p.box_id, bubble_name: p.bubble_name, bubble_id: p.bubble_id, count: 1 };
       }
     }
 
@@ -282,7 +282,6 @@ export default function Packaging({ orderIds, onDone }: { orderIds: string[]; on
                 <th className="p-3 text-center w-10 whitespace-nowrap">#</th>
                 <th className="p-3 text-left whitespace-nowrap">วันที่แพ็ค</th>
                 <th className="p-3 text-left whitespace-nowrap">รายการสินค้า</th>
-                <th className="p-3 text-center whitespace-nowrap">จำนวน (ออเดอร์)</th>
                 <th className="p-3 text-left whitespace-nowrap">กล่อง</th>
                 <th className="p-3 text-left whitespace-nowrap">บั้บเบิ้ล</th>
                 <th className="p-3 text-left whitespace-nowrap">ผู้รับผิดชอบ</th>
@@ -295,10 +294,9 @@ export default function Packaging({ orderIds, onDone }: { orderIds: string[]; on
                   <td className="p-3 text-center font-bold text-slate-500 whitespace-nowrap">{idx + 1}</td>
                   <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{packDate}</td>
                   <td className="p-3 min-w-[160px]">
-                    <div className="font-semibold text-slate-800 whitespace-nowrap">{g.name}</div>
-                  </td>
-                  <td className="p-3 text-center whitespace-nowrap">
-                    <span className="px-3 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-sm font-bold">{g.count} ออเดอร์</span>
+                    {g.short_name && <div className="font-semibold text-slate-800 whitespace-nowrap">{g.short_name}</div>}
+                    <div className="text-xs text-slate-500 whitespace-nowrap">{g.promo_name}</div>
+                    <div className="text-xs text-cyan-600 font-bold mt-0.5">จำนวน {g.count} ออเดอร์</div>
                   </td>
                   <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.box_name}</td>
                   <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.bubble_name}</td>
@@ -326,16 +324,14 @@ export default function Packaging({ orderIds, onDone }: { orderIds: string[]; on
                           <div key={pi} className="flex items-start gap-1.5">
                             <span className="w-4 h-4 rounded-full bg-amber-200 text-amber-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{pi+1}</span>
                             <div>
-                              {p.short_name && <div className="font-medium text-slate-800 text-sm whitespace-nowrap">{p.short_name}</div>}
-                              <div className="text-xs text-slate-500 whitespace-nowrap">{p.name} <span className="text-amber-600 font-bold">×{p.qty}</span></div>
+                              {p.short_name && <div className="font-semibold text-slate-800 text-sm whitespace-nowrap">{p.short_name}</div>}
+                              <div className="text-xs text-slate-500 whitespace-nowrap">{p.name}</div>
+                              <div className="text-xs text-cyan-600 font-bold">จำนวน {p.qty} ชิ้น</div>
                             </div>
                           </div>
                         ))}
                       </div>
-                      <span className="text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-0.5 rounded-full">⭐ แพ็คพิเศษ</span>
-                    </td>
-                    <td className="p-3 text-center whitespace-nowrap">
-                      <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">1 ออเดอร์</span>
+                      <span className="text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-0.5 rounded-full">⭐ แพ็คพิเศษ · 1 ออเดอร์</span>
                     </td>
                     {/* กล่อง — เลือกเองได้ */}
                     <td className="p-3 whitespace-nowrap">
