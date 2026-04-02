@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { CheckCircle, Package, ClipboardList } from 'lucide-react';
+import { CheckCircle, Package, ClipboardList, FileText } from 'lucide-react';
 
 type PackOrder = {
   id: string;
@@ -38,7 +38,7 @@ function extractQty(name: string): number {
   return f ? parseInt(f[1]) : 1;
 }
 
-export default function Packaging({ orderIds, onDone }: { orderIds: string[]; onDone: () => void }) {
+export default function Packaging({ orderIds, onDone, onCreateRequisition }: { orderIds: string[]; onDone: () => void; onCreateRequisition?: () => void }) {
   const [orders, setOrders] = useState<PackOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'prep' | 'summary'>('prep');
@@ -151,10 +151,18 @@ export default function Packaging({ orderIds, onDone }: { orderIds: string[]; on
           </h2>
           <p className="text-sm text-slate-500 mt-0.5">วันที่ {packDate} · {orders.length} ออเดอร์</p>
         </div>
-        <button onClick={handleFinish} disabled={finishing}
-          className="px-6 py-2.5 bg-green-500 text-white rounded-xl hover:bg-green-600 font-semibold flex items-center gap-2 disabled:opacity-50 shadow">
-          <CheckCircle size={18}/> {finishing ? 'กำลังบันทึก...' : 'เสร็จสิ้น — ปริ้นแล้ว'}
-        </button>
+        <div className="flex gap-2 flex-wrap">
+          {onCreateRequisition && (
+            <button onClick={onCreateRequisition}
+              className="px-5 py-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 font-semibold flex items-center gap-2 shadow">
+              <FileText size={16}/> สร้างใบเบิก
+            </button>
+          )}
+          <button onClick={handleFinish} disabled={finishing}
+            className="px-6 py-2.5 bg-green-500 text-white rounded-xl hover:bg-green-600 font-semibold flex items-center gap-2 disabled:opacity-50 shadow">
+            <CheckCircle size={18}/> {finishing ? 'กำลังบันทึก...' : 'เสร็จสิ้น — ปริ้นแล้ว'}
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
