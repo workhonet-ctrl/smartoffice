@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import Products from './components/Products';
 import ProductList from './components/ProductList';
 import Packaging from './components/Packaging';
+import Requisition from './components/Requisition';
 import Customers from './components/Customers';
 import Orders from './components/Orders';
 import FlashExport from './components/FlashExport';
@@ -15,6 +16,7 @@ type PageKey =
   | 'product-list'
   | 'packaging'
   | 'pack-products'
+  | 'requisition'
   | 'customers'
   | 'orders'
   | 'flash-export'
@@ -35,8 +37,9 @@ export default function App() {
     switch (activePage) {
       case 'products':       return <Products />;
       case 'product-list':   return <ProductList />;
-      case 'packaging':      return <Packaging orderIds={[]} onDone={() => setActivePage('orders')} />;
-      case 'pack-products':  return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} />;
+      case 'packaging':      return <Packaging orderIds={[]} onDone={() => setActivePage('orders')} onCreateRequisition={() => setActivePage('requisition')}/>;
+      case 'pack-products':  return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} onCreateRequisition={() => setActivePage('requisition')}/>;
+      case 'requisition':    return <Requisition />;
       case 'customers':      return <Customers />;
       case 'orders':         return <Orders onImportDone={goToPackaging} />;
       case 'flash-export':   return <FlashExport />;
