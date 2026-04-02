@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { FileText, Plus, Trash2, RefreshCw, CheckCircle } from 'lucide-react';
+import { FileText, Plus, Trash2, RefreshCw, CheckCircle, Printer } from 'lucide-react';
 
 type ReqItem = {
   key: string;
@@ -91,7 +91,11 @@ export default function Requisition() {
             const box = (promo as any).boxes;
             const bub = (promo as any).bubbles;
             if (promo.box_id && box)  { orderBoxKey = promo.box_id; orderBoxName = box.name; }
-            if (promo.bubble_id && bub) { orderBubKey = promo.bubble_id; orderBubName = `ยาว ${Number(bub.length_cm)} cm`; }
+            // กรอง: บั้บเบิ้ล 0 cm = ไม่มี ไม่ต้องเบิก
+            if (promo.bubble_id && bub && Number(bub.length_cm) > 0) {
+              orderBubKey  = promo.bubble_id;
+              orderBubName = `ยาว ${Number(bub.length_cm)} cm`;
+            }
           }
         }
 
@@ -148,6 +152,110 @@ export default function Requisition() {
     }
   };
 
+  const handlePrint = () => {
+    const today = new Date(docDate).toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const rows = items.filter(it => it.name.trim()).map((it, i) => `
+      <tr>
+        <td style="padding:8px 12px;text-align:center;border-bottom:1px solid #e2e8f0;color:#64748b">${i+1}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-weight:500;color:#1e293b">${it.name}</td>
+        <td style="padding:8px 12px;text-align:center;border-bottom:1px solid #e2e8f0;font-weight:700;font-size:16px;color:#0f172a">${it.qty}</td>
+        <td style="padding:8px 12px;text-align:center;border-bottom:1px solid #e2e8f0;color:#475569">${it.unit}</td>
+      </tr>`).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="th"><head><meta charset="UTF-8">
+<title>ใบเบิกสินค้า ${docNo}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Sarabun',sans-serif; font-size:14px; color:#1e293b; background:#fff; padding:32px; }
+  .header { text-align:right; margin-bottom:24px; }
+  .header h1 { font-size:28px; font-weight:700; color:#1e293b; }
+  .header p { font-size:13px; color:#64748b; }
+  .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px; border:1px solid #e2e8f0; border-radius:8px; padding:16px; }
+  .info-box { }
+  .info-label { font-size:11px; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px; }
+  .info-value { font-size:14px; font-weight:700; color:#1e293b; }
+  .doc-box { background:#f8fafc; border-radius:8px; padding:12px 16px; text-align:right; }
+  .doc-no { font-size:18px; font-weight:700; color:#3b82f6; font-family:monospace; }
+  table { width:100%; border-collapse:collapse; margin-bottom:16px; }
+  thead th { background:#1e293b; color:#f1f5f9; padding:10px 12px; text-align:left; font-size:12px; font-weight:600; letter-spacing:.05em; }
+  thead th:nth-child(1) { text-align:center; width:48px; }
+  thead th:nth-child(3), thead th:nth-child(4) { text-align:center; width:80px; }
+  tfoot td { padding:10px 12px; background:#f8fafc; font-weight:700; }
+  .total-row { text-align:right; font-size:13px; color:#64748b; }
+  .total-val { text-align:center; font-size:18px; color:#0f172a; }
+  .total-unit { text-align:center; font-size:12px; color:#94a3b8; }
+  .sig-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-top:40px; }
+  .sig-box { border-top:2px solid #e2e8f0; padding-top:8px; text-align:center; }
+  .sig-label { font-size:11px; color:#94a3b8; }
+  .sig-name { font-size:13px; font-weight:600; color:#475569; margin-top:4px; }
+  .sig-date { font-size:11px; color:#94a3b8; }
+  .note-box { border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px; margin-bottom:24px; }
+  .note-label { font-size:11px; font-weight:600; color:#94a3b8; margin-bottom:4px; }
+  @media print { body { padding:16px; } }
+</style>
+</head><body>
+<div class="header">
+  <p style="color:#94a3b8;font-size:12px;">(ต้นฉบับ)</p>
+  <h1>ใบเบิกสินค้า</h1>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+  <div style="flex:1;">
+    <p style="font-size:13px;color:#64748b;">ร้าน Online Shop</p>
+    <p style="font-size:12px;color:#94a3b8;margin-top:4px;">สาเหตุการเบิก: ส่งเสริมการขายและการตลาด</p>
+    ${note ? `<p style="font-size:12px;color:#64748b;margin-top:2px;">หมายเหตุ: ${note}</p>` : ''}
+  </div>
+  <div class="doc-box">
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:2px;">เลขที่เอกสาร</div>
+    <div class="doc-no">${docNo}</div>
+    <div style="font-size:12px;color:#475569;margin-top:4px;">วันที่ออก: ${today}</div>
+  </div>
+</div>
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>สินค้าที่ต้องการเบิก</th>
+      <th style="text-align:center">จำนวน</th>
+      <th style="text-align:center">หน่วย</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+  <tfoot>
+    <tr>
+      <td class="total-row" colspan="2">จำนวนทั้งสิ้น</td>
+      <td class="total-val">${items.filter(it=>it.name.trim()).reduce((s,it)=>s+it.qty,0)}</td>
+      <td class="total-unit">${items.filter(it=>it.name.trim()).length} รายการ</td>
+    </tr>
+  </tfoot>
+</table>
+<div class="sig-grid">
+  <div class="sig-box">
+    <div class="sig-label">รับรอง</div>
+    <div class="sig-name">________________________</div>
+    <div class="sig-date">${today}</div>
+  </div>
+  <div class="sig-box">
+    <div class="sig-label">ผู้ออกเอกสาร</div>
+    <div class="sig-name">________________________</div>
+    <div class="sig-date">${today}</div>
+  </div>
+  <div class="sig-box">
+    <div class="sig-label">ผู้อนุมัติเอกสาร</div>
+    <div class="sig-name">________________________</div>
+    <div class="sig-date">${today}</div>
+  </div>
+</div>
+</body></html>`;
+
+    const win = window.open('', '_blank', 'width=800,height=900');
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 600);
+  };
+
   const typeColor = (type: string) => {
     if (type === 'product') return 'bg-cyan-50 border-l-4 border-cyan-400';
     if (type === 'box')     return 'bg-amber-50 border-l-4 border-amber-400';
@@ -178,6 +286,10 @@ export default function Requisition() {
           <button onClick={() => { loadAndAggregate(); }} disabled={loading}
             className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 flex items-center gap-2 text-sm">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''}/> รีโหลด
+          </button>
+          <button onClick={handlePrint} disabled={items.length === 0}
+            className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 flex items-center gap-2 text-sm disabled:opacity-50">
+            <Printer size={14}/> ปริ้น / PDF
           </button>
           <button onClick={handleSave} disabled={saving || items.length === 0}
             className="px-5 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 font-medium disabled:opacity-50">
