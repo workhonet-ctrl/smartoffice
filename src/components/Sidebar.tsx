@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   PackageCheck,
+  FileText,
 } from 'lucide-react';
 
 type PageKey =
@@ -20,6 +21,7 @@ type PageKey =
   | 'product-list'
   | 'packaging'
   | 'pack-products'
+  | 'requisition'
   | 'customers'
   | 'orders'
   | 'flash-export'
@@ -39,6 +41,7 @@ const warehouseSubMenus: { key: PageKey; label: string; icon: any }[] = [
   { key: 'packaging',      label: 'วัสดุแพ็กสินค้า',       icon: Archive },
   { key: 'orders',         label: 'ออเดอร์',                icon: ShoppingCart },
   { key: 'pack-products',  label: 'แพ็คสินค้า',            icon: PackageCheck },
+  { key: 'requisition',    label: 'ใบเบิกสินค้า',           icon: FileText },
   { key: 'flash-export',   label: 'Flash Export',           icon: Truck },
   { key: 'myorder-export', label: 'MyOrder Export',         icon: FileSpreadsheet },
 ];
