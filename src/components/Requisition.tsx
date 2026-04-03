@@ -138,13 +138,28 @@ export default function Requisition() {
     if (!docNo) return;
     setSaving(true);
     try {
+      const validItems = items.filter(it => it.name.trim());
+
+      // 1. บันทึกใบเบิก
       const { error } = await supabase.from('requisitions').insert([{
         doc_no: docNo, doc_date: docDate,
-        items: items.filter(it => it.name.trim()),
-        note: note || null,
+        items: validItems, note: note || null,
       }]);
       if (error) throw error;
-      showToast('✅ บันทึกใบเบิกสำเร็จ เลขที่ ' + docNo);
+
+      // 2. ตัดสต็อกอัตโนมัติ — หา stock_item จาก name แล้ว insert transaction
+      for (const item of validItems) {
+        const { data: si } = await supabase.from('stock_items')
+          .select('id').ilike('name', item.name.trim()).maybeSingle();
+        if (si?.id) {
+          await supabase.from('stock_transactions').insert([{
+            stock_item_id: si.id, txn_type: 'out', qty: item.qty,
+            ref_type: 'requisition', ref_id: docNo, note: `ใบเบิก ${docNo}`,
+          }]);
+        }
+      }
+
+      showToast('✅ อนุมัติใบเบิกและตัดสต็อกสำเร็จ เลขที่ ' + docNo);
     } catch (err: any) {
       showToast('❌ ' + (err.message || 'เกิดข้อผิดพลาด'), 'error');
     } finally {
