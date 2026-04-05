@@ -15,6 +15,12 @@ type Transaction = {
   stock_items?: { name: string; unit: string };
 };
 
+// ข้อมูลรับเข้าจาก PO
+type StockInRow = {
+  po_no: string; po_date: string; supplier_name: string | null;
+  item_name: string; qty: number; unit: string; price: number; total: number;
+};
+
 type Tab = 'stock' | 'receive' | 'history';
 
 const TYPE_LABEL: Record<string, string> = {
@@ -28,11 +34,12 @@ const TYPE_COLOR: Record<string, string> = {
 };
 
 export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
-  const [tab, setTab]         = useState<Tab>('stock');
-  const [items, setItems]     = useState<StockItem[]>([]);
-  const [txns, setTxns]       = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch]   = useState('');
+  const [tab, setTab]             = useState<Tab>('stock');
+  const [items, setItems]         = useState<StockItem[]>([]);
+  const [txns, setTxns]           = useState<Transaction[]>([]);
+  const [receivedRows, setReceivedRows] = useState<StockInRow[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [search, setSearch]       = useState('');
   const [toast, setToast]     = useState<{ msg: string; type: 'success'|'error' } | null>(null);
 
   // รับเข้าสต็อก form
@@ -62,13 +69,32 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [{ data: s }, { data: t }] = await Promise.all([
+      const [{ data: s }, { data: t }, { data: po }] = await Promise.all([
         supabase.from('stock_current').select('*').order('type').order('name'),
         supabase.from('stock_transactions').select('*, stock_items(name,unit)')
           .order('created_at', { ascending: false }).limit(200),
+        supabase.from('purchase_orders').select('*').eq('status', 'approved')
+          .order('po_date', { ascending: false }),
       ]);
       if (s) setItems(s as StockItem[]);
       if (t) setTxns(t as Transaction[]);
+
+      // แปลง PO → รายการรับเข้าทีละ item
+      if (po) {
+        const rows: StockInRow[] = [];
+        for (const p of po) {
+          for (const item of (p.items || [])) {
+            rows.push({
+              po_no: p.po_no, po_date: p.po_date,
+              supplier_name: p.supplier_name,
+              item_name: item.name, qty: item.qty,
+              unit: item.unit, price: item.price,
+              total: item.qty * item.price,
+            });
+          }
+        }
+        setReceivedRows(rows);
+      }
     } finally { setLoading(false); }
   };
 
@@ -265,97 +291,76 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
 
       {/* ── Tab: รับเข้าสต็อก ── */}
       {tab === 'receive' && (
-        <div className="flex-1 overflow-auto min-h-0">
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 max-w-xl">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-                <ArrowDown size={18} className="text-green-500"/> รับเข้าสต็อกด้วยตนเอง
-              </h3>
-              <button onClick={onGoToPO}
-                className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 flex items-center gap-1.5 text-xs font-medium">
-                <ShoppingBag size={12}/> ผ่านใบสั่งซื้อ (PO)
-              </button>
-            </div>
-            <div className="space-y-4">
-              {/* วันที่ + เลขอ้างอิง */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">วันที่รับเข้า <span className="text-red-400">*</span></label>
-                  <input type="date" value={rcvDate} onChange={e => setRcvDate(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 text-cyan-700 font-medium"/>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">เลขที่ใบสั่งซื้อ / อ้างอิง</label>
-                  <input value={rcvRefId} onChange={e => setRcvRefId(e.target.value)}
-                    placeholder="PO-xxxx หรือ Invoice..."
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-                </div>
-              </div>
-
-              {/* สินค้า */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">รายการสินค้า <span className="text-red-400">*</span></label>
-                <select value={rcvItemId} onChange={e => setRcvItemId(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300">
-                  <option value="">เลือกสินค้า...</option>
-                  {['product','box','bubble','other'].map(type =>
-                    items.filter(i => i.type === type && i.active).length > 0 && (
-                      <optgroup key={type} label={TYPE_LABEL[type]}>
-                        {items.filter(i => i.type === type && i.active).map(i => (
-                          <option key={i.id} value={i.id}>
-                            {i.name} (คงเหลือ: {Number(i.current_qty)} {i.unit})
-                          </option>
-                        ))}
-                      </optgroup>
-                    )
-                  )}
-                </select>
-              </div>
-
-              {/* จำนวน */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">จำนวน <span className="text-red-400">*</span></label>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setRcvQty(q => Math.max(1, q-1))}
-                    className="w-9 h-9 rounded-full bg-slate-200 hover:bg-slate-300 font-bold text-lg flex items-center justify-center">−</button>
-                  <input type="number" min={1} value={rcvQty} onChange={e => setRcvQty(Number(e.target.value))}
-                    className="flex-1 text-center border rounded-lg px-2 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-                  <button onClick={() => setRcvQty(q => q+1)}
-                    className="w-9 h-9 rounded-full bg-slate-200 hover:bg-slate-300 font-bold text-lg flex items-center justify-center">+</button>
-                </div>
-              </div>
-
-              {/* รายละเอียด */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">รายละเอียด</label>
-                <input value={rcvNote} onChange={e => setRcvNote(e.target.value)}
-                  placeholder="ระบุรายละเอียดการรับสินค้า..."
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-              </div>
-
-              {/* ชื่อคนรับเข้า + ชื่อคนอนุมัติ */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">ชื่อผู้รับเข้า</label>
-                  <input value={rcvReceiver} onChange={e => setRcvReceiver(e.target.value)}
-                    placeholder="ชื่อผู้รับสินค้า..."
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">ชื่อผู้อนุมัติ</label>
-                  <input value={rcvApprover} onChange={e => setRcvApprover(e.target.value)}
-                    placeholder="ชื่อผู้อนุมัติ..."
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-                </div>
-              </div>
-
-              <button onClick={handleReceive} disabled={!rcvItemId || rcvQty<=0 || saving}
-                className="w-full py-3 bg-green-500 text-white rounded-xl font-semibold hover:bg-green-600 disabled:opacity-50 flex items-center justify-center gap-2 mt-2">
-                <ArrowDown size={16}/> {saving ? 'กำลังบันทึก...' : 'บันทึกรับเข้าสต็อก'}
-              </button>
-            </div>
+        <>
+          <div className="flex items-center justify-between mb-3 shrink-0 flex-wrap gap-2">
+            <p className="text-sm text-slate-500">
+              รายการรับเข้าทั้งหมด <span className="font-semibold text-slate-700">{receivedRows.length}</span> รายการ
+              (จาก PO ที่อนุมัติแล้ว)
+            </p>
+            <button onClick={onGoToPO}
+              className="px-3 py-1.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-1.5 text-sm font-medium">
+              <ShoppingBag size={13}/> สร้าง PO ใหม่
+            </button>
           </div>
-        </div>
+          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+            <table className="text-sm w-full" style={{minWidth:'850px'}}>
+              <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+                <tr>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่รับเข้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">เลขที่เอกสาร</th>
+                  <th className="p-3 text-left whitespace-nowrap">ผู้ขาย</th>
+                  <th className="p-3 text-left">รายการสินค้า</th>
+                  <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
+                  <th className="p-3 text-center whitespace-nowrap">หน่วย</th>
+                  <th className="p-3 text-right whitespace-nowrap">ราคา/หน่วย</th>
+                  <th className="p-3 text-right whitespace-nowrap">รวม</th>
+                </tr>
+              </thead>
+              <tbody>
+                {receivedRows.length === 0 && (
+                  <tr><td colSpan={8} className="p-10 text-center text-slate-400">
+                    ยังไม่มีการรับเข้าสต็อก — อนุมัติ PO เพื่อรับเข้าสต็อก
+                  </td></tr>
+                )}
+                {receivedRows.map((row, idx) => (
+                  <tr key={idx} className="border-b hover:bg-slate-50">
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                      {new Date(row.po_date).toLocaleDateString('th-TH')}
+                    </td>
+                    <td className="p-3 font-mono text-xs text-indigo-700 whitespace-nowrap">{row.po_no}</td>
+                    <td className="p-3 text-sm text-slate-700 whitespace-nowrap">
+                      {row.supplier_name || <span className="text-slate-300">-</span>}
+                    </td>
+                    <td className="p-3 font-medium text-slate-800">{row.item_name}</td>
+                    <td className="p-3 text-center font-bold text-green-600">{row.qty}</td>
+                    <td className="p-3 text-center text-slate-500">{row.unit}</td>
+                    <td className="p-3 text-right text-slate-600">
+                      {row.price > 0 ? `฿${row.price.toLocaleString()}` : <span className="text-slate-300">-</span>}
+                    </td>
+                    <td className="p-3 text-right font-bold text-slate-800">
+                      {row.total > 0 ? `฿${row.total.toLocaleString()}` : <span className="text-slate-300">-</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {receivedRows.length > 0 && (
+                <tfoot className="bg-slate-50 border-t-2 border-slate-200 sticky bottom-0">
+                  <tr>
+                    <td colSpan={4} className="p-3 text-right text-sm font-semibold text-slate-600">รวมทั้งสิ้น</td>
+                    <td className="p-3 text-center font-bold text-green-600">
+                      {receivedRows.reduce((s, r) => s + r.qty, 0)}
+                    </td>
+                    <td/>
+                    <td/>
+                    <td className="p-3 text-right font-bold text-slate-800">
+                      ฿{receivedRows.reduce((s, r) => s + r.total, 0).toLocaleString()}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </>
       )}
 
       {/* ── Tab: ประวัติ ── */}
