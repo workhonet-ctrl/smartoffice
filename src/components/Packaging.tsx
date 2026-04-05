@@ -123,7 +123,8 @@ export default function Packaging({
           count: 1, box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '', type:'multi'
         })),
       ];
-      const { data: ph } = await supabase.from('pack_history').insert([{
+
+      const { data: ph, error } = await supabase.from('pack_history').insert([{
         pack_date: new Date().toISOString().split('T')[0],
         responsible_person: responsible,
         order_count: orders.length,
@@ -132,8 +133,20 @@ export default function Packaging({
         status: 'pending',
       }]).select('id').single();
 
-      if (ph?.id) onCreateRequisition(ph.id);
-    } finally { setSaving(false); }
+      if (error) {
+        console.error('pack_history insert error:', error);
+        // ถ้า insert ล้มเหลว ยังคง navigate ไปหน้าใบเบิกได้ แต่ไม่มี historyId
+        onCreateRequisition('');
+      } else {
+        onCreateRequisition(ph?.id || '');
+      }
+    } catch (err) {
+      console.error('handleCreateRequisition error:', err);
+      // fallback: navigate ไปหน้าใบเบิกเสมอ
+      onCreateRequisition('');
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) return <div className="p-6 flex items-center gap-2 text-slate-500"><Package size={18} className="animate-bounce"/> กำลังโหลด...</div>;
