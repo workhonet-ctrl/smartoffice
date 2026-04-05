@@ -255,7 +255,7 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
               className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 flex items-center gap-2 text-sm disabled:opacity-50">
               <Printer size={14}/> ปริ้น / PDF
             </button>
-            <button onClick={handleSave} disabled={saving || items.length===0}
+            <button onClick={handleSave} disabled={saving || items.length===0 || !createdBy.trim() || !approvedBy.trim()}
               className="px-5 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 font-medium disabled:opacity-50">
               <CheckCircle size={16}/> {saving ? 'กำลังบันทึก...' : 'อนุมัติใบเบิกสินค้า'}
             </button>
@@ -292,14 +292,14 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 text-blue-600 font-medium"/>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">ผู้สร้างใบเบิก</label>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">ผู้สร้างใบเบิก <span className="text-red-400">*</span></label>
                 <input value={createdBy} onChange={e => setCreatedBy(e.target.value)} placeholder="ชื่อผู้สร้าง..."
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+                  className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 ${!createdBy.trim() ? 'border-red-300 bg-red-50' : 'border-green-400'}`}/>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">ผู้อนุมัติ</label>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">ผู้อนุมัติ <span className="text-red-400">*</span></label>
                 <input value={approvedBy} onChange={e => setApprovedBy(e.target.value)} placeholder="ชื่อผู้อนุมัติ..."
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+                  className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 ${!approvedBy.trim() ? 'border-red-300 bg-red-50' : 'border-green-400'}`}/>
               </div>
             </div>
             <div className="mt-3">
