@@ -201,9 +201,27 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
 
       // อัพเดต pack_history ถ้ามาจากหน้าแพ็คสินค้า
       if (packHistoryId) {
+        // ดึง orders_snapshot จาก pack_history
+        const { data: ph } = await supabase
+          .from('pack_history')
+          .select('orders_snapshot')
+          .eq('id', packHistoryId)
+          .maybeSingle();
+
+        // อัพเดต status = approved + link req_doc_no
         await supabase.from('pack_history')
           .update({ status: 'approved', req_doc_no: docNo })
           .eq('id', packHistoryId);
+
+        // อัพเดต order_status = 'แพ็คสินค้า' สำหรับออเดอร์ทั้งหมดในชุดนี้
+        if (ph?.orders_snapshot?.length > 0) {
+          const orderNos = (ph.orders_snapshot as any[]).map((o: any) => o.order_no).filter(Boolean);
+          if (orderNos.length > 0) {
+            await supabase.from('orders')
+              .update({ order_status: 'แพ็คสินค้า' })
+              .in('order_no', orderNos);
+          }
+        }
       }
 
       // ── Reset ทุกอย่าง — ไม่โหลดออเดอร์ใหม่ ──
