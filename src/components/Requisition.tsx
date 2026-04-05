@@ -199,10 +199,14 @@ export default function Requisition() {
 
       showToast('✅ อนุมัติใบเบิกและตัดสต็อกสำเร็จ เลขที่ ' + docNo);
 
-      // ── Reset ทุกอย่าง ──
-      setItems([]); setNote(''); setCreatedBy(''); setApprovedBy('');
+      // ── Reset ทุกอย่าง — ไม่โหลดออเดอร์ใหม่ ──
+      setItems([]);
+      setNote('');
+      setCreatedBy('');
+      setApprovedBy('');
       setDocDate(new Date().toISOString().split('T')[0]);
-      await Promise.all([initDocNo(), loadAndAggregate()]);
+      setOrderCount(0);
+      await initDocNo(); // อัพเดตเลขที่เอกสารถัดไปอย่างเดียว
 
     } catch (err: any) {
       showToast('❌ ' + (err.message || 'เกิดข้อผิดพลาด'), 'error');
