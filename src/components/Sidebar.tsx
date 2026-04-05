@@ -15,12 +15,13 @@ import {
   PackageCheck,
   FileText,
   BarChart2,
+  ShoppingBag,
 } from 'lucide-react';
 
 type PageKey =
   | 'products' | 'product-list' | 'packaging' | 'pack-products'
-  | 'requisition' | 'stock' | 'customers' | 'orders'
-  | 'flash-export' | 'myorder-export' | 'finance' | 'hr';
+  | 'requisition' | 'stock' | 'purchase-order' | 'customers'
+  | 'orders' | 'flash-export' | 'myorder-export' | 'finance' | 'hr';
 
 type SidebarProps = {
   activePage: PageKey;
@@ -36,6 +37,7 @@ const warehouseSubMenus: { key: PageKey; label: string; icon: any }[] = [
   { key: 'pack-products',  label: 'แพ็คสินค้า',            icon: PackageCheck },
   { key: 'requisition',    label: 'ใบเบิกสินค้า',           icon: FileText },
   { key: 'stock',          label: 'จัดการสต็อก',             icon: BarChart2 },
+  { key: 'purchase-order', label: 'ใบสั่งซื้อ (PO)',          icon: ShoppingBag },
   { key: 'flash-export',   label: 'Flash Export',           icon: Truck },
   { key: 'myorder-export', label: 'MyOrder Export',         icon: FileSpreadsheet },
 ];
