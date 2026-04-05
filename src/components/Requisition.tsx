@@ -80,7 +80,7 @@ function printDoc(docNo: string, docDate: string, items: any[], note: string) {
   setTimeout(() => win.print(), 600);
 }
 
-export default function Requisition() {
+export default function Requisition({ packHistoryId }: { packHistoryId?: string }) {
   const [tab, setTab]           = useState<'create'|'history'>('create');
   const [docDate, setDocDate]   = useState(new Date().toISOString().split('T')[0]);
   const [docNo, setDocNo]       = useState('');
@@ -198,6 +198,13 @@ export default function Requisition() {
       }
 
       showToast('✅ อนุมัติใบเบิกและตัดสต็อกสำเร็จ เลขที่ ' + docNo);
+
+      // อัพเดต pack_history ถ้ามาจากหน้าแพ็คสินค้า
+      if (packHistoryId) {
+        await supabase.from('pack_history')
+          .update({ status: 'approved', req_doc_no: docNo })
+          .eq('id', packHistoryId);
+      }
 
       // ── Reset ทุกอย่าง — ไม่โหลดออเดอร์ใหม่ ──
       setItems([]);
