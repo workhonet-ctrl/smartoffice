@@ -4,6 +4,7 @@ import Products from './components/Products';
 import ProductList from './components/ProductList';
 import Packaging from './components/Packaging';
 import PackingMaterials from './components/PackingMaterials';
+import PackHistory from './components/PackHistory';
 import Requisition from './components/Requisition';
 import Stock from './components/Stock';
 import PurchaseOrder from './components/PurchaseOrder';
@@ -16,17 +17,23 @@ import Finance from './components/Finance';
 import HR from './components/HR';
 
 type PageKey =
-  | 'products' | 'product-list' | 'packaging' | 'pack-products'
+  | 'products' | 'product-list' | 'packaging' | 'pack-products' | 'pack-history'
   | 'requisition' | 'stock' | 'purchase-order' | 'suppliers'
   | 'customers' | 'orders' | 'flash-export' | 'myorder-export' | 'finance' | 'hr';
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>('products');
   const [packagingOrderIds, setPackagingOrderIds] = useState<string[]>([]);
+  const [packHistoryId, setPackHistoryId]         = useState<string>('');
 
   const goToPackaging = (ids: string[]) => {
     setPackagingOrderIds(ids);
     setActivePage('pack-products');
+  };
+
+  const goToRequisition = (historyId: string) => {
+    setPackHistoryId(historyId);
+    setActivePage('requisition');
   };
 
   const renderPage = () => {
@@ -34,8 +41,9 @@ export default function App() {
       case 'products':       return <Products />;
       case 'product-list':   return <ProductList />;
       case 'packaging':      return <PackingMaterials />;
-      case 'pack-products':  return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} onCreateRequisition={() => setActivePage('requisition')}/>;
-      case 'requisition':    return <Requisition />;
+      case 'pack-products':  return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} onCreateRequisition={goToRequisition}/>;
+      case 'pack-history':   return <PackHistory />;
+      case 'requisition':    return <Requisition packHistoryId={packHistoryId} />;
       case 'stock':          return <Stock onGoToPO={() => setActivePage('purchase-order')} />;
       case 'purchase-order': return <PurchaseOrder />;
       case 'suppliers':      return <Suppliers />;
