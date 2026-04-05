@@ -5,6 +5,7 @@ import ProductList from './components/ProductList';
 import Packaging from './components/Packaging';
 import Requisition from './components/Requisition';
 import Stock from './components/Stock';
+import PurchaseOrder from './components/PurchaseOrder';
 import Customers from './components/Customers';
 import Orders from './components/Orders';
 import FlashExport from './components/FlashExport';
@@ -14,8 +15,8 @@ import HR from './components/HR';
 
 type PageKey =
   | 'products' | 'product-list' | 'packaging' | 'pack-products'
-  | 'requisition' | 'stock' | 'customers' | 'orders'
-  | 'flash-export' | 'myorder-export' | 'finance' | 'hr';
+  | 'requisition' | 'stock' | 'purchase-order' | 'customers'
+  | 'orders' | 'flash-export' | 'myorder-export' | 'finance' | 'hr';
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>('products');
@@ -33,7 +34,8 @@ export default function App() {
       case 'packaging':      return <Packaging orderIds={[]} onDone={() => setActivePage('orders')} onCreateRequisition={() => setActivePage('requisition')}/>;
       case 'pack-products':  return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} onCreateRequisition={() => setActivePage('requisition')}/>;
       case 'requisition':    return <Requisition />;
-      case 'stock':          return <Stock />;
+      case 'stock':          return <Stock onGoToPO={() => setActivePage('purchase-order')} />;
+      case 'purchase-order': return <PurchaseOrder />;
       case 'customers':      return <Customers />;
       case 'orders':         return <Orders onImportDone={goToPackaging} />;
       case 'flash-export':   return <FlashExport />;
