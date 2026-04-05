@@ -9,7 +9,8 @@ type Supplier = { id: string; name: string; tel: string | null; address: string 
 type StockItem = { id: string; name: string; unit: string; type: string };
 type POItem    = { key: string; stock_item_id: string | null; name: string; qty: number; unit: string; price: number };
 type PO        = {
-  id: string; po_no: string; po_date: string; supplier_name: string | null;
+  id: string; po_no: string; po_date: string;
+  supplier_id: string | null; supplier_name: string | null;
   items: POItem[]; total_thb: number; status: string; note: string | null;
 };
 
@@ -70,7 +71,7 @@ function SearchDrop({ options, value, onChange, placeholder, onAdd }:
 }
 
 export default function PurchaseOrder() {
-  const [tab, setTab]       = useState<'create'|'list'>('create');
+  const [tab, setTab]       = useState<'create'|'list'|'suppliers'>('create');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [poList, setPoList] = useState<PO[]>([]);
@@ -90,6 +91,8 @@ export default function PurchaseOrder() {
   const [newSup, setNewSup]     = useState({ name:'', tel:'', address:'', note:'' });
 
   const [toast, setToast]       = useState<{ msg: string; type: 'success'|'error' } | null>(null);
+  const [editSup, setEditSup]   = useState<Supplier | null>(null); // null = เพิ่มใหม่
+  const [supSearch, setSupSearch] = useState('');
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000);
@@ -129,14 +132,32 @@ export default function PurchaseOrder() {
 
   const handleAddSupplier = async () => {
     if (!newSup.name.trim()) return;
-    const { data } = await supabase.from('suppliers').insert([newSup]).select().single();
-    if (data) {
-      setSuppliers(p => [...p, data]);
-      setSupplierId(data.id); setSupplierName(data.name);
-      showToast('✓ เพิ่มผู้ขายสำเร็จ');
+    if (editSup) {
+      // แก้ไข
+      const { data } = await supabase.from('suppliers').update(newSup).eq('id', editSup.id).select().single();
+      if (data) {
+        setSuppliers(p => p.map(s => s.id === editSup.id ? data : s));
+        showToast('✓ แก้ไขผู้ขายสำเร็จ');
+      }
+    } else {
+      // เพิ่มใหม่
+      const { data } = await supabase.from('suppliers').insert([newSup]).select().single();
+      if (data) {
+        setSuppliers(p => [...p, data]);
+        setSupplierId(data.id); setSupplierName(data.name);
+        showToast('✓ เพิ่มผู้ขายสำเร็จ');
+      }
     }
     setNewSup({ name:'', tel:'', address:'', note:'' });
+    setEditSup(null);
     setShowSupModal(false);
+  };
+
+  const handleDeleteSupplier = async (id: string) => {
+    if (!confirm('ยืนยันลบผู้ขายนี้?')) return;
+    await supabase.from('suppliers').update({ active: false }).eq('id', id);
+    setSuppliers(p => p.filter(s => s.id !== id));
+    showToast('✓ ลบผู้ขายแล้ว');
   };
 
   const handleApprove = async () => {
@@ -229,7 +250,7 @@ export default function PurchaseOrder() {
           </div>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setShowSupModal(true)}
+          <button onClick={() => setTab('suppliers')}
             className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 flex items-center gap-2 text-sm">
             <User size={13}/> จัดการผู้ขาย
           </button>
@@ -242,7 +263,7 @@ export default function PurchaseOrder() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit mb-4 shrink-0">
-        {([['create','สร้างใบสั่งซื้อ'],['list','รายการ PO']] as ['create'|'list',string][]).map(([k,l]) => (
+        {([['create','สร้างใบสั่งซื้อ'],['list','รายการ PO'],['suppliers','ผู้ขาย']] as ['create'|'list'|'suppliers',string][]).map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition ${tab===k?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
             {l}
@@ -446,12 +467,84 @@ export default function PurchaseOrder() {
         </div>
       )}
 
-      {/* Modal เพิ่มผู้ขาย */}
+      {/* ── Tab: ผู้ขาย ── */}
+      {tab === 'suppliers' && (
+        <>
+          <div className="flex gap-3 mb-3 shrink-0 items-center flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+              <input value={supSearch} onChange={e => setSupSearch(e.target.value)}
+                placeholder="ค้นหาชื่อผู้ขาย..."
+                className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+            </div>
+            <button onClick={() => { setEditSup(null); setNewSup({ name:'', tel:'', address:'', note:'' }); setShowSupModal(true); }}
+              className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-2 text-sm shrink-0">
+              <Plus size={13}/> เพิ่มผู้ขายใหม่
+            </button>
+          </div>
+          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+            <table className="text-sm w-full" style={{minWidth:'650px'}}>
+              <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+                <tr>
+                  <th className="p-3 text-center w-10">#</th>
+                  <th className="p-3 text-left">ชื่อบริษัท/ผู้ขาย</th>
+                  <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
+                  <th className="p-3 text-left">ที่อยู่</th>
+                  <th className="p-3 text-left">หมายเหตุ</th>
+                  <th className="p-3 text-center whitespace-nowrap">สั่งซื้อแล้ว</th>
+                  <th className="p-3 text-center w-24">จัดการ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {suppliers.filter(s => !supSearch || s.name.toLowerCase().includes(supSearch.toLowerCase())).length === 0 && (
+                  <tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีผู้ขาย — กด "เพิ่มผู้ขายใหม่" ด้านบน</td></tr>
+                )}
+                {suppliers
+                  .filter(s => !supSearch || s.name.toLowerCase().includes(supSearch.toLowerCase()))
+                  .map((s, idx) => {
+                    const poCount = poList.filter(p => p.supplier_id === s.id || p.supplier_name === s.name).length;
+                    return (
+                      <tr key={s.id} className="border-b hover:bg-slate-50">
+                        <td className="p-3 text-center text-slate-400">{idx + 1}</td>
+                        <td className="p-3 font-semibold text-slate-800 whitespace-nowrap">{s.name}</td>
+                        <td className="p-3 font-mono text-xs text-slate-600 whitespace-nowrap">{s.tel || <span className="text-slate-300">-</span>}</td>
+                        <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{s.address || <span className="text-slate-300">-</span>}</td>
+                        <td className="p-3 text-xs text-slate-500 max-w-[150px] truncate">{s.note || <span className="text-slate-300">-</span>}</td>
+                        <td className="p-3 text-center">
+                          {poCount > 0
+                            ? <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold">{poCount} PO</span>
+                            : <span className="text-slate-300 text-xs">-</span>}
+                        </td>
+                        <td className="p-3 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button onClick={() => {
+                              setEditSup(s);
+                              setNewSup({ name: s.name, tel: s.tel||'', address: s.address||'', note: s.note||'' });
+                              setShowSupModal(true);
+                            }} className="px-2 py-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg">
+                              แก้ไข
+                            </button>
+                            <button onClick={() => handleDeleteSupplier(s.id)}
+                              className="px-2 py-1 text-xs bg-red-50 hover:bg-red-100 text-red-500 rounded-lg">
+                              ลบ
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* Modal เพิ่ม/แก้ไขผู้ขาย */}
       {showSupModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-md w-full">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold text-slate-800">เพิ่มผู้ขาย</h3>
+              <h3 className="text-lg font-bold text-slate-800">{editSup ? 'แก้ไขผู้ขาย' : 'เพิ่มผู้ขายใหม่'}</h3>
               <button onClick={() => setShowSupModal(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
             </div>
             <div className="space-y-3">
@@ -468,7 +561,7 @@ export default function PurchaseOrder() {
               <button onClick={() => setShowSupModal(false)} className="flex-1 py-2 bg-slate-200 rounded-lg text-sm hover:bg-slate-300">ยกเลิก</button>
               <button onClick={handleAddSupplier} disabled={!newSup.name.trim()}
                 className="flex-1 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-50 font-medium">
-                เพิ่มผู้ขาย
+                {editSup ? 'บันทึกการแก้ไข' : 'เพิ่มผู้ขาย'}
               </button>
             </div>
           </div>
