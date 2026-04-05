@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Plus, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, X } from 'lucide-react';
+import { Package, Plus, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, X, ShoppingBag } from 'lucide-react';
 
 type StockItem = {
   id: string; name: string; unit: string; type: string;
@@ -27,7 +27,7 @@ const TYPE_COLOR: Record<string, string> = {
   other:   'bg-slate-100 text-slate-600',
 };
 
-export default function Stock() {
+export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [tab, setTab]         = useState<Tab>('stock');
   const [items, setItems]     = useState<StockItem[]>([]);
   const [txns, setTxns]       = useState<Transaction[]>([]);
@@ -248,56 +248,15 @@ export default function Stock() {
 
       {/* ── Tab: รับเข้าสต็อก ── */}
       {tab === 'receive' && (
-        <div className="flex-1 overflow-auto min-h-0">
-          <div className="bg-white rounded-xl shadow p-6 max-w-xl">
-            <h3 className="font-bold text-slate-800 text-lg mb-5 flex items-center gap-2">
-              <ArrowDown size={18} className="text-green-500"/> รับเข้าสต็อก
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">รายการสินค้า <span className="text-red-400">*</span></label>
-                <select value={rcvItemId} onChange={e => setRcvItemId(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300">
-                  <option value="">เลือกสินค้า...</option>
-                  {['product','box','bubble','other'].map(type => (
-                    items.filter(i => i.type === type && i.active).length > 0 && (
-                      <optgroup key={type} label={TYPE_LABEL[type]}>
-                        {items.filter(i => i.type === type && i.active).map(i => (
-                          <option key={i.id} value={i.id}>{i.name} (คงเหลือ: {Number(i.current_qty)} {i.unit})</option>
-                        ))}
-                      </optgroup>
-                    )
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">จำนวน <span className="text-red-400">*</span></label>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => setRcvQty(q => Math.max(1, q-1))} className="w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 font-bold flex items-center justify-center">−</button>
-                    <input type="number" min={1} value={rcvQty} onChange={e => setRcvQty(Number(e.target.value))}
-                      className="flex-1 text-center border rounded-lg px-2 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-                    <button onClick={() => setRcvQty(q => q+1)} className="w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 font-bold flex items-center justify-center">+</button>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">เลขที่ใบสั่งซื้อ</label>
-                  <input type="text" value={rcvRefId} onChange={e => setRcvRefId(e.target.value)}
-                    placeholder="PO-xxxx (ถ้ามี)"
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">หมายเหตุ</label>
-                <input type="text" value={rcvNote} onChange={e => setRcvNote(e.target.value)}
-                  placeholder="ระบุรายละเอียดการรับสินค้า..."
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-              </div>
-              <button onClick={handleReceive} disabled={!rcvItemId || rcvQty<=0 || saving}
-                className="w-full py-3 bg-green-500 text-white rounded-xl font-semibold hover:bg-green-600 disabled:opacity-50 flex items-center justify-center gap-2">
-                <ArrowDown size={16}/> {saving ? 'กำลังบันทึก...' : 'บันทึกรับเข้าสต็อก'}
-              </button>
-            </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center bg-white rounded-xl shadow p-8 max-w-sm">
+            <ShoppingBag size={40} className="text-indigo-400 mx-auto mb-4"/>
+            <h3 className="font-bold text-slate-800 text-lg mb-2">ใช้ระบบใบสั่งซื้อ (PO)</h3>
+            <p className="text-sm text-slate-500 mb-4">การรับเข้าสต็อกเชื่อมกับใบสั่งซื้อ<br/>เมื่ออนุมัติ PO สต็อกจะเพิ่มอัตโนมัติ</p>
+            <button onClick={onGoToPO}
+              className="px-5 py-2.5 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 font-semibold flex items-center gap-2 mx-auto">
+              <ShoppingBag size={16}/> ไปหน้าใบสั่งซื้อ
+            </button>
           </div>
         </div>
       )}
