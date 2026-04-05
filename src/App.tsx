@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import Products from './components/Products';
 import ProductList from './components/ProductList';
 import Packaging from './components/Packaging';
+import PackingMaterials from './components/PackingMaterials';
 import Requisition from './components/Requisition';
 import Stock from './components/Stock';
 import PurchaseOrder from './components/PurchaseOrder';
@@ -32,7 +33,7 @@ export default function App() {
     switch (activePage) {
       case 'products':       return <Products />;
       case 'product-list':   return <ProductList />;
-      case 'packaging':      return <Packaging orderIds={[]} onDone={() => setActivePage('orders')} onCreateRequisition={() => setActivePage('requisition')}/>;
+      case 'packaging':      return <PackingMaterials />;
       case 'pack-products':  return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} onCreateRequisition={() => setActivePage('requisition')}/>;
       case 'requisition':    return <Requisition />;
       case 'stock':          return <Stock onGoToPO={() => setActivePage('purchase-order')} />;
