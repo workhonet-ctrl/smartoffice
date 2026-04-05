@@ -17,10 +17,11 @@ import {
   BarChart2,
   ShoppingBag,
   Handshake,
+  History,
 } from 'lucide-react';
 
 type PageKey =
-  | 'products' | 'product-list' | 'packaging' | 'pack-products'
+  | 'products' | 'product-list' | 'packaging' | 'pack-products' | 'pack-history'
   | 'requisition' | 'stock' | 'purchase-order' | 'suppliers'
   | 'customers' | 'orders' | 'flash-export' | 'myorder-export' | 'finance' | 'hr';
 
@@ -35,7 +36,8 @@ const warehouseSubMenus: { key: PageKey; label: string; icon: any }[] = [
   { key: 'product-list',   label: 'รายการสินค้าทั้งหมด', icon: List },
   { key: 'packaging',      label: 'วัสดุแพ็กสินค้า',       icon: Archive },
   { key: 'orders',         label: 'ออเดอร์',                icon: ShoppingCart },
-  { key: 'pack-products',  label: 'แพ็คสินค้า',            icon: PackageCheck },
+  { key: 'pack-products',  label: 'แพ็คสินค้า',             icon: PackageCheck },
+  { key: 'pack-history',   label: 'ประวัติแพ็คสินค้า',       icon: History },
   { key: 'requisition',    label: 'ใบเบิกสินค้า',           icon: FileText },
   { key: 'stock',          label: 'จัดการสต็อก',             icon: BarChart2 },
   { key: 'purchase-order', label: 'ใบสั่งซื้อ (PO)',          icon: ShoppingBag },
