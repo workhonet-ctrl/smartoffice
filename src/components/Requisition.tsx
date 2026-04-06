@@ -144,9 +144,9 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
           .map((s: any) => ({ box: s.box, count: s.count || 1 }));
       }
 
-      // นับกล่องจาก multi-orders (จาก snapshot)
+      // นับกล่องจาก multi-orders (จาก snapshot) — ใช้ชื่อกล่องเป็น key
       for (const mb of multiBoxes) {
-        const key = `multi-${mb.box}`;
+        const key = `box-name-${mb.box}`;
         if (boxMap[key]) boxMap[key].qty += mb.count;
         else boxMap[key] = { name: mb.box, qty: mb.count };
         multiCnt++;
@@ -155,7 +155,7 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
       for (const order of orders) {
         const rawProds = (order.raw_prod || '').split('|').map((s:string) => s.trim()).filter(Boolean);
         const isMultiOrder = rawProds.length > 1;
-        let orderBoxKey = '', orderBoxName = '', orderBubKey = '', orderBubName = '';
+        let orderBoxName = '', orderBubKey = '', orderBubName = '';
 
         for (let i = 0; i < rawProds.length; i++) {
           const pid = order.promo_ids?.[i];
@@ -174,13 +174,19 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
           if (!isMultiOrder && i === 0) {
             const box = (promo as any).boxes;
             const bub = (promo as any).bubbles;
-            if (promo.box_id && box) { orderBoxKey = promo.box_id; orderBoxName = box.name; }
+            if (promo.box_id && box) { orderBoxName = box.name; }
             if (promo.bubble_id && bub && Number(bub.length_cm) > 0) { orderBubKey = promo.bubble_id; orderBubName = `ยาว ${Number(bub.length_cm)} cm`; }
           }
         }
-        if (!isMultiOrder) {
-          if (orderBoxKey) { if (boxMap[orderBoxKey]) boxMap[orderBoxKey].qty++; else boxMap[orderBoxKey] = { name: orderBoxName, qty: 1 }; }
-          if (orderBubKey) { if (bubbleMap[orderBubKey]) bubbleMap[orderBubKey].qty++; else bubbleMap[orderBubKey] = { name: orderBubName, qty: 1 }; }
+        // ใช้ชื่อกล่องเป็น key เดียวกับ multi เพื่อให้รวมกันได้
+        if (!isMultiOrder && orderBoxName) {
+          const key = `box-name-${orderBoxName}`;
+          if (boxMap[key]) boxMap[key].qty++;
+          else boxMap[key] = { name: orderBoxName, qty: 1 };
+        }
+        if (!isMultiOrder && orderBubKey) {
+          if (bubbleMap[orderBubKey]) bubbleMap[orderBubKey].qty++;
+          else bubbleMap[orderBubKey] = { name: orderBubName, qty: 1 };
         }
       }
 
