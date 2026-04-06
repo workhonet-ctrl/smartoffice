@@ -134,10 +134,27 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
       const bubbleMap: Record<string, {name:string;qty:number}> = {};
       let multiCnt = 0;
 
+      // ดึง pack_history เพื่อรู้กล่องของ multi-order ที่ user เลือกไว้
+      let multiBoxes: {box: string; count: number}[] = [];
+      if (packHistoryId) {
+        const { data: ph } = await supabase.from('pack_history')
+          .select('summary_snapshot').eq('id', packHistoryId).maybeSingle();
+        const snap = (ph?.summary_snapshot || []) as any[];
+        multiBoxes = snap.filter((s: any) => s.type === 'multi' && s.box)
+          .map((s: any) => ({ box: s.box, count: s.count || 1 }));
+      }
+
+      // นับกล่องจาก multi-orders (จาก snapshot)
+      for (const mb of multiBoxes) {
+        const key = `multi-${mb.box}`;
+        if (boxMap[key]) boxMap[key].qty += mb.count;
+        else boxMap[key] = { name: mb.box, qty: mb.count };
+        multiCnt++;
+      }
+
       for (const order of orders) {
         const rawProds = (order.raw_prod || '').split('|').map((s:string) => s.trim()).filter(Boolean);
-        const isMulti  = rawProds.length > 1;
-        if (isMulti) multiCnt++;
+        const isMultiOrder = rawProds.length > 1;
         let orderBoxKey = '', orderBoxName = '', orderBubKey = '', orderBubName = '';
 
         for (let i = 0; i < rawProds.length; i++) {
@@ -153,15 +170,18 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
             if (masterMap[master.id]) masterMap[master.id].qty += qty;
             else masterMap[master.id] = { name: master.name, qty };
           }
-          if (!isMulti && i === 0) {
+          // นับกล่อง/บั้บเบิ้ลเฉพาะ single-product (multi ดึงจาก snapshot แล้ว)
+          if (!isMultiOrder && i === 0) {
             const box = (promo as any).boxes;
             const bub = (promo as any).bubbles;
             if (promo.box_id && box) { orderBoxKey = promo.box_id; orderBoxName = box.name; }
             if (promo.bubble_id && bub && Number(bub.length_cm) > 0) { orderBubKey = promo.bubble_id; orderBubName = `ยาว ${Number(bub.length_cm)} cm`; }
           }
         }
-        if (orderBoxKey) { if (boxMap[orderBoxKey]) boxMap[orderBoxKey].qty++; else boxMap[orderBoxKey] = { name: orderBoxName, qty: 1 }; }
-        if (orderBubKey) { if (bubbleMap[orderBubKey]) bubbleMap[orderBubKey].qty++; else bubbleMap[orderBubKey] = { name: orderBubName, qty: 1 }; }
+        if (!isMultiOrder) {
+          if (orderBoxKey) { if (boxMap[orderBoxKey]) boxMap[orderBoxKey].qty++; else boxMap[orderBoxKey] = { name: orderBoxName, qty: 1 }; }
+          if (orderBubKey) { if (bubbleMap[orderBubKey]) bubbleMap[orderBubKey].qty++; else bubbleMap[orderBubKey] = { name: orderBubName, qty: 1 }; }
+        }
       }
 
       setMultiCount(multiCnt);
