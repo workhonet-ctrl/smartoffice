@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ChangeEvent } from 'react';
 import { supabase } from '../lib/supabase';
 import { RefreshCw, ChevronDown, ChevronRight, Plus, X, Upload } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -151,7 +151,7 @@ export default function FinanceDaily() {
   };
 
   // Upload ค่าโฆษณาจากไฟล์ Excel
-  const handleAdUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAdUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     setUploading(true);
     try {
