@@ -117,7 +117,7 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
   const loadAndAggregate = async () => {
     setLoading(true);
     try {
-      const { data: orders } = await supabase.from('orders').select('id, raw_prod, quantities, quantity, promo_ids').eq('order_status', 'กำลังแพ็ค');
+      const { data: orders } = await supabase.from('orders').select('id, raw_prod, quantities, quantity, promo_ids').eq('order_status', 'รอแพ็ค');
       if (!orders || orders.length === 0) { setItems([]); setOrderCount(0); setLoading(false); return; }
       setOrderCount(orders.length);
 
