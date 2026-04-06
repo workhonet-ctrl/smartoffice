@@ -19,7 +19,9 @@ import HR from './components/HR';
 type PageKey =
   | 'products' | 'product-list' | 'packaging' | 'pack-products' | 'pack-history'
   | 'requisition' | 'stock' | 'purchase-order' | 'suppliers'
-  | 'customers' | 'orders' | 'flash-export' | 'myorder-export' | 'finance' | 'hr';
+  | 'customers' | 'orders' | 'flash-export' | 'myorder-export'
+  | 'finance-daily' | 'finance-monthly' | 'finance-yearly' | 'finance-expenses'
+  | 'hr';
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>('products');
@@ -51,7 +53,10 @@ export default function App() {
       case 'orders':         return <Orders onImportDone={goToPackaging} />;
       case 'flash-export':   return <FlashExport />;
       case 'myorder-export': return <MyOrderExport />;
-      case 'finance':        return <Finance />;
+      case 'finance-daily':    return <Finance page="daily" />;
+      case 'finance-monthly':  return <Finance page="monthly" />;
+      case 'finance-yearly':   return <Finance page="yearly" />;
+      case 'finance-expenses': return <Finance page="expenses" />;
       case 'hr':             return <HR />;
       default:               return <Products />;
     }
