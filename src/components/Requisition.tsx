@@ -104,7 +104,15 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000);
   };
 
-  useEffect(() => { initDocNo(); loadAndAggregate(); }, []);
+  useEffect(() => {
+    initDocNo();
+    // โหลดข้อมูลเฉพาะเมื่อมาจากหน้าแพ็คสินค้า (มี packHistoryId)
+    if (packHistoryId) {
+      loadAndAggregate();
+    } else {
+      setLoading(false);
+    }
+  }, [packHistoryId]);
   useEffect(() => { if (tab === 'history') loadHistory(); }, [tab]);
 
   const initDocNo = async () => {
@@ -349,6 +357,7 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
           </div>
 
           {/* Items */}
+          {packHistoryId && (
           <div className="shrink-0 mb-2 flex items-center justify-between">
             <h3 className="font-semibold text-slate-700 flex items-center gap-2">
               สินค้าที่ต้องการเบิก
@@ -358,9 +367,16 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
               <Plus size={13}/> เพิ่มรายการ
             </button>
           </div>
+          )}
 
           <div className="flex-1 bg-white rounded-xl shadow-sm border border-slate-100 overflow-auto min-h-0">
-            {loading ? (
+            {!packHistoryId ? (
+              <div className="p-12 text-center text-slate-400 flex flex-col items-center gap-3">
+                <FileText size={40} className="text-slate-200"/>
+                <p className="font-medium text-slate-500">ไม่มีข้อมูล</p>
+                <p className="text-sm">กรุณาไปที่ <span className="font-semibold text-blue-500">หน้าแพ็คสินค้า → ใบสรุป → สร้างใบเบิก</span></p>
+              </div>
+            ) : loading ? (
               <div className="p-12 text-center text-slate-400 flex items-center justify-center gap-2">
                 <RefreshCw size={16} className="animate-spin"/> กำลังคำนวณ...
               </div>
