@@ -34,28 +34,37 @@ function makeItems(order: Order): OrderItem[] {
 export default function FlashExport() {
   const [orders, setOrders]               = useState<Order[]>([]);
   const [exportedOrders, setExportedOrders] = useState<Order[]>([]);
+  const [printedOrders, setPrintedOrders]   = useState<Order[]>([]);
   const [loading, setLoading]             = useState(true);
   const [exporting, setExporting]         = useState(false);
   const [reExporting, setReExporting]     = useState(false);
   const [previewing, setPreviewing]       = useState(false);
   const [previewRows, setPreviewRows]     = useState<PreviewRow[]>([]);
   const [showPreview, setShowPreview]     = useState(false);
-  const [tab, setTab]                     = useState<'pending' | 'exported'>('pending');
+  const [tab, setTab]                     = useState<'pending' | 'exported' | 'printed'>('pending');
   const [selectedPending,  setSelectedPending]  = useState<Set<string>>(new Set());
   const [selectedExported, setSelectedExported] = useState<Set<string>>(new Set());
-  // per-order product selections
   const [orderSelections, setOrderSelections] = useState<OrderSelections>({});
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
-  const [searchProduct, setSearchProduct]   = useState(''); // ค้นหา pending
-  const [searchExported, setSearchExported] = useState(''); // ค้นหา exported
+  const [searchProduct, setSearchProduct]   = useState('');
+  const [searchExported, setSearchExported] = useState('');
+  // upload tracking file
+  const [uploadResult, setUploadResult] = useState<{ matched: number; notFound: number } | null>(null);
+  const [uploading, setUploading] = useState(false);
 
-  useEffect(() => { loadOrders(); loadExportedOrders(); }, []);
+  useEffect(() => { loadOrders(); loadExportedOrders(); loadPrintedOrders(); }, []);
+
+  const loadPrintedOrders = async () => {
+    const { data } = await supabase.from('orders').select('*, customers(*)')
+      .eq('route', 'B').eq('order_status', 'กำลังคีย์').order('updated_at', { ascending: false });
+    if (data) setPrintedOrders(data);
+  };
 
   const loadOrders = async () => {
     setLoading(true);
     try {
       const { data } = await supabase.from('orders').select('*, customers(*)')
-        .eq('route', 'B').neq('order_status', 'ส่งแฟลช').order('created_at', { ascending: false });
+        .eq('route', 'B').eq('order_status', 'รอคีย์ออเดอร์').order('created_at', { ascending: false });
       if (data) {
         setOrders(data);
         // initialize selections
@@ -68,7 +77,7 @@ export default function FlashExport() {
 
   const loadExportedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .eq('route', 'B').eq('order_status', 'ส่งแฟลช').order('updated_at', { ascending: false });
+      .eq('route', 'B').eq('order_status', 'กำลังคีย์').order('updated_at', { ascending: false });
     if (data) {
       setExportedOrders(data);
       const sel: any = {};
@@ -144,7 +153,7 @@ export default function FlashExport() {
     URL.revokeObjectURL(url);
     if (updateStatus) {
       const ids = targetOrders.map(o => o.id);
-      await supabase.from('orders').update({ order_status: 'ส่งแฟลช' }).in('id', ids);
+      await supabase.from('orders').update({ order_status: 'กำลังคีย์' }).in('id', ids);
       setOrders([]); setSelectedPending(new Set());
       await Promise.all([loadOrders(), loadExportedOrders()]);
     }
@@ -182,9 +191,84 @@ export default function FlashExport() {
   // ลบ = reset กลับเป็น รอแพ็ค
   const handleDeleteExported = async (ids: string[]) => {
     if (!confirm(`ยืนยันลบ ${ids.length} รายการออกจากส่งออกแล้ว?`)) return;
-    await supabase.from('orders').update({ order_status: 'รอแพ็ค' }).in('id', ids);
+    await supabase.from('orders').update({ order_status: 'รอคีย์ออเดอร์' }).in('id', ids);
     setSelectedExported(new Set());
     await Promise.all([loadOrders(), loadExportedOrders()]);
+  };
+
+  // upload ไฟล์ Flash tracking
+  const handleFlashUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadResult(null);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb  = XLSX.read(buf, { type: 'array', cellDates: true });
+      const ws  = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      // row 0 = header, row 1+ = data
+      let matched = 0; let notFound = 0;
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const rawDate  = row[0];  // Col A: เวลารับพัสดุ
+        const tracking = String(row[1] || '').trim();  // Col B: เลขพัสดุ
+        const name     = String(row[10] || '').trim(); // Col K: ชื่อผู้รับ
+        const tel      = String(row[11] || '').trim(); // Col L: เบอร์โทรผู้รับ
+
+        if (!tracking || !name) continue;
+
+        // parse วันที่ → YYYY-MM-DD
+        let dateStr = '';
+        if (rawDate instanceof Date) {
+          dateStr = rawDate.toISOString().split('T')[0];
+        } else {
+          const m = String(rawDate).match(/(\d{4}-\d{2}-\d{2})/);
+          if (m) dateStr = m[1];
+        }
+        if (!dateStr) continue;
+
+        // หา order ที่ตรงกัน: วันที่ + ชื่อ + เบอร์
+        const { data: matches } = await supabase
+          .from('orders')
+          .select('id, order_status')
+          .eq('order_date', dateStr)
+          .eq('order_status', 'กำลังคีย์')
+          .or(`customers.name.eq.${name},customers.tel.eq.${tel}`)
+          .limit(1);
+
+        // fallback: หาจาก tel อย่างเดียว ถ้าไม่เจอ
+        let orderId = matches?.[0]?.id;
+        if (!orderId) {
+          const { data: byTel } = await supabase
+            .from('orders')
+            .select('id, customers!inner(tel)')
+            .eq('order_date', dateStr)
+            .eq('order_status', 'กำลังคีย์')
+            .eq('customers.tel', tel)
+            .limit(1);
+          orderId = byTel?.[0]?.id;
+        }
+
+        if (orderId) {
+          await supabase.from('orders')
+            .update({ tracking_no: tracking, order_status: 'รอแพ็ค' })
+            .eq('id', orderId);
+          matched++;
+        } else {
+          notFound++;
+        }
+      }
+      setUploadResult({ matched, notFound });
+      await Promise.all([loadOrders(), loadPrintedOrders()]);
+    } catch (err) {
+      console.error(err);
+      alert('เกิดข้อผิดพลาดในการอ่านไฟล์');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
   };
 
   const togglePending  = (id: string) => setSelectedPending(s  => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -215,7 +299,10 @@ export default function FlashExport() {
           รอส่งออก <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='pending'?'bg-yellow-100 text-yellow-700':'bg-slate-200 text-slate-500'}`}>{orders.length}</span>
         </button>
         <button onClick={() => setTab('exported')} className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab==='exported'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
-          ส่งออกแล้ว <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='exported'?'bg-green-100 text-green-700':'bg-slate-200 text-slate-500'}`}>{exportedOrders.length}</span>
+          ปริ้นแล้ว <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='exported'?'bg-indigo-100 text-indigo-700':'bg-slate-200 text-slate-500'}`}>{exportedOrders.length}</span>
+        </button>
+        <button onClick={() => setTab('printed')} className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab==='printed'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
+          รอแพ็ค <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='printed'?'bg-green-100 text-green-700':'bg-slate-200 text-slate-500'}`}>{printedOrders.length}</span>
         </button>
       </div>
 
@@ -388,6 +475,61 @@ export default function FlashExport() {
       )}
 
       {/* ── Modal แก้ไขสินค้า ── */}
+
+      {/* ── Tab: ปริ้นแล้ว (กำลังคีย์) — upload tracking ── */}
+      {tab === 'printed' && (
+        <>
+          <div className="shrink-0 bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h3 className="font-semibold text-slate-700">อัพโหลดไฟล์ Tracking จาก Flash</h3>
+                <p className="text-xs text-slate-400 mt-0.5">จับคู่ วันที่ + ชื่อ + เบอร์ → ใส่ Tracking → เปลี่ยนสถานะเป็น รอแพ็ค</p>
+              </div>
+              <label className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer flex items-center gap-2 ${uploading ? 'bg-slate-200 text-slate-400' : 'bg-indigo-500 text-white hover:bg-indigo-600'}`}>
+                <Download size={14}/> {uploading ? 'กำลังประมวลผล...' : 'อัพโหลดไฟล์ Flash (.xlsx)'}
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFlashUpload} disabled={uploading}/>
+              </label>
+            </div>
+            {uploadResult && (
+              <div className={`mt-3 p-3 rounded-lg text-sm flex items-center gap-3 ${uploadResult.matched > 0 ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
+                <span>✓ จับคู่สำเร็จ <strong>{uploadResult.matched}</strong> ออเดอร์</span>
+                {uploadResult.notFound > 0 && <span className="text-orange-600">· ไม่พบ {uploadResult.notFound} รายการ</span>}
+              </div>
+            )}
+          </div>
+          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+            <table className="text-sm w-full" style={{minWidth:'700px'}}>
+              <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+                <tr>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                  <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
+                  <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
+                  <th className="p-3 text-left">สินค้า</th>
+                  <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {printedOrders.length === 0 && (
+                  <tr><td colSpan={6} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์ที่ปริ้นแล้ว — Export Flash เพื่อเพิ่มรายการ</td></tr>
+                )}
+                {printedOrders.map(o => (
+                  <tr key={o.id} className="border-b hover:bg-indigo-50">
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
+                    <td className="p-3 font-mono text-xs text-indigo-700 whitespace-nowrap">{o.order_no}</td>
+                    <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
+                    <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
+                    <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod || '-'}</td>
+                    <td className="p-3 text-center">
+                      <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold">กำลังคีย์</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
       {editingOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-lg w-full">
