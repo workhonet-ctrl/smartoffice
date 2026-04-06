@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ChangeEvent } from 'react';
 import { supabase } from '../lib/supabase';
 import { Plus, Search, Trash2, X, Upload, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -84,7 +84,7 @@ export default function FinanceExpenses() {
   };
 
   // Upload จากไฟล์ Excel: col A=เลขที่(ถ้ามี), B=วันที่, C=รายการ, D=หมวด, E=ยอด
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     setUploading(true);
     const buf  = await file.arrayBuffer();
