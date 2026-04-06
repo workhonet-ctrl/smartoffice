@@ -60,10 +60,10 @@ export default function MyOrderExport() {
     }
   };
 
-  // Tab ปริ้นแล้ว: รอแพ็ค (มี tracking แล้ว)
+  // Tab ปริ้นแล้ว: รอแพ็ค (route A หรือ C)
   const loadPrintedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .eq('route', 'A').eq('order_status', 'รอแพ็ค').order('updated_at', { ascending: false });
+      .in('route', ['A', 'C']).eq('order_status', 'รอแพ็ค').order('updated_at', { ascending: false });
     if (data) setPrintedOrders(data);
   };
 
