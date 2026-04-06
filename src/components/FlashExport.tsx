@@ -56,7 +56,7 @@ export default function FlashExport() {
 
   const loadPrintedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .eq('route', 'B').eq('order_status', 'กำลังคีย์').order('updated_at', { ascending: false });
+      .eq('route', 'B').eq('order_status', 'รอแพ็ค').order('updated_at', { ascending: false });
     if (data) setPrintedOrders(data);
   };
 
@@ -302,7 +302,7 @@ export default function FlashExport() {
           ปริ้นแล้ว <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='exported'?'bg-indigo-100 text-indigo-700':'bg-slate-200 text-slate-500'}`}>{exportedOrders.length}</span>
         </button>
         <button onClick={() => setTab('printed')} className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab==='printed'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
-          รอแพ็ค <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='printed'?'bg-green-100 text-green-700':'bg-slate-200 text-slate-500'}`}>{printedOrders.length}</span>
+          ส่งออกแล้ว <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='printed'?'bg-green-100 text-green-700':'bg-slate-200 text-slate-500'}`}>{printedOrders.length}</span>
         </button>
       </div>
 
@@ -521,7 +521,7 @@ export default function FlashExport() {
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
                     <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod || '-'}</td>
                     <td className="p-3 text-center">
-                      <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-xs font-bold">กำลังคีย์</span>
+                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">รอแพ็ค</span>
                     </td>
                   </tr>
                 ))}
