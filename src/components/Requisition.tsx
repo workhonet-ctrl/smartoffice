@@ -219,7 +219,8 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
           if (orderNos.length > 0) {
             await supabase.from('orders')
               .update({ order_status: 'แพ็คสินค้า' })
-              .in('order_no', orderNos);
+              .in('order_no', orderNos)
+              .eq('order_status', 'รอแพ็ค');
           }
         }
       }
