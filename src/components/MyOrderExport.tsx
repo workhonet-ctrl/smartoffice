@@ -114,12 +114,11 @@ export default function MyOrderExport() {
       const ws   = wb.Sheets[wb.SheetNames[0]];
       const rows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-      // โหลดออเดอร์ route A ที่ไม่มี tracking
+      // โหลดออเดอร์ที่ route A หรือ C (ไปรษณีย์) ทั้งหมด
       const { data: allOrders } = await supabase
         .from('orders')
-        .select('id, order_date, order_status, customers(name, tel)')
-        .eq('route', 'A')
-        .or('tracking_no.is.null,tracking_no.eq.');
+        .select('id, order_date, order_status, route, customers(name, tel)')
+        .in('route', ['A', 'C']);
 
       let matched = 0; let notFound = 0;
       // row 0 = header, row 1+ = data
