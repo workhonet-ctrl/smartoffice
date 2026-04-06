@@ -71,13 +71,16 @@ function extractQty(promoName: string): number {
 
 function getAutoStatus(order: Order): { label: string; color: string } {
   const s = order.order_status;
-  if (s === 'ส่งแฟลช')     return { label: 'ส่งแฟลช',     color: 'bg-yellow-100 text-yellow-800' };
-  if (s === 'ส่งไปรษณีย์') return { label: 'ส่งไปรษณีย์', color: 'bg-purple-100 text-purple-800' };
+  if (s === 'รอคีย์ออเดอร์') return { label: 'รอคีย์ออเดอร์', color: 'bg-blue-100 text-blue-700' };
+  if (s === 'กำลังคีย์')     return { label: 'กำลังคีย์',     color: 'bg-indigo-100 text-indigo-700' };
+  if (s === 'รอแพ็ค')        return { label: 'รอแพ็ค',        color: 'bg-yellow-100 text-yellow-700' };
+  if (s === 'กำลังแพ็ค')     return { label: 'กำลังแพ็ค',     color: 'bg-orange-100 text-orange-700' };
+  if (s === 'แพ็คสินค้า')    return { label: 'แพ็คสินค้า',    color: 'bg-teal-100 text-teal-700' };
+  if (s === 'ส่งแฟลช')       return { label: 'ส่งแฟลช',       color: 'bg-green-100 text-green-700' };
+  if (s === 'ส่งไปรษณีย์')   return { label: 'ส่งไปรษณีย์',   color: 'bg-purple-100 text-purple-800' };
   if (s === 'ส่งสินค้าแล้ว') return { label: 'ส่งสินค้าแล้ว', color: 'bg-green-100 text-green-800' };
-  if (s === 'ปริ้นแล้ว')   return { label: 'ปริ้นแล้ว',   color: 'bg-blue-100 text-blue-700' };
-  if (s === 'กำลังแพ็ค')   return { label: 'กำลังแพ็ค',   color: 'bg-orange-100 text-orange-700' };
-  if (order.tracking_no)    return { label: 'ส่งสินค้าแล้ว', color: 'bg-green-100 text-green-800' };
-  return { label: 'รอแพ็ค', color: 'bg-yellow-100 text-yellow-700' };
+  if (s === 'ปริ้นแล้ว')     return { label: 'ปริ้นแล้ว',     color: 'bg-sky-100 text-sky-700' };
+  return { label: s || 'รอแพ็ค', color: 'bg-slate-100 text-slate-600' };
 }
 
 // ── helper: ขนส่ง label ──
@@ -261,8 +264,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         const hasTrack   = order.tracking_no && String(order.tracking_no).length > 3;
         const isTourist  = TOURIST_ZIPS.has(String(order.postal_code));
         const route      = hasTrack ? 'A' : isTourist ? 'C' : 'B';
-        // ทุกออเดอร์เริ่มต้นที่ "กำลังแพ็ค" (จะเปลี่ยนเป็น "ปริ้นแล้ว" หลังเสร็จหน้าแพ็ค)
-        const orderStatus = 'กำลังแพ็ค';
+        // มี tracking → รอแพ็ค, ไม่มี tracking → รอคีย์ออเดอร์ (ต้อง export Flash ก่อน)
+        const orderStatus = hasTrack ? 'รอแพ็ค' : 'รอคีย์ออเดอร์';
 
         const { error: oe } = await supabase.from('orders').insert([{
           order_no: String(order.order_no), customer_id: customerId, channel: order.channel,
@@ -310,7 +313,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
 
   // อัพเดต tracking → อัพเดต order_status อัตโนมัติ
   const updateTracking = async (orderId: string, tracking: string) => {
-    const newStatus = tracking.trim().length > 3 ? 'ส่งสินค้าแล้ว' : 'รอแพ็ค';
+    const newStatus = tracking.trim().length > 3 ? 'รอแพ็ค' : 'รอคีย์ออเดอร์';
     await supabase.from('orders').update({ tracking_no: tracking.trim() || null, order_status: newStatus }).eq('id', orderId);
     loadOrders();
   };
