@@ -209,12 +209,12 @@ export default function FlashExport() {
 
       let matched = 0; let notFound = 0;
 
-      // โหลดออเดอร์ทั้งหมดที่ route=B, status=กำลังคีย์ พร้อม customers ครั้งเดียว
+      // โหลดออเดอร์ route B ที่ยังไม่มี tracking ทั้งหมด
       const { data: allOrders } = await supabase
         .from('orders')
-        .select('id, order_date, customers(name, tel)')
+        .select('id, order_date, order_status, customers(name, tel)')
         .eq('route', 'B')
-        .eq('order_status', 'กำลังคีย์');
+        .or('tracking_no.is.null,tracking_no.eq.');
 
       for (let i = 1; i < rows.length; i++) {
         const row      = rows[i];
@@ -251,6 +251,7 @@ export default function FlashExport() {
           matched++;
         } else {
           notFound++;
+          console.log(`ไม่พบ: วันที่=${dateStr} ชื่อ=${name} เบอร์=${tel}`);
         }
       }
 
@@ -470,16 +471,17 @@ export default function FlashExport() {
 
       {/* ── Modal แก้ไขสินค้า ── */}
 
-      {/* ── Tab: ปริ้นแล้ว (กำลังคีย์) — upload tracking ── */}
+      {/* ── Tab: ส่งออกแล้ว — upload tracking + แสดงออเดอร์ที่มี tracking แล้ว ── */}
       {tab === 'printed' && (
         <>
+          {/* Upload */}
           <div className="shrink-0 bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-4">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
                 <h3 className="font-semibold text-slate-700">อัพโหลดไฟล์ Tracking จาก Flash</h3>
                 <p className="text-xs text-slate-400 mt-0.5">จับคู่ วันที่ + ชื่อ + เบอร์ → ใส่ Tracking → เปลี่ยนสถานะเป็น รอแพ็ค</p>
               </div>
-              <label className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer flex items-center gap-2 ${uploading ? 'bg-slate-200 text-slate-400' : 'bg-indigo-500 text-white hover:bg-indigo-600'}`}>
+              <label className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer flex items-center gap-2 ${uploading ? 'bg-slate-200 text-slate-400' : 'bg-green-500 text-white hover:bg-green-600'}`}>
                 <Download size={14}/> {uploading ? 'กำลังประมวลผล...' : 'อัพโหลดไฟล์ Flash (.xlsx)'}
                 <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFlashUpload} disabled={uploading}/>
               </label>
@@ -491,31 +493,37 @@ export default function FlashExport() {
               </div>
             )}
           </div>
+
+          {/* ตารางออเดอร์ที่มี tracking แล้ว (รอแพ็ค) */}
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
             <table className="text-sm w-full" style={{minWidth:'700px'}}>
-              <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+              <thead className="bg-green-800 text-green-100 text-xs sticky top-0 z-10">
                 <tr>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
                   <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
                   <th className="p-3 text-left">สินค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">Tracking</th>
                   <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
                 </tr>
               </thead>
               <tbody>
                 {printedOrders.length === 0 && (
-                  <tr><td colSpan={6} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์ที่ปริ้นแล้ว — Export Flash เพื่อเพิ่มรายการ</td></tr>
+                  <tr><td colSpan={7} className="p-8 text-center text-slate-400">
+                    ยังไม่มีออเดอร์ที่ส่งออกแล้ว — อัพโหลดไฟล์ Flash เพื่อจับคู่ tracking
+                  </td></tr>
                 )}
                 {printedOrders.map(o => (
-                  <tr key={o.id} className="border-b hover:bg-indigo-50">
+                  <tr key={o.id} className="border-b hover:bg-green-50">
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
-                    <td className="p-3 font-mono text-xs text-indigo-700 whitespace-nowrap">{o.order_no}</td>
+                    <td className="p-3 font-mono text-xs text-green-700 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
-                    <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod || '-'}</td>
+                    <td className="p-3 text-xs text-slate-500 max-w-[160px] truncate">{o.raw_prod || '-'}</td>
+                    <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{(o as any).tracking_no || '-'}</td>
                     <td className="p-3 text-center">
-                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">รอแพ็ค</span>
+                      <span className="px-2 py-0.5 bg-teal-100 text-teal-700 rounded-full text-xs font-bold">รอแพ็ค</span>
                     </td>
                   </tr>
                 ))}
