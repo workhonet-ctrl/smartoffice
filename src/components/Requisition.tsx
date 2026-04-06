@@ -188,10 +188,30 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
       if (error) throw error;
 
       for (const item of validItems) {
-        const { data: si } = await supabase.from('stock_items').select('id').ilike('name', item.name.trim()).maybeSingle();
+        const itemName = item.name.trim();
+        let stockId: string | null = null;
+
+        // หา stock_item ที่ชื่อตรงกัน (exact หรือ ilike)
+        const { data: si } = await supabase
+          .from('stock_items').select('id')
+          .or(`name.eq.${itemName},name.ilike.%${itemName}%`)
+          .maybeSingle();
+
         if (si?.id) {
+          stockId = si.id;
+        } else {
+          // ถ้าไม่มีใน stock_items → สร้างใหม่อัตโนมัติ
+          const unit = item.unit || 'ชิ้น';
+          const type = item.type === 'box' ? 'box' : item.type === 'bubble' ? 'bubble' : 'product';
+          const { data: newItem } = await supabase
+            .from('stock_items').insert([{ name: itemName, unit, type, min_qty: 0 }])
+            .select('id').single();
+          stockId = newItem?.id || null;
+        }
+
+        if (stockId) {
           await supabase.from('stock_transactions').insert([{
-            stock_item_id: si.id, txn_type: 'out', qty: item.qty,
+            stock_item_id: stockId, txn_type: 'out', qty: item.qty,
             ref_type: 'requisition', ref_id: docNo, note: `ใบเบิก ${docNo}`,
           }]);
         }
