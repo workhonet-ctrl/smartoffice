@@ -163,7 +163,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             }
             return '';
           })() : '',
-          customer_name: String(row[4] || ''), tel: String(row[6] || ''),
+          customer_name: String(row[4] || ''), facebook_name: String(row[5] || ''), tel: String(row[6] || ''),
           address: String(row[7] || ''), subdistrict: String(row[8] || ''),
           district: String(row[9] || ''), province: String(row[10] || ''),
           postal_code: String(row[11] || ''), raw_prod: String(row[14] || ''),
@@ -234,17 +234,23 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           // มีลูกค้าอยู่แล้ว — อัพเดตที่อยู่
           customerId = cust.id;
           await supabase.from('customers').update({
-            name: order.customer_name, address: order.address,
+            name: order.customer_name,
+            facebook_name: order.facebook_name || undefined,
+            address: order.address,
             subdistrict: order.subdistrict, district: order.district,
             province: order.province, postal_code: order.postal_code,
+            channel: order.channel || undefined,
           }).eq('id', cust.id);
         } else {
           // ลูกค้าใหม่ — insert
           const { data: nc, error: ce } = await supabase.from('customers').insert([{
             name: order.customer_name, tel: String(order.tel),
+            facebook_name: order.facebook_name || undefined,
             address: order.address, subdistrict: order.subdistrict,
             district: order.district, province: order.province,
-            postal_code: order.postal_code, channel: order.channel, tag: 'ใหม่',
+            postal_code: order.postal_code, channel: order.channel,
+            payment_method: order.payment_method || undefined,
+            tag: 'ใหม่',
           }]).select('id').single();
           if (ce) {
             errors.push(`customer: ${order.customer_name} — ${ce.message}`);
