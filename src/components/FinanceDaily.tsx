@@ -59,7 +59,7 @@ export default function FinanceDaily() {
       const { data: orders } = await supabase.from('orders')
         .select('id, order_no, channel, total_thb, shipping_thb, raw_prod, promo_ids, quantities, quantity, customers(name)')
         .gte('order_date', dateFrom).lte('order_date', dateTo)
-        .not('order_status', 'in', '(รอคีย์ออเดอร์)')
+        .neq('order_status', 'รอคีย์ออเดอร์')
         .order('order_date');
 
       // ดึงค่าโฆษณา
