@@ -196,7 +196,6 @@ export default function FlashExport() {
     await Promise.all([loadOrders(), loadExportedOrders()]);
   };
 
-  // upload ไฟล์ Flash tracking
   const handleFlashUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -208,18 +207,25 @@ export default function FlashExport() {
       const ws  = wb.Sheets[wb.SheetNames[0]];
       const rows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-      // row 0 = header, row 1+ = data
       let matched = 0; let notFound = 0;
+
+      // โหลดออเดอร์ทั้งหมดที่ route=B, status=กำลังคีย์ พร้อม customers ครั้งเดียว
+      const { data: allOrders } = await supabase
+        .from('orders')
+        .select('id, order_date, customers(name, tel)')
+        .eq('route', 'B')
+        .eq('order_status', 'กำลังคีย์');
+
       for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        const rawDate  = row[0];  // Col A: เวลารับพัสดุ
-        const tracking = String(row[1] || '').trim();  // Col B: เลขพัสดุ
-        const name     = String(row[10] || '').trim(); // Col K: ชื่อผู้รับ
-        const tel      = String(row[11] || '').trim(); // Col L: เบอร์โทรผู้รับ
+        const row      = rows[i];
+        const rawDate  = row[0];
+        const tracking = String(row[1] || '').trim();
+        const name     = String(row[10] || '').trim();
+        const tel      = String(row[11] || '').replace(/\D/g, ''); // เบอร์เฉพาะตัวเลข
 
-        if (!tracking || !name) continue;
+        if (!tracking || (!name && !tel)) continue;
 
-        // parse วันที่ → YYYY-MM-DD
+        // parse วันที่
         let dateStr = '';
         if (rawDate instanceof Date) {
           dateStr = rawDate.toISOString().split('T')[0];
@@ -229,37 +235,25 @@ export default function FlashExport() {
         }
         if (!dateStr) continue;
 
-        // หา order ที่ตรงกัน: วันที่ + ชื่อ + เบอร์
-        const { data: matches } = await supabase
-          .from('orders')
-          .select('id, order_status')
-          .eq('order_date', dateStr)
-          .eq('order_status', 'กำลังคีย์')
-          .or(`customers.name.eq.${name},customers.tel.eq.${tel}`)
-          .limit(1);
+        // จับคู่จาก orders ที่โหลดไว้แล้ว
+        const match = (allOrders || []).find((o: any) => {
+          const orderDate = String(o.order_date || '').split('T')[0];
+          const cTel = String((o.customers as any)?.tel || '').replace(/\D/g, '');
+          const cName = String((o.customers as any)?.name || '').trim();
+          // ต้องตรงวันที่ + (เบอร์ หรือ ชื่อ)
+          return orderDate === dateStr && (cTel === tel || cName === name);
+        });
 
-        // fallback: หาจาก tel อย่างเดียว ถ้าไม่เจอ
-        let orderId = matches?.[0]?.id;
-        if (!orderId) {
-          const { data: byTel } = await supabase
-            .from('orders')
-            .select('id, customers!inner(tel)')
-            .eq('order_date', dateStr)
-            .eq('order_status', 'กำลังคีย์')
-            .eq('customers.tel', tel)
-            .limit(1);
-          orderId = byTel?.[0]?.id;
-        }
-
-        if (orderId) {
+        if (match) {
           await supabase.from('orders')
             .update({ tracking_no: tracking, order_status: 'รอแพ็ค' })
-            .eq('id', orderId);
+            .eq('id', match.id);
           matched++;
         } else {
           notFound++;
         }
       }
+
       setUploadResult({ matched, notFound });
       await Promise.all([loadOrders(), loadPrintedOrders()]);
     } catch (err) {
