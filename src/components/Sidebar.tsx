@@ -23,7 +23,9 @@ import {
 type PageKey =
   | 'products' | 'product-list' | 'packaging' | 'pack-products' | 'pack-history'
   | 'requisition' | 'stock' | 'purchase-order' | 'suppliers'
-  | 'customers' | 'orders' | 'flash-export' | 'myorder-export' | 'finance' | 'hr';
+  | 'customers' | 'orders' | 'flash-export' | 'myorder-export'
+  | 'finance-daily' | 'finance-monthly' | 'finance-yearly' | 'finance-expenses'
+  | 'hr';
 
 type SidebarProps = {
   activePage: PageKey;
@@ -46,24 +48,28 @@ const warehouseSubMenus: { key: PageKey; label: string; icon: any }[] = [
   { key: 'myorder-export', label: 'MyOrder Export',         icon: FileSpreadsheet },
 ];
 
+// เมนูย่อย การเงิน
+const financeSubMenus: { key: PageKey; label: string; icon: any }[] = [
+  { key: 'finance-daily',    label: 'บัญชีรายวัน',   icon: BarChart2 },
+  { key: 'finance-monthly',  label: 'บัญชีรายเดือน', icon: BarChart2 },
+  { key: 'finance-yearly',   label: 'บัญชีรายปี',    icon: BarChart2 },
+  { key: 'finance-expenses', label: 'รายจ่าย',       icon: FileText  },
+];
+
 // เมนูหลักอื่น ๆ
 const mainMenus: { key: PageKey; label: string; icon: any }[] = [
-  { key: 'customers', label: 'ลูกค้า',    icon: Users },
-  { key: 'finance',   label: 'การเงิน',   icon: DollarSign },
-  { key: 'hr',        label: 'พนักงาน',   icon: UserCog },
+  { key: 'customers', label: 'ลูกค้า',   icon: Users },
+  { key: 'hr',        label: 'พนักงาน',  icon: UserCog },
 ];
 
 export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
-  // เปิด dropdown ฝ่ายคลังสินค้าอัตโนมัติถ้า active page อยู่ในกลุ่ม
   const warehouseKeys = warehouseSubMenus.map(m => m.key);
-  const [warehouseOpen, setWarehouseOpen] = useState(
-    warehouseKeys.includes(activePage)
-  );
+  const financeKeys   = financeSubMenus.map(m => m.key);
 
-  const handleSubMenu = (key: PageKey) => {
-    setActivePage(key);
-    setWarehouseOpen(true);
-  };
+  const [warehouseOpen, setWarehouseOpen] = useState(warehouseKeys.includes(activePage));
+  const [financeOpen,   setFinanceOpen]   = useState(financeKeys.includes(activePage));
+
+  const handleSubMenu = (key: PageKey) => { setActivePage(key); setWarehouseOpen(true); };
 
   return (
     <aside className="w-60 bg-slate-950 text-white min-h-screen flex flex-col">
@@ -121,25 +127,44 @@ export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
         {/* ── เส้นคั่น ── */}
         <div className="my-2 border-t border-slate-800" />
 
-        {/* ── เมนูหลักอื่น ๆ ── */}
-        {mainMenus.map(menu => {
-          const Icon = menu.icon;
-          const active = activePage === menu.key;
-          return (
-            <button
-              key={menu.key}
-              onClick={() => setActivePage(menu.key)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition
-                ${active
-                  ? 'bg-cyan-700 text-white'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                }`}
-            >
-              <Icon size={20} />
-              <span>{menu.label}</span>
-            </button>
-          );
-        })}
+        {/* ── เมนูหลัก: ลูกค้า ── */}
+        <button onClick={() => setActivePage('customers')}
+          className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition ${activePage==='customers'?'bg-cyan-700 text-white':'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
+          <Users size={20}/><span>ลูกค้า</span>
+        </button>
+
+        {/* ── เมนูหลัก: การเงิน (dropdown) ── */}
+        <div>
+          <button onClick={() => setFinanceOpen(o => !o)}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition
+              ${financeKeys.includes(activePage) ? 'bg-slate-800 text-cyan-400' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
+            <DollarSign size={20}/>
+            <span className="flex-1">การเงิน</span>
+            {financeOpen ? <ChevronDown size={16} className="text-slate-400"/> : <ChevronRight size={16} className="text-slate-400"/>}
+          </button>
+          {financeOpen && (
+            <div className="ml-3 mt-1 space-y-0.5 border-l border-slate-700 pl-3">
+              {financeSubMenus.map(menu => {
+                const Icon = menu.icon;
+                const active = activePage === menu.key;
+                return (
+                  <button key={menu.key} onClick={() => setActivePage(menu.key)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition text-sm
+                      ${active ? 'bg-cyan-700 text-white font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+                    <Icon size={17}/><span>{menu.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ── เมนูหลัก: พนักงาน ── */}
+        <button onClick={() => setActivePage('hr')}
+          className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition ${activePage==='hr'?'bg-cyan-700 text-white':'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
+          <UserCog size={20}/><span>พนักงาน</span>
+        </button>
+
       </nav>
     </aside>
   );
