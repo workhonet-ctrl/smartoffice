@@ -32,6 +32,15 @@ type AdCost = { id: string; expense_date: string; channel: string | null; amount
 
 const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// แยกจำนวนชิ้นจริงจากชื่อ promo เช่น "1 แถม 1" → 2, "2 แถม 2" → 4
+function extractPieces(promoName: string): number {
+  const t = promoName.match(/(\d+)\s*แถม\s*(\d+)/);
+  if (t) return parseInt(t[1]) + parseInt(t[2]);
+  const u = promoName.match(/\(?\s*(\d+)\s*(?:กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน)/i);
+  if (u) return parseInt(u[1]);
+  return 1;
+}
+
 export default function FinanceDaily() {
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 6);
@@ -111,19 +120,22 @@ export default function FinanceDaily() {
           for (let i = 0; i < o.promo_ids.length; i++) {
             const promo = promoMap[o.promo_ids[i]];
             if (!promo) continue;
-            const qty    = Number(qtys[i]?.trim()) || 1;
+            const qty    = Number(qtys[i]?.trim()) || 1;   // จำนวน promo packs
+            const pieces = extractPieces(promo.name) * qty; // ชิ้นจริง
             const master = promo.products_master;
             const box    = promo.boxes;
             const bub    = promo.bubbles;
-            const goodsCost = master?.cost_thb ? Number(master.cost_thb) * qty : 0;
+            const goodsCost = master?.cost_thb ? Number(master.cost_thb) * pieces : 0;
             const shipCost  = promo.ship_thb ? Number(promo.ship_thb) * qty : 0;
             if (goodsCost) oGoods += goodsCost;
             if (shipCost)  oShip  += shipCost;
             if (i === 0 && box?.price_thb) oBox += Number(box.price_thb);
             if (i === 0 && bub?.price_thb && bub?.length_cm > 0) oBub += Number(bub.price_thb);
             const promoName  = master?.name || (o.raw_prod||'').split('|')[i]?.trim() || '-';
+            const packs      = Number(qtys[i]?.trim()) || 1;   // จำนวน promo ที่สั่ง
+            const pieces     = extractPieces(promo.name) * packs; // ชิ้นจริง = ชิ้น/แพ็ค × จำนวนแพ็ค
             const unitCost   = master?.cost_thb ? Number(master.cost_thb) : 0;
-            items.push({ name: promoName, qty, cost: unitCost * qty });
+            items.push({ name: promoName, qty: pieces, cost: unitCost * pieces });
           }
           o._cost_goods  = oGoods;
           o._cost_ship   = oShip;
