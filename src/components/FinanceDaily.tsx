@@ -311,16 +311,16 @@ export default function FinanceDaily() {
                       <td className="py-1.5 px-2 whitespace-nowrap">ช่องทาง</td>
                       <td className="py-1.5 px-2 text-right whitespace-nowrap">รายรับ</td>
                       <td className="py-1.5 px-2">รายการสินค้า · จำนวน · ต้นทุน</td>
-                      <td className="py-1.5 px-2 text-right whitespace-nowrap">ขนส่ง</td>
+                      <td className="py-1.5 px-2 text-right whitespace-nowrap">ต้นทุนรวม</td>
                       <td className="py-1.5 px-2 text-right whitespace-nowrap">กล่อง+บั้บ</td>
                       <td className="py-1.5 px-2 text-right whitespace-nowrap">โฆษณา</td>
                       <td className="py-1.5 px-2 text-right whitespace-nowrap">อื่นๆ</td>
                       <td className="py-1.5 px-2 text-right whitespace-nowrap">กำไร</td>
                     </tr>
                     {day.orders.map(o => {
-                      const oProfit = Number(o.total_thb)
-                        - (o._cost_goods||0) - (o._cost_ship||0)
-                        - (o._cost_box||0) - (o._cost_bubble||0);
+                      const itemsCost = (o._items||[]).reduce((s,it)=>s+it.cost,0);
+                      const boxBub    = (o._cost_box||0)+(o._cost_bubble||0);
+                      const oProfit   = Number(o.total_thb) - itemsCost - boxBub;
                       return (
                         <tr key={o.id} className="border-b bg-slate-50 hover:bg-cyan-50 text-xs">
                           <td className="py-2 pl-8 pr-2 font-mono text-cyan-700 whitespace-nowrap">{o.order_no}</td>
@@ -332,19 +332,19 @@ export default function FinanceDaily() {
                           </td>
                           <td className="py-2 px-2 text-right font-bold text-emerald-600 whitespace-nowrap">฿{fmt(Number(o.total_thb))}</td>
                           <td className="py-2 px-2 text-slate-600">
-                            <div className="flex flex-wrap gap-1">
+                            <div className="flex flex-col gap-0.5">
                               {(o._items && o._items.length > 0) ? o._items.map((item, i) => (
-                                <span key={i} className="inline-flex items-center gap-1 bg-white border border-slate-200 rounded px-1.5 py-0.5 whitespace-nowrap">
+                                <div key={i} className="flex items-center gap-1 whitespace-nowrap">
                                   <span className="text-slate-700">{item.name}</span>
                                   <span className="text-slate-400">×{item.qty}</span>
-                                  {item.cost > 0 && <span className="text-red-500">฿{fmt(item.cost)}</span>}
-                                </span>
+                                  {item.cost > 0 && <span className="text-red-500 font-medium">฿{fmt(item.cost)}</span>}
+                                </div>
                               )) : (
-                                <span className="text-slate-400 text-[10px]">{(o.raw_prod||'').split('|').map(p=>p.trim()).filter(Boolean).join(' · ')}</span>
+                                <span className="text-slate-400 text-[10px]">{(o.raw_prod||'').split('|').map(p=>p.trim()).filter(Boolean).join(', ')}</span>
                               )}
                             </div>
                           </td>
-                          <td className="py-2 px-2 text-right text-slate-500 whitespace-nowrap">฿{fmt(o._cost_ship||0)}</td>
+                          <td className="py-2 px-2 text-right text-slate-500 whitespace-nowrap">฿{fmt((o._items||[]).reduce((s,it)=>s+it.cost,0))}</td>
                           <td className="py-2 px-2 text-right text-slate-500 whitespace-nowrap">฿{fmt((o._cost_box||0)+(o._cost_bubble||0))}</td>
                           <td className="py-2 px-2 text-right text-orange-400 whitespace-nowrap">-</td>
                           <td className="py-2 px-2 text-right text-slate-400 whitespace-nowrap">-</td>
