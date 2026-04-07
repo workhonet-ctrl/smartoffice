@@ -9,6 +9,10 @@ type DailyOrder = {
   raw_prod: string | null; promo_ids: string[] | null;
   quantities: string | null; quantity: number | null;
   customers: { name: string } | null;
+  // ต้นทุนต่อออเดอร์ (คำนวณแล้ว)
+  _cost_goods?: number; _cost_ship?: number;
+  _cost_box?: number; _cost_bubble?: number;
+  _items?: { name: string; qty: number; cost: number }[];
 };
 
 type DaySummary = {
@@ -102,6 +106,8 @@ export default function FinanceDaily() {
         for (const o of dayOrders) {
           if (!o.promo_ids?.length) continue;
           const qtys = String(o.quantities || o.quantity || '1').split('|');
+          let oGoods = 0, oShip = 0, oBox = 0, oBub = 0;
+          const items: { name: string; qty: number; cost: number }[] = [];
           for (let i = 0; i < o.promo_ids.length; i++) {
             const promo = promoMap[o.promo_ids[i]];
             if (!promo) continue;
@@ -109,11 +115,25 @@ export default function FinanceDaily() {
             const master = promo.products_master;
             const box    = promo.boxes;
             const bub    = promo.bubbles;
-            if (master?.cost_thb)  costGoods  += Number(master.cost_thb) * qty;
-            if (promo.ship_thb)    costShip   += Number(promo.ship_thb) * qty;
-            if (i === 0 && box?.price_thb) costBox += Number(box.price_thb);
-            if (i === 0 && bub?.price_thb && bub?.length_cm > 0) costBubble += Number(bub.price_thb);
+            const goodsCost = master?.cost_thb ? Number(master.cost_thb) * qty : 0;
+            const shipCost  = promo.ship_thb ? Number(promo.ship_thb) * qty : 0;
+            if (goodsCost) oGoods += goodsCost;
+            if (shipCost)  oShip  += shipCost;
+            if (i === 0 && box?.price_thb) oBox += Number(box.price_thb);
+            if (i === 0 && bub?.price_thb && bub?.length_cm > 0) oBub += Number(bub.price_thb);
+            // เก็บรายการสินค้าต่อออเดอร์
+            const promoName = (o.raw_prod||'').split('|')[i]?.trim() || promo.name || '-';
+            items.push({ name: promoName, qty, cost: goodsCost });
           }
+          o._cost_goods  = oGoods;
+          o._cost_ship   = oShip;
+          o._cost_box    = oBox;
+          o._cost_bubble = oBub;
+          o._items       = items;
+          costGoods  += oGoods;
+          costShip   += oShip;
+          costBox    += oBox;
+          costBubble += oBub;
         }
 
         const revenue   = dayOrders.reduce((s, o) => s + Number(o.total_thb), 0);
@@ -272,20 +292,60 @@ export default function FinanceDaily() {
                     {day.profit<0?'-':''}฿{fmt(Math.abs(day.profit))}
                   </td>
                 </tr>
-                {expanded.has(day.date) && day.orders.map(o => (
-                  <tr key={o.id} className="bg-cyan-50 border-b">
-                    <td className="p-2"/>
-                    <td colSpan={2} className="p-2 text-xs text-slate-500">
-                      <span className="font-mono text-cyan-700">{o.order_no}</span>
-                      <span className="ml-2 text-slate-400">{o.customers?.name}</span>
-                      {o.channel && <span className="ml-2 px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-[10px]">{o.channel}</span>}
-                    </td>
-                    <td className="p-2 text-right text-xs font-bold text-emerald-600">฿{fmt(Number(o.total_thb))}</td>
-                    <td colSpan={6} className="p-2 text-xs text-slate-500 truncate max-w-[300px]">
-                      {(o.raw_prod||'').split('|').map(p=>p.trim()).filter(Boolean).join(' · ')}
-                    </td>
-                  </tr>
-                ))}
+                {expanded.has(day.date) && (
+                  <>
+                    {/* sub-header */}
+                    <tr className="bg-slate-700 text-slate-300 text-[10px]">
+                      <td className="py-1.5 pl-8 pr-2 whitespace-nowrap">เลขออเดอร์</td>
+                      <td className="py-1.5 px-2 whitespace-nowrap">ลูกค้า</td>
+                      <td className="py-1.5 px-2 whitespace-nowrap">ช่องทาง</td>
+                      <td className="py-1.5 px-2 text-right whitespace-nowrap">รายรับ</td>
+                      <td className="py-1.5 px-2">รายการสินค้า · จำนวน · ต้นทุน</td>
+                      <td className="py-1.5 px-2 text-right whitespace-nowrap">ขนส่ง</td>
+                      <td className="py-1.5 px-2 text-right whitespace-nowrap">กล่อง+บั้บ</td>
+                      <td className="py-1.5 px-2 text-right whitespace-nowrap">โฆษณา</td>
+                      <td className="py-1.5 px-2 text-right whitespace-nowrap">อื่นๆ</td>
+                      <td className="py-1.5 px-2 text-right whitespace-nowrap">กำไร</td>
+                    </tr>
+                    {day.orders.map(o => {
+                      const oProfit = Number(o.total_thb)
+                        - (o._cost_goods||0) - (o._cost_ship||0)
+                        - (o._cost_box||0) - (o._cost_bubble||0);
+                      return (
+                        <tr key={o.id} className="border-b bg-slate-50 hover:bg-cyan-50 text-xs">
+                          <td className="py-2 pl-8 pr-2 font-mono text-cyan-700 whitespace-nowrap">{o.order_no}</td>
+                          <td className="py-2 px-2 font-medium text-slate-700 whitespace-nowrap max-w-[120px] truncate">{o.customers?.name || '-'}</td>
+                          <td className="py-2 px-2">
+                            {o.channel
+                              ? <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-[10px] whitespace-nowrap">{o.channel}</span>
+                              : <span className="text-slate-300">-</span>}
+                          </td>
+                          <td className="py-2 px-2 text-right font-bold text-emerald-600 whitespace-nowrap">฿{fmt(Number(o.total_thb))}</td>
+                          <td className="py-2 px-2 text-slate-600">
+                            <div className="flex flex-wrap gap-1">
+                              {(o._items && o._items.length > 0) ? o._items.map((item, i) => (
+                                <span key={i} className="inline-flex items-center gap-1 bg-white border border-slate-200 rounded px-1.5 py-0.5 whitespace-nowrap">
+                                  <span className="text-slate-700">{item.name}</span>
+                                  <span className="text-slate-400">×{item.qty}</span>
+                                  {item.cost > 0 && <span className="text-red-500">฿{fmt(item.cost)}</span>}
+                                </span>
+                              )) : (
+                                <span className="text-slate-400 text-[10px]">{(o.raw_prod||'').split('|').map(p=>p.trim()).filter(Boolean).join(' · ')}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2 px-2 text-right text-slate-500 whitespace-nowrap">฿{fmt(o._cost_ship||0)}</td>
+                          <td className="py-2 px-2 text-right text-slate-500 whitespace-nowrap">฿{fmt((o._cost_box||0)+(o._cost_bubble||0))}</td>
+                          <td className="py-2 px-2 text-right text-orange-400 whitespace-nowrap">-</td>
+                          <td className="py-2 px-2 text-right text-slate-400 whitespace-nowrap">-</td>
+                          <td className={`py-2 px-2 text-right font-bold whitespace-nowrap ${oProfit>=0?'text-teal-600':'text-red-500'}`}>
+                            {oProfit<0?'-':''}฿{fmt(Math.abs(oProfit))}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </>
+                )}
               </>
             ))}
           </tbody>
