@@ -14,6 +14,7 @@ import Orders from './components/Orders';
 import FlashExport from './components/FlashExport';
 import MyOrderExport from './components/MyOrderExport';
 import Finance from './components/Finance';
+import Marketing from './components/Marketing';
 import HR from './components/HR';
 
 type PageKey =
@@ -59,9 +60,9 @@ export default function App() {
       case 'finance-yearly':   return <Finance page="yearly" />;
       case 'finance-expenses': return <Finance page="expenses" />;
       case 'hr':             return <HR />;
-      case 'marketing-graphic': return <MarketingPlaceholder title="กราฟฟิก" />;
-      case 'marketing-ads':     return <MarketingPlaceholder title="โฆษณา ADS" />;
-      case 'marketing-admin':   return <MarketingPlaceholder title="แอดมิน" />;
+      case 'marketing-graphic': return <Marketing page="graphic" />;
+      case 'marketing-ads':     return <Marketing page="ads" />;
+      case 'marketing-admin':   return <Marketing page="admin" />;
       default:               return <Products />;
     }
   };
