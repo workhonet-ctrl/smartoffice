@@ -103,29 +103,39 @@ async function buildRow(order: Order, selections: OrderItem[]): Promise<string[]
   const amount  = String(Math.floor(order.total_thb));
   const payDate = isCOD ? '' : ((order as any).payment_date || '');
 
+  // Map channel → ค่าที่ MyOrder รองรับ
+  const channelMap: Record<string, string> = {
+    'facebook': 'FACEBOOK', 'fb': 'FACEBOOK', 'เฟสบุ๊ก': 'FACEBOOK',
+    'line':     'LINE',     'line oa': 'LINE',  'ไลน์': 'LINE',
+    'shopee':   'SHOPEE',   'ช้อปปี้': 'SHOPEE',
+    'lazada':   'LASADA',   'ลาซาด้า': 'LASADA', 'lasada': 'LASADA',
+  };
+  const rawChannel = (order.channel || '').toLowerCase().trim();
+  const channel = channelMap[rawChannel] || 'FACEBOOK';
+
   return [
-    c?.name        || '',
-    (c?.tel        || '').replace(/[^0-9]/g, ''),
-    c?.address     || '',
-    c?.subdistrict || '',
-    c?.district    || '',
-    c?.province    || '',
-    c?.postal_code || '',
-    '',
-    order.raw_prod || '',
-    masterNames.join(' + ') || '-',
-    promoNames.join(' + ')  || '-',
-    color,
-    String(widthCm),
-    String(lengthCm),
-    String(heightCm),
-    weightKg.toFixed(2),
-    payType,
-    amount,
-    payDate,
-    '',
-    '',
-    order.channel || '',
+    c?.name        || '',                              // A ชื่อผู้รับ
+    (c?.tel        || '').replace(/[^0-9]/g, ''),     // B เบอร์โทร
+    c?.address     || '',                              // C ที่อยู่
+    c?.subdistrict || '',                              // D ตำบล
+    c?.district    || '',                              // E อำเภอ
+    c?.province    || '',                              // F จังหวัด
+    c?.postal_code || '',                              // G รหัสไปรษณีย์
+    '',                                                // H อีเมล
+    order.raw_prod || '',                              // I หมายเหตุ
+    masterNames.join(' + ') || '-',                    // J ชื่อสินค้า (master.name)
+    masterNames.join(' + ') || '-',                    // K ชื่อสินค้า (สำหรับขนส่ง) = master.name
+    color,                                             // L สีสินค้า
+    String(widthCm),                                   // M ความกว้าง
+    String(lengthCm),                                  // N ความยาว
+    String(heightCm),                                  // O ความสูง
+    weightKg.toFixed(2),                               // P น้ำหนัก(กก.)
+    payType,                                           // Q ประเภทการชำระ
+    amount,                                            // R จำนวนเงิน
+    payDate,                                           // S วันที่โอนเงิน
+    '',                                                // T เวลาที่โอน
+    '',                                                // U ผู้รับเงิน
+    channel,                                           // V ช่องทางการจำหน่าย (FACEBOOK/LINE/SHOPEE/LASADA)
   ];
 }
 
