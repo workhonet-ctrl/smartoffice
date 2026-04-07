@@ -91,7 +91,7 @@ export default function FinanceDaily() {
       const promoMap: Record<string, any> = {};
       if (allPromoIds.length > 0) {
         const { data: promos } = await supabase.from('products_promo')
-          .select('id, ship_thb, box_id, bubble_id, boxes(price_thb), bubbles(price_thb, length_cm), products_master(cost_thb)')
+          .select('id, name, ship_thb, box_id, bubble_id, boxes(price_thb), bubbles(price_thb, length_cm), products_master(cost_thb, name)')
           .in('id', allPromoIds);
         (promos || []).forEach((p: any) => { promoMap[p.id] = p; });
       }
