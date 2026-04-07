@@ -121,9 +121,9 @@ export default function FinanceDaily() {
             if (shipCost)  oShip  += shipCost;
             if (i === 0 && box?.price_thb) oBox += Number(box.price_thb);
             if (i === 0 && bub?.price_thb && bub?.length_cm > 0) oBub += Number(bub.price_thb);
-            // เก็บรายการสินค้าต่อออเดอร์
-            const promoName = (o.raw_prod||'').split('|')[i]?.trim() || promo.name || '-';
-            items.push({ name: promoName, qty, cost: goodsCost });
+            const promoName  = master?.name || (o.raw_prod||'').split('|')[i]?.trim() || '-';
+            const unitCost   = master?.cost_thb ? Number(master.cost_thb) : 0;
+            items.push({ name: promoName, qty, cost: unitCost * qty });
           }
           o._cost_goods  = oGoods;
           o._cost_ship   = oShip;
