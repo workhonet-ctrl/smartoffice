@@ -45,7 +45,7 @@ export default function Packaging({
     try {
       const query = orderIds.length > 0
         ? supabase.from('orders').select('*, customers(name, tel)').in('id', orderIds)
-        : supabase.from('orders').select('*, customers(name, tel)').eq('order_status', 'รอแพ็ค');
+        : supabase.from('orders').select('*, customers(name, tel)').in('order_status', ['รอแพ็ค', 'รอคีย์ออเดอร์']);
       const { data: ordersData } = await query.order('created_at', { ascending: true });
       if (!ordersData) return;
 
