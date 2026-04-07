@@ -50,7 +50,19 @@ function extractPieces(promoName: string, packQty: number): number {
   return packQty;
 }
 
-async function buildRow(order: Order, selections: OrderItem[]): Promise<string[]> {
+const CHANNEL_OPTIONS = ['FACEBOOK', 'LINE', 'SHOPEE', 'LASADA'] as const;
+type ChannelOption = typeof CHANNEL_OPTIONS[number];
+
+// ── Preview row type (columns ที่ต้องตรวจ) ────────────────────────────────
+type PreviewRow = {
+  order_no: string; name: string; tel: string;
+  address: string; subdistrict: string; district: string; province: string; postal: string;
+  remark: string; product_name: string; color: string;
+  w: string; l: string; h: string; weight: string;
+  pay_type: string; amount: string; channel: string;
+};
+
+async function buildRow(order: Order, selections: OrderItem[], channel: ChannelOption): Promise<string[]> {
   const c        = order.customers;
   const selected = selections.filter(it => it.selected);
   const origProds = (order.raw_prod || '').split('|').map(s => s.trim());
@@ -103,16 +115,6 @@ async function buildRow(order: Order, selections: OrderItem[]): Promise<string[]
   const amount  = String(Math.floor(order.total_thb));
   const payDate = isCOD ? '' : ((order as any).payment_date || '');
 
-  // Map channel → ค่าที่ MyOrder รองรับ
-  const channelMap: Record<string, string> = {
-    'facebook': 'FACEBOOK', 'fb': 'FACEBOOK', 'เฟสบุ๊ก': 'FACEBOOK',
-    'line':     'LINE',     'line oa': 'LINE',  'ไลน์': 'LINE',
-    'shopee':   'SHOPEE',   'ช้อปปี้': 'SHOPEE',
-    'lazada':   'LASADA',   'ลาซาด้า': 'LASADA', 'lasada': 'LASADA',
-  };
-  const rawChannel = (order.channel || '').toLowerCase().trim();
-  const channel = channelMap[rawChannel] || 'FACEBOOK';
-
   return [
     c?.name        || '',                              // A ชื่อผู้รับ
     (c?.tel        || '').replace(/[^0-9]/g, ''),     // B เบอร์โทร
@@ -139,11 +141,11 @@ async function buildRow(order: Order, selections: OrderItem[]): Promise<string[]
   ];
 }
 
-async function exportToExcel(targetOrders: Order[], selectionsMap: OrderSelections, filename: string) {
+async function exportToExcel(targetOrders: Order[], selectionsMap: OrderSelections, filename: string, channel: ChannelOption) {
   const aoa: string[][] = [HEADERS];
   for (const order of targetOrders) {
     const sels = selectionsMap[order.id] || makeItems(order);
-    aoa.push(await buildRow(order, sels));
+    aoa.push(await buildRow(order, sels, channel));
   }
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -181,6 +183,10 @@ export default function MyOrderExport() {
   const [searchExported,   setSearchExported]   = useState('');
   const [uploading,        setUploading]        = useState(false);
   const [uploadResult,     setUploadResult]     = useState<{ matched: number; notFound: number } | null>(null);
+  const [channel,          setChannel]          = useState<ChannelOption>('FACEBOOK');
+  const [previewing,       setPreviewing]       = useState(false);
+  const [showPreview,      setShowPreview]      = useState(false);
+  const [previewRows,      setPreviewRows]      = useState<PreviewRow[]>([]);
 
   useEffect(() => { loadOrders(); loadExportedOrders(); loadPrintedOrders(); }, []);
 
@@ -219,13 +225,38 @@ export default function MyOrderExport() {
     if (targetOrders.length === 0) return;
     setExporting(true);
     try {
-      await exportToExcel(targetOrders, orderSelections, `MyOrder_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+      await exportToExcel(targetOrders, orderSelections, `MyOrder_Export_${new Date().toISOString().split('T')[0]}.xlsx`, channel);
       if (updateStatus) {
         await supabase.from('orders').update({ order_status: 'กำลังคีย์' }).in('id', targetOrders.map(o => o.id));
         await Promise.all([loadOrders(), loadExportedOrders()]);
       }
     } catch (e) { console.error(e); alert('เกิดข้อผิดพลาดในการส่งออก'); }
-    finally { setExporting(false); }
+    finally { setExporting(false); setShowPreview(false); }
+  };
+
+  const handlePreview = async (targetOrders: Order[]) => {
+    if (targetOrders.length === 0) return;
+    setPreviewing(true);
+    try {
+      const rows: PreviewRow[] = [];
+      for (const order of targetOrders) {
+        const sels = orderSelections[order.id] || makeItems(order);
+        const row  = await buildRow(order, sels, channel);
+        rows.push({
+          order_no:     order.order_no,
+          name:         row[0],  tel:          row[1],
+          address:      row[2],  subdistrict:  row[3],
+          district:     row[4],  province:     row[5],
+          postal:       row[6],  remark:       row[8],
+          product_name: row[9],  color:        row[11],
+          w: row[12], l: row[13], h: row[14],  weight:    row[15],
+          pay_type:     row[16], amount:        row[17],
+          channel:      row[21],
+        });
+      }
+      setPreviewRows(rows);
+      setShowPreview(true);
+    } finally { setPreviewing(false); }
   };
 
   const handleDeleteExported = async (ids: string[]) => {
@@ -311,10 +342,23 @@ export default function MyOrderExport() {
               <input value={searchProduct} onChange={e=>setSearchProduct(e.target.value)} placeholder="ค้นหาชื่อสินค้า..."
                 className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
             </div>
+            {/* Col V — ช่องทางการจำหน่าย */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs text-slate-500 whitespace-nowrap">ช่องทาง (Col V):</span>
+              <select value={channel} onChange={e=>setChannel(e.target.value as ChannelOption)}
+                className="border rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-purple-300 bg-white">
+                {CHANNEL_OPTIONS.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <button onClick={()=>{const t=selectedPending.size>0?filteredPending.filter(o=>selectedPending.has(o.id)):filteredPending;handlePreview(t);}}
+              disabled={orders.length===0||previewing||exporting}
+              className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 text-sm">
+              {previewing?'กำลังโหลด...':'🔍 ดูตัวอย่าง'}
+            </button>
             <button onClick={()=>{const t=selectedPending.size>0?filteredPending.filter(o=>selectedPending.has(o.id)):filteredPending;handleExport(t,true);}}
-              disabled={orders.length===0||exporting}
+              disabled={orders.length===0||exporting||previewing}
               className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 flex items-center gap-2 disabled:opacity-50 text-sm">
-              <Download size={16}/> {exporting?'กำลังดึงข้อมูล...':`ส่งออก MyOrder (${pendingCount} รายการ)`}
+              <Download size={16}/> {exporting?'กำลังส่งออก...':`ส่งออก (${pendingCount} รายการ)`}
             </button>
           </div>
           <div className="shrink-0 mb-2 px-3 py-2 bg-purple-50 border border-purple-100 rounded-lg text-xs text-purple-700">
@@ -465,7 +509,96 @@ export default function MyOrderExport() {
         </>
       )}
 
-      {editingOrder&&(
+      {/* ── Preview Modal ────────────────────────────────────────────── */}
+      {showPreview && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-7xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">ตัวอย่างข้อมูลก่อนส่งออก</h3>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {previewRows.length} รายการ · ช่องทาง: <span className="font-bold text-purple-600">{channel}</span> · Sheet: <span className="font-mono text-xs">Template ใหม่_New102024</span>
+                </p>
+              </div>
+              <button onClick={()=>setShowPreview(false)} className="text-slate-400 hover:text-slate-600"><X size={22}/></button>
+            </div>
+            <div className="overflow-auto flex-1 p-2">
+              <table className="w-full text-xs border-collapse" style={{minWidth:'1100px'}}>
+                <thead className="sticky top-0 bg-slate-800 text-white">
+                  <tr>
+                    <th className="px-2 py-2 text-left whitespace-nowrap">A ชื่อผู้รับ</th>
+                    <th className="px-2 py-2 text-left whitespace-nowrap">B เบอร์โทร</th>
+                    <th className="px-2 py-2 text-left whitespace-nowrap">C ที่อยู่</th>
+                    <th className="px-2 py-2 text-left whitespace-nowrap">D ตำบล</th>
+                    <th className="px-2 py-2 text-left whitespace-nowrap">E อำเภอ</th>
+                    <th className="px-2 py-2 text-left whitespace-nowrap">F จังหวัด</th>
+                    <th className="px-2 py-2 text-center whitespace-nowrap">G ไปรษณีย์</th>
+                    <th className="px-2 py-2 text-left whitespace-nowrap">I หมายเหตุ</th>
+                    <th className="px-2 py-2 text-left whitespace-nowrap">J/K ชื่อสินค้า</th>
+                    <th className="px-2 py-2 text-left whitespace-nowrap">L สี</th>
+                    <th className="px-2 py-2 text-center whitespace-nowrap">M กว้าง</th>
+                    <th className="px-2 py-2 text-center whitespace-nowrap">N ยาว</th>
+                    <th className="px-2 py-2 text-center whitespace-nowrap">O สูง</th>
+                    <th className="px-2 py-2 text-right whitespace-nowrap">P น้ำหนัก</th>
+                    <th className="px-2 py-2 text-center whitespace-nowrap">Q ชำระ</th>
+                    <th className="px-2 py-2 text-right whitespace-nowrap">R ยอด</th>
+                    <th className="px-2 py-2 text-center whitespace-nowrap">V ช่องทาง</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewRows.map((row, i) => (
+                    <tr key={i} className={`border-b ${i%2===0?'bg-white':'bg-slate-50'} hover:bg-purple-50`}>
+                      <td className="px-2 py-1.5 font-medium whitespace-nowrap">{row.name}</td>
+                      <td className="px-2 py-1.5 font-mono whitespace-nowrap">{row.tel}</td>
+                      <td className="px-2 py-1.5 max-w-[140px] truncate text-slate-500">{row.address}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap text-slate-500">{row.subdistrict||<span className="text-red-400">ว่าง!</span>}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap text-slate-500">{row.district||<span className="text-red-400">ว่าง!</span>}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap text-slate-600">{row.province||<span className="text-red-400">ว่าง!</span>}</td>
+                      <td className="px-2 py-1.5 text-center font-mono">{row.postal||<span className="text-red-400">ว่าง!</span>}</td>
+                      <td className="px-2 py-1.5 max-w-[140px] truncate text-slate-400">{row.remark}</td>
+                      <td className="px-2 py-1.5 max-w-[160px] truncate text-slate-700 font-medium">{row.product_name}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap text-slate-500">{row.color}</td>
+                      <td className="px-2 py-1.5 text-center">{row.w}</td>
+                      <td className="px-2 py-1.5 text-center">{row.l}</td>
+                      <td className="px-2 py-1.5 text-center">{row.h}</td>
+                      <td className="px-2 py-1.5 text-right font-bold">{row.weight} kg</td>
+                      <td className="px-2 py-1.5 text-center">
+                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${row.pay_type==='COD'?'bg-orange-100 text-orange-700':'bg-green-100 text-green-700'}`}>
+                          {row.pay_type}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-bold text-slate-700">฿{Number(row.amount).toLocaleString()}</td>
+                      <td className="px-2 py-1.5 text-center">
+                        <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-[10px] font-bold">{row.channel}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-6 py-4 border-t flex justify-between items-center shrink-0">
+              <p className="text-sm text-slate-500">ตรวจสอบข้อมูลครบแล้วกด "ส่งออก" ได้เลย</p>
+              <div className="flex gap-3">
+                <button onClick={()=>setShowPreview(false)}
+                  className="px-4 py-2 bg-slate-200 rounded-lg text-sm hover:bg-slate-300">ปิด</button>
+                <button
+                  onClick={()=>{
+                    const t = selectedPending.size > 0
+                      ? filteredPending.filter(o => selectedPending.has(o.id))
+                      : filteredPending;
+                    handleExport(t, true);
+                  }}
+                  disabled={exporting}
+                  className="px-5 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 flex items-center gap-2 text-sm disabled:opacity-50">
+                  <Download size={16}/> {exporting ? 'กำลังส่งออก...' : `ส่งออก ${previewRows.length} รายการ`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal แก้ไขสินค้า ──────────────────────────────────────────── */}
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-lg w-full">
             <div className="flex justify-between items-center mb-4">
