@@ -235,13 +235,11 @@ export default function FlashExport() {
         }
         if (!dateStr) continue;
 
-        // จับคู่จาก orders ที่โหลดไว้แล้ว
+        // จับคู่จากชื่อ + เบอร์โทรเท่านั้น (ไม่ใช้วันที่ เพราะวันที่ในไฟล์ Flash = วันรับพัสดุ ≠ วันสั่งซื้อ)
         const match = (allOrders || []).find((o: any) => {
-          const orderDate = String(o.order_date || '').split('T')[0];
-          const cTel = String((o.customers as any)?.tel || '').replace(/\D/g, '');
+          const cTel  = String((o.customers as any)?.tel || '').replace(/\D/g, '');
           const cName = String((o.customers as any)?.name || '').trim();
-          // ต้องตรงวันที่ + (เบอร์ หรือ ชื่อ)
-          return orderDate === dateStr && (cTel === tel || cName === name);
+          return cTel === tel || cName === name;
         });
 
         if (match) {
