@@ -38,7 +38,7 @@ export default function MyOrderExport() {
     setLoading(true);
     try {
       const { data } = await supabase.from('orders').select('*, customers(*)')
-        .eq('route', 'A').eq('order_status', 'รอคีย์ออเดอร์').order('created_at', { ascending: false });
+        .in('route', ['A', 'C']).eq('order_status', 'รอคีย์ออเดอร์').order('created_at', { ascending: false });
       if (data) {
         setOrders(data);
         const sel: OrderSelections = {};
@@ -51,7 +51,7 @@ export default function MyOrderExport() {
   // Tab ส่งออกแล้ว: กำลังคีย์
   const loadExportedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .eq('route', 'A').eq('order_status', 'กำลังคีย์').order('updated_at', { ascending: false });
+      .in('route', ['A', 'C']).eq('order_status', 'กำลังคีย์').order('updated_at', { ascending: false });
     if (data) {
       setExportedOrders(data);
       const sel: any = {};
