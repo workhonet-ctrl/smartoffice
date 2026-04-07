@@ -55,24 +55,33 @@ export default function FinanceDaily() {
   const loadData = async () => {
     setLoading(true);
     try {
-      // ดึงออเดอร์ในช่วงวัน
       const { data: orders } = await supabase.from('orders')
         .select('id, order_no, order_date, channel, total_thb, shipping_thb, raw_prod, promo_ids, quantities, quantity, customers(name)')
         .gte('order_date', dateFrom).lte('order_date', dateTo)
         .neq('order_status', 'รอคีย์ออเดอร์')
         .order('order_date');
 
-      // ดึงค่าโฆษณา
       const { data: adCosts } = await supabase.from('finance_expense')
         .select('id, expense_date, channel, amount_thb, description')
         .eq('category', 'ค่าโฆษณา')
         .gte('expense_date', dateFrom).lte('expense_date', dateTo);
 
-      // ดึงรายจ่ายอื่นๆ
       const { data: otherExp } = await supabase.from('finance_expense')
         .select('id, expense_date, amount_thb')
         .neq('category', 'ค่าโฆษณา')
         .gte('expense_date', dateFrom).lte('expense_date', dateTo);
+
+      // ── Batch load promos ครั้งเดียว ──
+      const allPromoIds = [...new Set(
+        (orders || []).flatMap((o: any) => o.promo_ids || []).filter(Boolean)
+      )];
+      const promoMap: Record<string, any> = {};
+      if (allPromoIds.length > 0) {
+        const { data: promos } = await supabase.from('products_promo')
+          .select('id, ship_thb, box_id, bubble_id, boxes(price_thb), bubbles(price_thb, length_cm), products_master(cost_thb)')
+          .in('id', allPromoIds);
+        (promos || []).forEach((p: any) => { promoMap[p.id] = p; });
+      }
 
       // สร้าง range วันที่
       const dates: string[] = [];
@@ -85,51 +94,40 @@ export default function FinanceDaily() {
 
       const result: DaySummary[] = [];
       for (const date of dates) {
-        const dayOrders = (orders || []).filter((o: any) => {
-          const od = String(o.order_date || '').split('T')[0];
-          return od === date;
-        }) as DailyOrder[];
+        const dayOrders = (orders || []).filter((o: any) =>
+          String(o.order_date || '').split('T')[0] === date
+        ) as DailyOrder[];
 
-        // คำนวณค่าใช้จ่ายจากออเดอร์
         let costGoods = 0, costShip = 0, costBox = 0, costBubble = 0;
-
         for (const o of dayOrders) {
           if (!o.promo_ids?.length) continue;
           const qtys = String(o.quantities || o.quantity || '1').split('|');
-
           for (let i = 0; i < o.promo_ids.length; i++) {
-            const pid = o.promo_ids[i];
-            const { data: promo } = await supabase.from('products_promo')
-              .select('ship_thb, box_id, bubble_id, boxes(price_thb), bubbles(price_thb, length_cm), products_master(cost_thb)')
-              .eq('id', pid).maybeSingle();
-
+            const promo = promoMap[o.promo_ids[i]];
             if (!promo) continue;
-            const qty = Number(qtys[i]?.trim()) || 1;
-            const master = (promo as any).products_master;
-            const box    = (promo as any).boxes;
-            const bub    = (promo as any).bubbles;
-
-            if (master?.cost_thb) costGoods  += Number(master.cost_thb) * qty;
-            if (promo.ship_thb)   costShip   += Number((promo as any).ship_thb) * qty;
+            const qty    = Number(qtys[i]?.trim()) || 1;
+            const master = promo.products_master;
+            const box    = promo.boxes;
+            const bub    = promo.bubbles;
+            if (master?.cost_thb)  costGoods  += Number(master.cost_thb) * qty;
+            if (promo.ship_thb)    costShip   += Number(promo.ship_thb) * qty;
             if (i === 0 && box?.price_thb) costBox += Number(box.price_thb);
-            if (i === 0 && bub?.price_thb && bub?.length_cm > 0)
-              costBubble += Number(bub.price_thb);
+            if (i === 0 && bub?.price_thb && bub?.length_cm > 0) costBubble += Number(bub.price_thb);
           }
         }
 
-        const revenue  = dayOrders.reduce((s, o) => s + Number(o.total_thb), 0);
-        const costAd   = (adCosts || []).filter((a: any) => String(a.expense_date).split('T')[0] === date)
+        const revenue   = dayOrders.reduce((s, o) => s + Number(o.total_thb), 0);
+        const costAd    = (adCosts || []).filter((a: any) => String(a.expense_date).split('T')[0] === date)
           .reduce((s: number, a: any) => s + Number(a.amount_thb), 0);
         const costOther = (otherExp || []).filter((e: any) => String(e.expense_date).split('T')[0] === date)
           .reduce((s: number, e: any) => s + Number(e.amount_thb), 0);
-        const totalCost = costGoods + costShip + costBox + costBubble + costAd + costOther;
 
         result.push({
           date, orders: dayOrders, revenue,
           cost_goods: costGoods, cost_ship: costShip,
           cost_box: costBox, cost_bubble: costBubble,
           cost_ad: costAd, cost_other: costOther,
-          profit: revenue - totalCost,
+          profit: revenue - costGoods - costShip - costBox - costBubble - costAd - costOther,
         });
       }
       setSummaries(result);
