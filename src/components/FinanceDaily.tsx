@@ -132,8 +132,6 @@ export default function FinanceDaily() {
             if (i === 0 && box?.price_thb) oBox += Number(box.price_thb);
             if (i === 0 && bub?.price_thb && bub?.length_cm > 0) oBub += Number(bub.price_thb);
             const promoName  = master?.name || (o.raw_prod||'').split('|')[i]?.trim() || '-';
-            const packs      = Number(qtys[i]?.trim()) || 1;   // จำนวน promo ที่สั่ง
-            const pieces     = extractPieces(promo.name) * packs; // ชิ้นจริง = ชิ้น/แพ็ค × จำนวนแพ็ค
             const unitCost   = master?.cost_thb ? Number(master.cost_thb) : 0;
             items.push({ name: promoName, qty: pieces, cost: unitCost * pieces });
           }
