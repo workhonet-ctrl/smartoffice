@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import GraphicBoard from './GraphicBoard';
 import GraphicTasks from './GraphicTasks';
 import GraphicBrief from './GraphicBrief';
@@ -7,10 +8,10 @@ type MarketingPage = 'graphic' | 'ads' | 'admin';
 type GraphicSub = 'board' | 'tasks' | 'brief' | 'assets';
 
 const GRAPHIC_SUBS: { key: GraphicSub; label: string; emoji: string }[] = [
-  { key: 'board',  label: 'Board',        emoji: '📊' },
-  { key: 'tasks',  label: 'รายการงาน',    emoji: '📋' },
+  { key: 'board',  label: 'Board',          emoji: '📊' },
+  { key: 'tasks',  label: 'รายการงาน',      emoji: '📋' },
   { key: 'brief',  label: 'สร้างงาน/Brief', emoji: '🆕' },
-  { key: 'assets', label: 'คลัง Assets',  emoji: '🖼️' },
+  { key: 'assets', label: 'คลัง Assets',    emoji: '🖼️' },
 ];
 
 function Placeholder({ title }: { title: string }) {
@@ -29,13 +30,7 @@ export default function Marketing({ page }: { page: MarketingPage }) {
 }
 
 function GraphicModule() {
-  const sub = (new URLSearchParams(window.location.search).get('g') || 'board') as GraphicSub;
-  const setSub = (k: GraphicSub) => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('g', k);
-    window.history.pushState({}, '', url);
-    window.dispatchEvent(new Event('popstate'));
-  };
+  const [sub, setSub] = useState<GraphicSub>('board');
 
   return (
     <div className="flex flex-col h-screen p-6 pb-2">
