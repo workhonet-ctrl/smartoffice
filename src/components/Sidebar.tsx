@@ -18,6 +18,7 @@ import {
   ShoppingBag,
   Handshake,
   History,
+  TrendingUp,
 } from 'lucide-react';
 
 type PageKey =
@@ -25,6 +26,7 @@ type PageKey =
   | 'requisition' | 'stock' | 'purchase-order' | 'suppliers'
   | 'customers' | 'orders' | 'flash-export' | 'myorder-export'
   | 'finance-daily' | 'finance-monthly' | 'finance-yearly' | 'finance-expenses'
+  | 'marketing-graphic' | 'marketing-ads' | 'marketing-admin'
   | 'hr';
 
 type SidebarProps = {
@@ -48,7 +50,12 @@ const warehouseSubMenus: { key: PageKey; label: string; icon: any }[] = [
   { key: 'myorder-export', label: 'MyOrder Export',         icon: FileSpreadsheet },
 ];
 
-// เมนูย่อย การเงิน
+// เมนูย่อย การตลาด
+const marketingSubMenus: { key: PageKey; label: string; icon: any }[] = [
+  { key: 'marketing-graphic', label: 'กราฟฟิก',   icon: BarChart2 },
+  { key: 'marketing-ads',     label: 'โฆษณา ADS', icon: TrendingUp },
+  { key: 'marketing-admin',   label: 'แอดมิน',    icon: UserCog   },
+];
 const financeSubMenus: { key: PageKey; label: string; icon: any }[] = [
   { key: 'finance-daily',    label: 'บัญชีรายวัน',   icon: BarChart2 },
   { key: 'finance-monthly',  label: 'บัญชีรายเดือน', icon: BarChart2 },
@@ -65,9 +72,11 @@ const mainMenus: { key: PageKey; label: string; icon: any }[] = [
 export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
   const warehouseKeys = warehouseSubMenus.map(m => m.key);
   const financeKeys   = financeSubMenus.map(m => m.key);
+  const marketingKeys = marketingSubMenus.map(m => m.key);
 
   const [warehouseOpen, setWarehouseOpen] = useState(warehouseKeys.includes(activePage));
   const [financeOpen,   setFinanceOpen]   = useState(financeKeys.includes(activePage));
+  const [marketingOpen, setMarketingOpen] = useState(marketingKeys.includes(activePage));
 
   const handleSubMenu = (key: PageKey) => { setActivePage(key); setWarehouseOpen(true); };
 
@@ -145,6 +154,32 @@ export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
           {financeOpen && (
             <div className="ml-3 mt-1 space-y-0.5 border-l border-slate-700 pl-3">
               {financeSubMenus.map(menu => {
+                const Icon = menu.icon;
+                const active = activePage === menu.key;
+                return (
+                  <button key={menu.key} onClick={() => setActivePage(menu.key)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition text-sm
+                      ${active ? 'bg-cyan-700 text-white font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+                    <Icon size={17}/><span>{menu.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ── เมนูหลัก: ฝ่ายการตลาด (dropdown) ── */}
+        <div>
+          <button onClick={() => setMarketingOpen(o => !o)}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition
+              ${marketingKeys.includes(activePage) ? 'bg-slate-800 text-pink-400' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
+            <TrendingUp size={20}/>
+            <span className="flex-1">ฝ่ายการตลาด</span>
+            {marketingOpen ? <ChevronDown size={16} className="text-slate-400"/> : <ChevronRight size={16} className="text-slate-400"/>}
+          </button>
+          {marketingOpen && (
+            <div className="ml-3 mt-1 space-y-0.5 border-l border-slate-700 pl-3">
+              {marketingSubMenus.map(menu => {
                 const Icon = menu.icon;
                 const active = activePage === menu.key;
                 return (
