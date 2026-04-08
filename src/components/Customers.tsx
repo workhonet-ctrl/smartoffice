@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Search, Users, TrendingUp, ShoppingBag, ChevronDown, ChevronRight, X } from 'lucide-react';
+import { Search, Users, TrendingUp, ShoppingBag, ChevronDown, ChevronRight, X, Upload } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 type Customer = {
   id: string; name: string; facebook_name: string | null; tel: string;
@@ -34,6 +35,12 @@ export default function Customers() {
   const [custOrders, setCustOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [editTag, setEditTag]       = useState<{id: string; tag: string} | null>(null);
+  const [importing, setImporting]   = useState(false);
+  const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; type: 'success'|'error' } | null>(null);
+  const showToast = (msg: string, type: 'success'|'error' = 'success') => {
+    setToast({ msg, type }); setTimeout(() => setToast(null), 5000);
+  };
 
   useEffect(() => { loadCustomers(); }, []);
 
@@ -68,6 +75,56 @@ export default function Customers() {
     setEditTag(null);
   };
 
+  // ── นำเข้า Excel — Step 1 ──────────────────────────────────────────────
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setImporting(true); setImportResult(null);
+    try {
+      const buf  = await file.arrayBuffer();
+      const wb   = XLSX.read(buf);
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as Array<Array<string|number>>;
+
+      let added = 0, updated = 0, skipped = 0;
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i]; if (!row[6]) continue; // ต้องมีเบอร์โทร
+        const tel = String(row[6] || '').trim();
+        if (!tel) { skipped++; continue; }
+
+        const payload = {
+          name:          String(row[4]  || '').trim(),
+          facebook_name: String(row[5]  || '').trim() || null,
+          tel,
+          address:       String(row[7]  || '').trim() || null,
+          subdistrict:   String(row[8]  || '').trim() || null,
+          district:      String(row[9]  || '').trim() || null,
+          province:      String(row[10] || '').trim() || null,
+          postal_code:   String(row[11] || '').trim() || null,
+          channel:       String(row[2]  || '').trim() || null,
+        };
+        if (!payload.name) { skipped++; continue; }
+
+        // ค้นหาด้วยเบอร์โทร
+        const { data: existing } = await supabase
+          .from('customers').select('id').eq('tel', tel).maybeSingle();
+
+        if (existing?.id) {
+          await supabase.from('customers').update(payload).eq('id', existing.id);
+          updated++;
+        } else {
+          const { error } = await supabase.from('customers').insert([{ ...payload, tag: 'ใหม่' }]);
+          if (error) { skipped++; } else { added++; }
+        }
+      }
+      setImportResult({ added, updated, skipped });
+      showToast(`✓ เพิ่มใหม่ ${added} · อัพเดต ${updated} · ข้าม ${skipped}`);
+      loadCustomers();
+    } catch (err) {
+      console.error(err);
+      showToast('เกิดข้อผิดพลาดในการนำเข้า', 'error');
+    } finally { setImporting(false); e.target.value = ''; }
+  };
+
   const filtered = customers.filter(c => {
     const matchTag = tagFilter === 'ทั้งหมด' || c.tag === tagFilter;
     const matchSearch = !search || c.name.toLowerCase().includes(search.toLowerCase())
@@ -90,13 +147,34 @@ export default function Customers() {
   return (
     <div className="flex flex-col h-screen p-6 pb-2">
       {/* Header */}
-      <div className="shrink-0 mb-4 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-cyan-500 flex items-center justify-center">
-          <Users size={20} className="text-white"/>
+      <div className="shrink-0 mb-4 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-cyan-500 flex items-center justify-center">
+            <Users size={20} className="text-white"/>
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-2xl font-bold text-slate-800">ลูกค้า</h2>
+              <span className="px-2 py-0.5 bg-cyan-100 text-cyan-700 rounded-full text-xs font-bold">Step 1</span>
+            </div>
+            <p className="text-xs text-slate-400">{customers.length} คน · นำเข้าก่อน แล้วไปหน้าออเดอร์ Step 2</p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">ลูกค้า</h2>
-          <p className="text-xs text-slate-400">{customers.length} คน · อัพเดตอัตโนมัติจากออเดอร์</p>
+        {/* ปุ่ม นำเข้า Excel */}
+        <div className="flex items-center gap-3">
+          {importResult && (
+            <div className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+              ✓ เพิ่มใหม่ <strong>{importResult.added}</strong> · อัพเดต <strong>{importResult.updated}</strong>
+              {importResult.skipped > 0 && <span className="text-slate-400"> · ข้าม {importResult.skipped}</span>}
+            </div>
+          )}
+          <label className={`px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-semibold cursor-pointer shadow-sm transition
+            ${importing ? 'bg-slate-200 text-slate-400' : 'bg-cyan-500 text-white hover:bg-cyan-600'}`}>
+            <Upload size={16}/>
+            {importing ? 'กำลังนำเข้า...' : '📥 นำเข้า Excel (Step 1)'}
+            <input type="file" accept=".xlsx,.xls" className="hidden"
+              onChange={handleImportExcel} disabled={importing}/>
+          </label>
         </div>
       </div>
 
