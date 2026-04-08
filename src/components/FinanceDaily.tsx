@@ -50,6 +50,8 @@ export default function FinanceDaily() {
   const [summaries, setSummaries] = useState<DaySummary[]>([]);
   const [loading, setLoading]     = useState(false);
   const [expanded, setExpanded]   = useState<Set<string>>(new Set());
+  // Step 3: filter ลูกค้า
+  const [filterCustomer, setFilterCustomer] = useState('');
 
   // Ad cost form
   const [showAdModal, setShowAdModal] = useState(false);
@@ -207,9 +209,29 @@ export default function FinanceDaily() {
 
   const toggle = (date: string) => setExpanded(p => { const n = new Set(p); n.has(date)?n.delete(date):n.add(date); return n; });
 
-  const totRevenue = summaries.reduce((s,d) => s+d.revenue, 0);
-  const totProfit  = summaries.reduce((s,d) => s+d.profit, 0);
-  const totOrders  = summaries.reduce((s,d) => s+d.orders.length, 0);
+  // Step 3: กรองตามลูกค้า
+  const filteredSummaries = filterCustomer.trim()
+    ? summaries.map(day => ({
+        ...day,
+        orders: day.orders.filter(o =>
+          (o.customers?.name || '').toLowerCase().includes(filterCustomer.toLowerCase())
+        ),
+      })).map(day => ({
+        ...day,
+        revenue:    day.orders.reduce((s, o) => s + Number(o.total_thb), 0),
+        cost_goods: day.orders.reduce((s, o) => s + (o._cost_goods || 0), 0),
+        cost_ship:  day.orders.reduce((s, o) => s + (o._cost_ship  || 0), 0),
+        cost_box:   day.orders.reduce((s, o) => s + (o._cost_box   || 0), 0),
+        cost_bubble:day.orders.reduce((s, o) => s + (o._cost_bubble|| 0), 0),
+        profit: day.orders.reduce((s, o) => s + Number(o.total_thb), 0)
+               - day.orders.reduce((s, o) => s + (o._cost_goods||0) + (o._cost_ship||0) + (o._cost_box||0) + (o._cost_bubble||0), 0)
+               - day.cost_ad - day.cost_other,
+      })).filter(day => day.orders.length > 0)
+    : summaries;
+
+  const totRevenue = filteredSummaries.reduce((s,d) => s+d.revenue, 0);
+  const totProfit  = filteredSummaries.reduce((s,d) => s+d.profit, 0);
+  const totOrders  = filteredSummaries.reduce((s,d) => s+d.orders.length, 0);
 
   return (
     <div className="flex flex-col h-full">
@@ -220,6 +242,17 @@ export default function FinanceDaily() {
         <span className="text-slate-400">–</span>
         <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
           className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
+        {/* Step 3: filter ลูกค้า */}
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">👤</span>
+          <input type="text" value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)}
+            placeholder="กรองตามลูกค้า (Step 3)..."
+            className="pl-8 pr-4 py-2 border rounded-lg text-sm w-52 focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
+        </div>
+        {filterCustomer && (
+          <button onClick={() => setFilterCustomer('')}
+            className="px-2 py-2 bg-slate-100 text-slate-500 rounded-lg text-xs hover:bg-slate-200">✕ ล้าง</button>
+        )}
         <button onClick={loadData} disabled={loading}
           className="px-3 py-2 bg-slate-200 rounded-lg hover:bg-slate-300 flex items-center gap-2 text-sm">
           <RefreshCw size={13} className={loading?'animate-spin':''}/> โหลด
@@ -278,7 +311,7 @@ export default function FinanceDaily() {
           </thead>
           <tbody>
             {loading && <tr><td colSpan={10} className="p-8 text-center text-slate-400"><RefreshCw size={16} className="animate-spin inline mr-2"/>คำนวณ...</td></tr>}
-            {!loading && summaries.map(day => (
+            {!loading && filteredSummaries.map(day => (
               <>
                 <tr key={day.date}
                   onClick={() => day.orders.length > 0 && toggle(day.date)}
@@ -359,17 +392,20 @@ export default function FinanceDaily() {
               </>
             ))}
           </tbody>
-          {!loading && summaries.length > 0 && (
+          {!loading && filteredSummaries.length > 0 && (
             <tfoot className="bg-slate-50 border-t-2 border-slate-300 sticky bottom-0">
               <tr>
-                <td colSpan={2} className="p-3 font-semibold text-slate-600 text-sm">รวม {summaries.length} วัน</td>
+                <td colSpan={2} className="p-3 font-semibold text-slate-600 text-sm">
+                  รวม {filteredSummaries.length} วัน
+                  {filterCustomer && <span className="ml-2 text-emerald-600">· ลูกค้า: {filterCustomer}</span>}
+                </td>
                 <td className="p-3 text-center font-bold">{totOrders}</td>
                 <td className="p-3 text-right font-bold text-emerald-600">฿{fmt(totRevenue)}</td>
-                <td className="p-3 text-right font-bold">฿{fmt(summaries.reduce((s,d)=>s+d.cost_goods,0))}</td>
-                <td className="p-3 text-right font-bold">฿{fmt(summaries.reduce((s,d)=>s+d.cost_ship,0))}</td>
-                <td className="p-3 text-right font-bold">฿{fmt(summaries.reduce((s,d)=>s+d.cost_box+d.cost_bubble,0))}</td>
-                <td className="p-3 text-right font-bold text-orange-600">฿{fmt(summaries.reduce((s,d)=>s+d.cost_ad,0))}</td>
-                <td className="p-3 text-right font-bold">฿{fmt(summaries.reduce((s,d)=>s+d.cost_other,0))}</td>
+                <td className="p-3 text-right font-bold">฿{fmt(filteredSummaries.reduce((s,d)=>s+d.cost_goods,0))}</td>
+                <td className="p-3 text-right font-bold">฿{fmt(filteredSummaries.reduce((s,d)=>s+d.cost_ship,0))}</td>
+                <td className="p-3 text-right font-bold">฿{fmt(filteredSummaries.reduce((s,d)=>s+d.cost_box+d.cost_bubble,0))}</td>
+                <td className="p-3 text-right font-bold text-orange-600">฿{fmt(filteredSummaries.reduce((s,d)=>s+d.cost_ad,0))}</td>
+                <td className="p-3 text-right font-bold">฿{fmt(filteredSummaries.reduce((s,d)=>s+d.cost_other,0))}</td>
                 <td className={`p-3 text-right font-bold text-lg ${totProfit>=0?'text-teal-600':'text-red-600'}`}>
                   {totProfit<0?'-':''}฿{fmt(Math.abs(totProfit))}
                 </td>
