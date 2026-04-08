@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { TOURIST_ZIPS } from '../lib/types';
 import { Search, Users, TrendingUp, ShoppingBag, ChevronDown, ChevronRight, X, Upload } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -75,7 +76,7 @@ export default function Customers() {
     setEditTag(null);
   };
 
-  // ── นำเข้า Excel — Step 1 ──────────────────────────────────────────────
+  // ── นำเข้า Excel ครั้งเดียว → บันทึก ลูกค้า + ออเดอร์ พร้อมกัน ─────────
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     setImporting(true); setImportResult(null);
@@ -85,14 +86,30 @@ export default function Customers() {
       const ws   = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as Array<Array<string|number>>;
 
-      let added = 0, updated = 0, skipped = 0;
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i]; if (!row[6]) continue; // ต้องมีเบอร์โทร
-        const tel = String(row[6] || '').trim();
-        if (!tel) { skipped++; continue; }
+      let custAdded = 0, custUpdated = 0, orderAdded = 0, orderSkipped = 0;
 
-        const payload = {
-          name:          String(row[4]  || '').trim(),
+      // ── 1. Auto-map product names ────────────────────────────────────────
+      const rawProdsAll = [...new Set(
+        rows.slice(1)
+          .filter(r => r[6])
+          .flatMap(r => String(r[14] || '').split('|').map(s => s.trim()).filter(Boolean))
+      )];
+      const autoPromoMap: Record<string, string> = {};
+      for (const rp of rawProdsAll) {
+        const { data: mp } = await supabase.from('product_mappings').select('promo_id').eq('raw_name', rp).maybeSingle();
+        if (mp?.promo_id) autoPromoMap[rp] = mp.promo_id;
+      }
+
+      // ── 2. บันทึกทีละแถว ─────────────────────────────────────────────────
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const tel = String(row[6] || '').trim();
+        const name = String(row[4] || '').trim();
+        if (!tel || !name) continue;
+
+        // ── บันทึกลูกค้า ──
+        const custPayload = {
+          name,
           facebook_name: String(row[5]  || '').trim() || null,
           tel,
           address:       String(row[7]  || '').trim() || null,
@@ -102,27 +119,112 @@ export default function Customers() {
           postal_code:   String(row[11] || '').trim() || null,
           channel:       String(row[2]  || '').trim() || null,
         };
-        if (!payload.name) { skipped++; continue; }
 
-        // ค้นหาด้วยเบอร์โทร
-        const { data: existing } = await supabase
-          .from('customers').select('id').eq('tel', tel).maybeSingle();
+        let customerId: string | null = null;
+        const { data: existing } = await supabase.from('customers')
+          .select('id').eq('tel', tel).maybeSingle();
 
         if (existing?.id) {
-          await supabase.from('customers').update(payload).eq('id', existing.id);
-          updated++;
+          await supabase.from('customers').update(custPayload).eq('id', existing.id);
+          customerId = existing.id;
+          custUpdated++;
         } else {
-          const { error } = await supabase.from('customers').insert([{ ...payload, tag: 'ใหม่' }]);
-          if (error) { skipped++; } else { added++; }
+          const { data: nc } = await supabase.from('customers')
+            .insert([{ ...custPayload, tag: 'ใหม่' }]).select('id').single();
+          customerId = nc?.id ?? null;
+          if (customerId) custAdded++;
         }
+
+        if (!customerId) continue;
+
+        // ── บันทึกออเดอร์ (ถ้ามีเลขออเดอร์) ──
+        const orderNo = String(row[1] || '').trim();
+        if (!orderNo) continue;
+
+        // เช็คออเดอร์ซ้ำ
+        const { data: existOrd } = await supabase.from('orders')
+          .select('id').eq('order_no', orderNo).maybeSingle();
+        if (existOrd?.id) { orderSkipped++; continue; }
+
+        // parse วันที่ + เวลา
+        const rawDate = String(row[3] || '');
+        const orderDate = rawDate
+          ? new Date(rawDate).toISOString().split('T')[0]
+          : new Date().toISOString().split('T')[0];
+        const timeMatch = rawDate.match(/(\d{1,2}):(\d{2})/);
+        const orderTime = timeMatch
+          ? `${timeMatch[1].padStart(2,'0')}:${timeMatch[2]}`
+          : '';
+
+        // parse tracking + courier
+        const rawTrack = String(row[17] || '');
+        const trackMatch = rawTrack.match(/^([^\s(]+)/);
+        const trackingNo = trackMatch ? trackMatch[1] : '';
+        const courierMatch = rawTrack.match(/\(([^)]+)\)/);
+        let courier = '';
+        if (courierMatch) {
+          const c = courierMatch[1].toUpperCase();
+          if (c.includes('THAI_POST') || c.includes('EMS')) courier = 'ไปรษณีย์';
+          else if (c.includes('FLASH')) courier = 'FLASH';
+          else courier = courierMatch[1];
+        }
+
+        // จับคู่สินค้า
+        const rawProds = String(row[14] || '').split('|').map(s => s.trim()).filter(Boolean);
+        const promoIds: string[] = rawProds.map(rp => autoPromoMap[rp] || '').filter(Boolean);
+        const quantities = String(row[15] || '1');
+        const weightKg   = (Number(row[16]) || 0) / 1000;
+        const postal      = String(row[11] || '').trim();
+        const hasTrack    = trackingNo.length > 3;
+        const isTourist   = TOURIST_ZIPS.has(postal);
+        const route       = hasTrack ? 'A' : isTourist ? 'C' : 'B';
+        const orderStatus = hasTrack ? 'รอแพ็ค' : 'รอคีย์ออเดอร์';
+
+        const { error: oe } = await supabase.from('orders').insert([{
+          order_no:       orderNo,
+          customer_id:    customerId,
+          channel:        String(row[2] || '').trim() || null,
+          order_date:     orderDate,
+          order_time:     orderTime || null,
+          raw_prod:       String(row[14] || '').trim() || null,
+          promo_ids:      promoIds,
+          quantity:       quantities.split('|').reduce((s, n) => s + (Number(n.trim()) || 1), 0),
+          quantities,
+          weight_kg:      weightKg,
+          tracking_no:    hasTrack ? trackingNo : null,
+          courier:        courier || null,
+          total_thb:      Number(row[21]) || 0,
+          payment_method: String(row[22] || 'COD').trim(),
+          payment_status: String(row[24] || 'รอชำระเงิน').trim(),
+          order_status:   orderStatus,
+          route,
+        }]);
+
+        if (oe && oe.code !== '23505') console.error('order insert error:', oe);
+        else if (!oe) orderAdded++;
+        else orderSkipped++;
       }
-      setImportResult({ added, updated, skipped });
-      showToast(`✓ เพิ่มใหม่ ${added} · อัพเดต ${updated} · ข้าม ${skipped}`);
+
+      setImportResult({ added: custAdded, updated: custUpdated, skipped: orderSkipped });
+      showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded} ข้าม ${orderSkipped}`);
       loadCustomers();
     } catch (err) {
       console.error(err);
       showToast('เกิดข้อผิดพลาดในการนำเข้า', 'error');
     } finally { setImporting(false); e.target.value = ''; }
+  };
+
+  const handleDelete = async (c: Customer, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (c.order_count > 0) {
+      if (!confirm(`ลูกค้า "${c.name}" มี ${c.order_count} ออเดอร์\nถ้าลบจะไม่กระทบออเดอร์เดิม แต่จะหาชื่อไม่เจอ\nยืนยันลบ?`)) return;
+    } else {
+      if (!confirm(`ยืนยันลบลูกค้า "${c.name}"?`)) return;
+    }
+    const { error } = await supabase.from('customers').delete().eq('id', c.id);
+    if (error) { showToast('ลบไม่สำเร็จ: ' + error.message, 'error'); return; }
+    setCustomers(p => p.filter(x => x.id !== c.id));
+    showToast(`✓ ลบ "${c.name}" แล้ว`);
   };
 
   const filtered = customers.filter(c => {
@@ -155,23 +257,22 @@ export default function Customers() {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-2xl font-bold text-slate-800">ลูกค้า</h2>
-              <span className="px-2 py-0.5 bg-cyan-100 text-cyan-700 rounded-full text-xs font-bold">Step 1</span>
             </div>
-            <p className="text-xs text-slate-400">{customers.length} คน · นำเข้าก่อน แล้วไปหน้าออเดอร์ Step 2</p>
+            <p className="text-xs text-slate-400">{customers.length} คน · นำเข้า Excel ครั้งเดียว → บันทึกลูกค้า + ออเดอร์พร้อมกัน</p>
           </div>
         </div>
         {/* ปุ่ม นำเข้า Excel */}
         <div className="flex items-center gap-3">
           {importResult && (
-            <div className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-              ✓ เพิ่มใหม่ <strong>{importResult.added}</strong> · อัพเดต <strong>{importResult.updated}</strong>
-              {importResult.skipped > 0 && <span className="text-slate-400"> · ข้าม {importResult.skipped}</span>}
+            <div className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 space-y-0.5">
+              <div>👥 ลูกค้า: เพิ่ม <strong>{importResult.added}</strong> · อัพเดต <strong>{importResult.updated}</strong></div>
+              <div>📋 ออเดอร์: บันทึก <strong>{importResult.added + importResult.updated}</strong> · ข้าม {importResult.skipped} ซ้ำ</div>
             </div>
           )}
           <label className={`px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-semibold cursor-pointer shadow-sm transition
             ${importing ? 'bg-slate-200 text-slate-400' : 'bg-cyan-500 text-white hover:bg-cyan-600'}`}>
             <Upload size={16}/>
-            {importing ? 'กำลังนำเข้า...' : '📥 นำเข้า Excel (Step 1)'}
+            {importing ? 'กำลังนำเข้า...' : '📥 นำเข้า Excel'}
             <input type="file" accept=".xlsx,.xls" className="hidden"
               onChange={handleImportExcel} disabled={importing}/>
           </label>
@@ -238,11 +339,12 @@ export default function Customers() {
               <th className="p-3 text-center whitespace-nowrap">ออเดอร์</th>
               <th className="p-3 text-right whitespace-nowrap">ยอดรวม (฿)</th>
               <th className="p-3 text-center whitespace-nowrap">แท็ก</th>
+              <th className="p-3 w-10"/>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={8} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
-            {!loading && filtered.length === 0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">ไม่พบลูกค้า</td></tr>}
+            {loading && <tr><td colSpan={9} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
+            {!loading && filtered.length === 0 && <tr><td colSpan={9} className="p-8 text-center text-slate-400">ไม่พบลูกค้า</td></tr>}
             {filtered.map(c => (
               <>
                 <tr key={c.id} onClick={() => toggleExpand(c.id)}
@@ -269,12 +371,19 @@ export default function Customers() {
                       {c.tag || 'ใหม่'}
                     </button>
                   </td>
+                  <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
+                    <button onClick={e => handleDelete(c, e)}
+                      className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                      title="ลบลูกค้า">
+                      🗑
+                    </button>
+                  </td>
                 </tr>
 
                 {/* ExpandedRow: รายละเอียด + ประวัติออเดอร์ */}
                 {expanded === c.id && (
                   <tr key={`${c.id}-detail`}>
-                    <td colSpan={8} className="bg-cyan-50 px-6 py-4 border-b">
+                    <td colSpan={9} className="bg-cyan-50 px-6 py-4 border-b">
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                         <div>
                           <div className="text-xs text-slate-400 mb-0.5">ที่อยู่</div>
@@ -344,6 +453,16 @@ export default function Customers() {
               <button onClick={saveTag} className="flex-1 py-2 bg-cyan-500 text-white rounded-lg text-sm hover:bg-cyan-600">บันทึก</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-4 rounded-xl shadow-2xl text-white text-sm font-medium
+          ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500'}`}
+          style={{minWidth:'260px'}}>
+          <span>{toast.msg}</span>
+          <button onClick={() => setToast(null)} className="ml-auto opacity-70 hover:opacity-100 text-lg leading-none">×</button>
         </div>
       )}
     </div>
