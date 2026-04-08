@@ -1,21 +1,43 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, X, Clock, CheckCircle, User, Search } from 'lucide-react';
+import { Plus, X, Clock, CheckCircle, User, Search, Edit2 } from 'lucide-react';
 
 type Task = {
   id: string; title: string; task_type: string; channel: string | null;
   size: string | null; deadline: string | null; status: string;
   source: string; brief: string | null; assigned_to: string | null;
-  created_at: string; updated_at?: string;
+  created_at: string; updated_at?: string; revision_note?: string | null;
 };
 
 type Tab = 'board' | 'list';
 
+// ── ADS Board columns ─────────────────────────────────────────────────────
+// งานที่ ADS สั่ง Graphic ไม่แสดงบน Board จนกว่า Graphic จะส่งมา รอรีวิว
 const ADS_COLUMNS = [
-  { key: 'รอดำเนินการ', label: 'รอดำเนินการ', color: 'bg-purple-50',  badge: 'bg-purple-400 text-white',  statuses: ['รอรีวิว'],                    desc: 'กราฟฟิกส่งงานรอ ADS อนุมัติ' },
-  { key: 'กำลังทำ',     label: 'กำลังทำ',     color: 'bg-blue-50',    badge: 'bg-blue-400 text-white',    statuses: ['รอดำเนินการ', 'กำลังทำ'],      desc: 'กราฟฟิกกำลังดำเนินการ' },
-  { key: 'ตรวจงาน',    label: 'ตรวจงาน',    color: 'bg-orange-50',  badge: 'bg-orange-400 text-white',  statuses: ['อนุมัติแล้ว'],                  desc: 'ADS อนุมัติแล้ว กำลังรัน' },
-  { key: 'สำเร็จ',     label: 'สำเร็จ',     color: 'bg-green-50',   badge: 'bg-green-500 text-white',   statuses: ['เก็บถาวร'],                     desc: 'เสร็จสมบูรณ์' },
+  {
+    key: 'รอดำเนินการ', label: 'รอดำเนินการ',
+    color: 'bg-purple-50', badge: 'bg-purple-400 text-white',
+    statuses: ['รอรีวิว'],   // Graphic ส่งมา → ADS รออนุมัติ
+    desc: 'Graphic ส่งงานมา รอ ADS ตรวจ',
+  },
+  {
+    key: 'กำลังทำ', label: 'กำลังทำ',
+    color: 'bg-blue-50', badge: 'bg-blue-400 text-white',
+    statuses: ['อนุมัติแล้ว'], // ADS อนุมัติแล้ว กำลังรันโฆษณา
+    desc: 'ADS อนุมัติแล้ว กำลังรันโฆษณา',
+  },
+  {
+    key: 'ตรวจงาน', label: 'ตรวจงาน',
+    color: 'bg-orange-50', badge: 'bg-orange-400 text-white',
+    statuses: ['ตรวจงาน'],
+    desc: 'ตรวจสอบผลลัพธ์การโฆษณา',
+  },
+  {
+    key: 'สำเร็จ', label: 'สำเร็จ',
+    color: 'bg-green-50', badge: 'bg-green-500 text-white',
+    statuses: ['เก็บถาวร'],
+    desc: 'งานเสร็จสมบูรณ์',
+  },
 ];
 
 function getAdsColumn(status: string) {
@@ -27,7 +49,7 @@ function getAdsColumn(status: string) {
 
 const TYPE_OPTIONS = ['รูปภาพ', 'วิดีโอ', 'Story', 'Reel', 'Banner', 'อื่นๆ'];
 const CHAN_OPTIONS = ['Facebook', 'Instagram', 'TikTok', 'LINE OA', 'Shopee', 'Lazada'];
-const ALL_STATUSES = ['รอดำเนินการ', 'กำลังทำ', 'รอรีวิว', 'อนุมัติแล้ว', 'เก็บถาวร'];
+const ALL_STATUSES = ['รอดำเนินการ', 'กำลังทำ', 'รอรีวิว', 'อนุมัติแล้ว', 'ตรวจงาน', 'เก็บถาวร'];
 
 function isNear(d: string | null) {
   if (!d) return false;
@@ -39,6 +61,7 @@ const STATUS_COLOR: Record<string, string> = {
   'กำลังทำ':    'bg-blue-100 text-blue-700',
   'รอรีวิว':    'bg-orange-100 text-orange-700',
   'อนุมัติแล้ว': 'bg-green-100 text-green-700',
+  'ตรวจงาน':   'bg-yellow-100 text-yellow-700',
   'เก็บถาวร':   'bg-gray-100 text-gray-500',
 };
 
@@ -58,24 +81,31 @@ function fmtDate(d: string | null | undefined, short = false) {
 }
 
 export default function MarketingAds() {
-  const [tab,  setTab]    = useState<Tab>('board');
+  const [tab, setTab]     = useState<Tab>('board');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading]     = useState(true);
   const [selected, setSelected]   = useState<Task | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [saving, setSaving]       = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const [search,       setSearch]       = useState('');
+  // ── Revision modal ────────────────────────────────────────────────────
+  const [revisionTask, setRevisionTask] = useState<Task | null>(null);
+  const [revisionNote, setRevisionNote] = useState('');
+  const [savingRevision, setSavingRevision] = useState(false);
+
+  // ── List filters ──────────────────────────────────────────────────────
+  const [search, setSearch]             = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterAdsCol, setFilterAdsCol] = useState('');
 
-  const [fTitle,    setFTitle]    = useState('');
-  const [fType,     setFType]     = useState('รูปภาพ');
-  const [fChannel,  setFChannel]  = useState('Facebook');
-  const [fSize,     setFSize]     = useState('');
+  // ── Create form ───────────────────────────────────────────────────────
+  const [fTitle, setFTitle]       = useState('');
+  const [fType, setFType]         = useState('รูปภาพ');
+  const [fChannel, setFChannel]   = useState('Facebook');
+  const [fSize, setFSize]         = useState('');
   const [fDeadline, setFDeadline] = useState('');
-  const [fBrief,    setFBrief]    = useState('');
-  const [fAssign,   setFAssign]   = useState('');
+  const [fBrief, setFBrief]       = useState('');
+  const [fAssign, setFAssign]     = useState('');
 
   useEffect(() => { load(); }, []);
 
@@ -104,6 +134,7 @@ export default function MarketingAds() {
     } finally { setSaving(false); }
   };
 
+  // ── อนุมัติ: รอรีวิว → อนุมัติแล้ว (ADS Board: กำลังทำ) ──────────────
   const handleApprove = async (task: Task) => {
     await supabase.from('graphic_tasks')
       .update({ status: 'อนุมัติแล้ว', updated_at: new Date().toISOString() }).eq('id', task.id);
@@ -111,12 +142,40 @@ export default function MarketingAds() {
     if (selected?.id === task.id) setSelected({ ...task, status: 'อนุมัติแล้ว' });
   };
 
+  // ── แก้ไข: รอรีวิว → กำลังทำ (Graphic) + บันทึกโน้ต ─────────────────
+  const handleRevisionSubmit = async () => {
+    if (!revisionTask || !revisionNote.trim()) return;
+    setSavingRevision(true);
+    try {
+      await supabase.from('graphic_tasks').update({
+        status: 'กำลังทำ',               // ส่งกลับ Graphic
+        revision_note: revisionNote.trim(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', revisionTask.id);
+      setTasks(p => p.map(t => t.id === revisionTask.id
+        ? { ...t, status: 'กำลังทำ', revision_note: revisionNote.trim() }
+        : t));
+      if (selected?.id === revisionTask.id) setSelected(null);
+      setRevisionTask(null);
+      setRevisionNote('');
+    } finally { setSavingRevision(false); }
+  };
+
+  // ── เสร็จสมบูรณ์ ─────────────────────────────────────────────────────
   const handleComplete = async (task: Task) => {
     if (!confirm('ยืนยันทำเครื่องหมายเป็นสำเร็จ?')) return;
     await supabase.from('graphic_tasks')
       .update({ status: 'เก็บถาวร', updated_at: new Date().toISOString() }).eq('id', task.id);
     setTasks(p => p.map(t => t.id === task.id ? { ...t, status: 'เก็บถาวร' } : t));
     setSelected(null);
+  };
+
+  // ── ย้ายไป ตรวจงาน (จาก กำลังทำ) ────────────────────────────────────
+  const handleMoveToCheck = async (task: Task) => {
+    await supabase.from('graphic_tasks')
+      .update({ status: 'ตรวจงาน', updated_at: new Date().toISOString() }).eq('id', task.id);
+    setTasks(p => p.map(t => t.id === task.id ? { ...t, status: 'ตรวจงาน' } : t));
+    if (selected?.id === task.id) setSelected({ ...task, status: 'ตรวจงาน' });
   };
 
   const filteredList = tasks.filter(t => {
@@ -131,6 +190,11 @@ export default function MarketingAds() {
 
   if (loading) return <div className="p-8 text-slate-400 text-center">กำลังโหลด...</div>;
 
+  // Board แสดงเฉพาะงานที่ Graphic ส่งมาแล้ว (ไม่รวมงานที่ Graphic ยังทำอยู่)
+  const boardTasks = tasks.filter(t =>
+    ['รอรีวิว', 'อนุมัติแล้ว', 'ตรวจงาน', 'เก็บถาวร'].includes(t.status)
+  );
+
   return (
     <div className="flex flex-col h-full">
       {/* Header + tabs */}
@@ -141,7 +205,7 @@ export default function MarketingAds() {
               className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab === key ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
               {label}
               <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab === key ? 'bg-purple-100 text-purple-700' : 'bg-slate-200 text-slate-500'}`}>
-                {tasks.length}
+                {tab === key ? (key === 'board' ? boardTasks.length : filteredList.length) : tasks.length}
               </span>
             </button>
           ))}
@@ -152,13 +216,13 @@ export default function MarketingAds() {
         </button>
       </div>
 
-      {/* Board tab */}
+      {/* ── Board tab ─────────────────────────────────────────────────── */}
       {tab === 'board' && (
         <div className="flex gap-3 flex-1 overflow-x-auto overflow-y-hidden pb-2">
           {ADS_COLUMNS.map(col => {
-            const colTasks = tasks.filter(t => col.statuses.includes(t.status));
+            const colTasks = boardTasks.filter(t => col.statuses.includes(t.status));
             return (
-              <div key={col.key} className="flex flex-col min-w-[260px] w-[260px] shrink-0">
+              <div key={col.key} className="flex flex-col min-w-[280px] w-[280px] shrink-0">
                 <div className="flex items-center justify-between mb-2 px-1">
                   <div>
                     <span className="font-semibold text-sm text-slate-700">{col.label}</span>
@@ -178,10 +242,16 @@ export default function MarketingAds() {
                         )}
                       </div>
                       {t.task_type && <div className="text-xs text-slate-400 mb-1">{t.task_type}{t.channel ? ` · ${t.channel}` : ''}</div>}
+                      {/* แสดง revision note ถ้ามี */}
+                      {t.revision_note && (
+                        <div className="bg-orange-50 border border-orange-200 rounded px-2 py-1 text-[10px] text-orange-700 mb-2">
+                          ✏ แก้ไข: {t.revision_note}
+                        </div>
+                      )}
                       <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded-full font-bold mb-2 ${STATUS_COLOR[t.status] || 'bg-slate-100 text-slate-500'}`}>
                         {t.status}
                       </span>
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between mb-2">
                         {t.assigned_to
                           ? <span className="flex items-center gap-1 text-[10px] text-slate-500"><User size={10} />{t.assigned_to}</span>
                           : <span className="text-[10px] text-slate-300">ยังไม่มอบหมาย</span>}
@@ -191,10 +261,31 @@ export default function MarketingAds() {
                           </span>
                         )}
                       </div>
+                      {/* ปุ่ม อนุมัติ + แก้ไข สำหรับงานที่ Graphic ส่งมา */}
                       {t.status === 'รอรีวิว' && (
-                        <button onClick={e => { e.stopPropagation(); handleApprove(t); }}
-                          className="mt-2 w-full py-1.5 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold flex items-center justify-center gap-1">
-                          <CheckCircle size={12} /> อนุมัติ
+                        <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => handleApprove(t)}
+                            className="flex-1 py-1.5 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold flex items-center justify-center gap-1">
+                            <CheckCircle size={11} /> อนุมัติ
+                          </button>
+                          <button onClick={() => { setRevisionTask(t); setRevisionNote(''); }}
+                            className="flex-1 py-1.5 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 font-bold flex items-center justify-center gap-1">
+                            <Edit2 size={11} /> แก้ไข
+                          </button>
+                        </div>
+                      )}
+                      {/* ย้ายไปตรวจงาน */}
+                      {t.status === 'อนุมัติแล้ว' && (
+                        <button onClick={e => { e.stopPropagation(); handleMoveToCheck(t); }}
+                          className="w-full py-1.5 bg-orange-400 text-white text-xs rounded-lg hover:bg-orange-500 font-bold">
+                          → ตรวจงาน
+                        </button>
+                      )}
+                      {/* เสร็จสมบูรณ์ */}
+                      {t.status === 'ตรวจงาน' && (
+                        <button onClick={e => { e.stopPropagation(); handleComplete(t); }}
+                          className="w-full py-1.5 bg-teal-500 text-white text-xs rounded-lg hover:bg-teal-600 font-bold">
+                          ✓ เสร็จสมบูรณ์
                         </button>
                       )}
                     </div>
@@ -206,7 +297,7 @@ export default function MarketingAds() {
         </div>
       )}
 
-      {/* List tab */}
+      {/* ── List tab ──────────────────────────────────────────────────── */}
       {tab === 'list' && (
         <>
           <div className="shrink-0 mb-3 bg-white rounded-xl border px-4 py-3 flex flex-wrap gap-2 items-center">
@@ -234,7 +325,7 @@ export default function MarketingAds() {
           </div>
 
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-            <table className="text-sm w-full" style={{ minWidth: '1000px' }}>
+            <table className="text-sm w-full" style={{ minWidth: '1100px' }}>
               <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
                 <tr>
                   <th className="p-3 text-left whitespace-nowrap">วันที่เพิ่ม</th>
@@ -246,12 +337,13 @@ export default function MarketingAds() {
                   <th className="p-3 text-center whitespace-nowrap">กำหนดส่ง</th>
                   <th className="p-3 text-center whitespace-nowrap">สถานะกราฟฟิก</th>
                   <th className="p-3 text-center whitespace-nowrap">Board ADS</th>
-                  <th className="p-3 text-center whitespace-nowrap">อนุมัติ</th>
+                  <th className="p-3 text-center whitespace-nowrap">หมายเหตุแก้ไข</th>
+                  <th className="p-3 text-center whitespace-nowrap">การดำเนินการ</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredList.length === 0 && (
-                  <tr><td colSpan={10} className="p-8 text-center text-slate-400">ไม่พบรายการ</td></tr>
+                  <tr><td colSpan={11} className="p-8 text-center text-slate-400">ไม่พบรายการ</td></tr>
                 )}
                 {filteredList.map(t => {
                   const adsCol = getAdsColumn(t.status);
@@ -266,7 +358,7 @@ export default function MarketingAds() {
                       </td>
                       <td className="p-3">
                         <div className="font-medium text-slate-800 leading-tight">{t.title}</div>
-                        {t.brief && <div className="text-xs text-slate-400 mt-0.5 truncate max-w-[200px]">{t.brief}</div>}
+                        {t.brief && <div className="text-xs text-slate-400 mt-0.5 truncate max-w-[180px]">{t.brief}</div>}
                       </td>
                       <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{t.task_type || '-'}</td>
                       <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{t.channel || '-'}</td>
@@ -276,13 +368,12 @@ export default function MarketingAds() {
                         </span>
                       </td>
                       <td className="p-3 text-xs text-slate-600 whitespace-nowrap">
-                        {t.assigned_to
-                          ? <span className="flex items-center gap-1"><User size={11} />{t.assigned_to}</span>
+                        {t.assigned_to ? <span className="flex items-center gap-1"><User size={11} />{t.assigned_to}</span>
                           : <span className="text-slate-300">-</span>}
                       </td>
                       <td className="p-3 text-center whitespace-nowrap">
                         {t.deadline
-                          ? <span className={`text-xs font-medium ${isNear(t.deadline) ? 'text-red-500 font-bold' : 'text-slate-500'}`}>
+                          ? <span className={`text-xs ${isNear(t.deadline) ? 'text-red-500 font-bold' : 'text-slate-500'}`}>
                               {fmtDate(t.deadline, true)}{isNear(t.deadline) && ' ⚠'}
                             </span>
                           : <span className="text-slate-300 text-xs">-</span>}
@@ -297,18 +388,27 @@ export default function MarketingAds() {
                           {adsCol}
                         </span>
                       </td>
+                      <td className="p-3 text-xs text-orange-600 max-w-[120px]">
+                        {t.revision_note
+                          ? <span className="truncate block" title={t.revision_note}>✏ {t.revision_note}</span>
+                          : <span className="text-slate-300">-</span>}
+                      </td>
                       <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
                         {t.status === 'รอรีวิว' && (
-                          <button onClick={() => handleApprove(t)}
-                            className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold whitespace-nowrap">
-                            ✓ อนุมัติ
-                          </button>
+                          <div className="flex gap-1 justify-center">
+                            <button onClick={() => handleApprove(t)}
+                              className="px-2 py-1 bg-green-500 text-white text-[10px] rounded font-bold hover:bg-green-600">✓ อนุมัติ</button>
+                            <button onClick={() => { setRevisionTask(t); setRevisionNote(''); }}
+                              className="px-2 py-1 bg-orange-500 text-white text-[10px] rounded font-bold hover:bg-orange-600">✏ แก้ไข</button>
+                          </div>
                         )}
                         {t.status === 'อนุมัติแล้ว' && (
+                          <button onClick={() => handleMoveToCheck(t)}
+                            className="px-2 py-1 bg-orange-400 text-white text-[10px] rounded font-bold hover:bg-orange-500">→ ตรวจงาน</button>
+                        )}
+                        {t.status === 'ตรวจงาน' && (
                           <button onClick={() => handleComplete(t)}
-                            className="px-3 py-1 bg-teal-500 text-white text-xs rounded-lg hover:bg-teal-600 font-bold whitespace-nowrap">
-                            ✓ เสร็จ
-                          </button>
+                            className="px-2 py-1 bg-teal-500 text-white text-[10px] rounded font-bold hover:bg-teal-600">✓ เสร็จ</button>
                         )}
                       </td>
                     </tr>
@@ -320,7 +420,42 @@ export default function MarketingAds() {
         </>
       )}
 
-      {/* Detail Modal */}
+      {/* ── Revision Modal ────────────────────────────────────────────────── */}
+      {revisionTask && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">ส่งแก้ไขกลับ Graphic</h3>
+                <p className="text-xs text-slate-400 mt-0.5">งาน: <strong>{revisionTask.title}</strong></p>
+              </div>
+              <button onClick={() => setRevisionTask(null)}><X size={20} className="text-slate-400" /></button>
+            </div>
+            <div className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 text-xs text-orange-700 mb-4 flex items-start gap-2">
+              <span>⚠</span>
+              <span>งานนี้จะย้ายกลับไปที่ <strong>Graphic Board → กำลังทำ</strong> พร้อมหมายเหตุแก้ไข</span>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600 block mb-2">แก้ไขเรื่องอะไร? *</label>
+              <textarea value={revisionNote} onChange={e => setRevisionNote(e.target.value)}
+                rows={4} placeholder="เช่น ปรับสีพื้นหลังให้เข้มขึ้น, เพิ่มโลโก้มุมขวาล่าง, แก้ตัวหนังสือผิดสะกด..."
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 resize-none" />
+              <p className="text-xs text-slate-400 mt-1">{revisionNote.length} ตัวอักษร</p>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setRevisionTask(null)}
+                className="flex-1 py-2 bg-slate-200 rounded-lg text-sm hover:bg-slate-300">ยกเลิก</button>
+              <button onClick={handleRevisionSubmit} disabled={!revisionNote.trim() || savingRevision}
+                className="flex-1 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+                <Edit2 size={15} />
+                {savingRevision ? 'กำลังส่ง...' : 'ส่งแก้ไขกลับ Graphic'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Detail Modal ──────────────────────────────────────────────────── */}
       {selected && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[85vh] overflow-y-auto">
@@ -330,20 +465,19 @@ export default function MarketingAds() {
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                   <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${STATUS_COLOR[selected.status] || 'bg-slate-100 text-slate-600'}`}>{selected.status}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${ADS_COL_COLOR[getAdsColumn(selected.status)]}`}>Board: {getAdsColumn(selected.status)}</span>
-                  {selected.source === 'ทีมโฆษณา' && <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-bold">ADS</span>}
                 </div>
               </div>
               <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
             </div>
             <div className="space-y-2.5 text-sm">
               {([
-                ['ประเภท',      selected.task_type],
-                ['ช่องทาง',     selected.channel || '-'],
-                ['ขนาด',        selected.size || '-'],
-                ['ที่มา',       selected.source],
-                ['มอบหมายให้',  selected.assigned_to || '-'],
-                ['กำหนดส่ง',    fmtDate(selected.deadline)],
-                ['วันที่เพิ่ม',  fmtDate(selected.created_at)],
+                ['ประเภท',       selected.task_type],
+                ['ช่องทาง',      selected.channel || '-'],
+                ['ขนาด',         selected.size || '-'],
+                ['ที่มา',        selected.source],
+                ['มอบหมายให้',   selected.assigned_to || '-'],
+                ['กำหนดส่ง',     fmtDate(selected.deadline)],
+                ['วันที่เพิ่ม',   fmtDate(selected.created_at)],
                 ['อัพเดตล่าสุด', fmtDate(selected.updated_at)],
               ] as [string, string][]).map(([k, v]) => (
                 <div key={k} className="flex gap-2">
@@ -351,6 +485,12 @@ export default function MarketingAds() {
                   <span className="text-slate-700 font-medium">{v}</span>
                 </div>
               ))}
+              {selected.revision_note && (
+                <div>
+                  <div className="text-slate-400 mb-1">หมายเหตุแก้ไข</div>
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-orange-800 text-xs leading-relaxed">✏ {selected.revision_note}</div>
+                </div>
+              )}
               {selected.brief && (
                 <div>
                   <div className="text-slate-400 mb-1">Brief</div>
@@ -360,15 +500,27 @@ export default function MarketingAds() {
             </div>
             <div className="flex gap-2 mt-5">
               {selected.status === 'รอรีวิว' && (
-                <button onClick={() => handleApprove(selected)}
-                  className="flex-1 py-2.5 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium text-sm flex items-center justify-center gap-2">
-                  <CheckCircle size={15} /> อนุมัติงาน
-                </button>
+                <>
+                  <button onClick={() => handleApprove(selected)}
+                    className="flex-1 py-2.5 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium text-sm flex items-center justify-center gap-1">
+                    <CheckCircle size={14} /> อนุมัติ
+                  </button>
+                  <button onClick={() => { setRevisionTask(selected); setRevisionNote(''); setSelected(null); }}
+                    className="flex-1 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium text-sm flex items-center justify-center gap-1">
+                    <Edit2 size={14} /> แก้ไข
+                  </button>
+                </>
               )}
               {selected.status === 'อนุมัติแล้ว' && (
+                <button onClick={() => handleMoveToCheck(selected)}
+                  className="flex-1 py-2.5 bg-orange-400 text-white rounded-lg hover:bg-orange-500 font-medium text-sm">
+                  → ตรวจงาน
+                </button>
+              )}
+              {selected.status === 'ตรวจงาน' && (
                 <button onClick={() => handleComplete(selected)}
                   className="flex-1 py-2.5 bg-teal-500 text-white rounded-lg hover:bg-teal-600 font-medium text-sm">
-                  ✓ ทำเสร็จสมบูรณ์
+                  ✓ เสร็จสมบูรณ์
                 </button>
               )}
               <button onClick={() => setSelected(null)} className="px-4 py-2.5 bg-slate-100 rounded-lg text-sm hover:bg-slate-200">ปิด</button>
@@ -377,14 +529,14 @@ export default function MarketingAds() {
         </div>
       )}
 
-      {/* Create Modal */}
+      {/* ── Create Modal ──────────────────────────────────────────────────── */}
       {showCreate && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-5">
               <div>
                 <h3 className="text-lg font-bold text-slate-800">สร้างงานใหม่</h3>
-                <p className="text-xs text-slate-400 mt-0.5">งานจะถูกส่งไปยังหน้ากราฟฟิกอัตโนมัติ</p>
+                <p className="text-xs text-slate-400 mt-0.5">งานจะถูกส่งไปยังหน้ากราฟฟิกอัตโนมัติ · แสดงใน รายการงาน</p>
               </div>
               <button onClick={() => setShowCreate(false)}><X size={20} className="text-slate-400" /></button>
             </div>
@@ -430,11 +582,11 @@ export default function MarketingAds() {
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">Brief / รายละเอียด</label>
                 <textarea value={fBrief} onChange={e => setFBrief(e.target.value)} rows={4}
-                  placeholder="อธิบายสิ่งที่ต้องการ เช่น สี, ข้อความ, โทนภาพ..."
+                  placeholder="อธิบายสิ่งที่ต้องการ..."
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 resize-none" />
               </div>
               <div className="bg-purple-50 rounded-lg px-3 py-2 text-xs text-purple-600 flex items-center gap-2">
-                <span>📤</span><span>งานนี้จะปรากฏที่ <strong>หน้ากราฟฟิก → รอดำเนินการ</strong> ทันที</span>
+                <span>📤</span><span>งานนี้จะปรากฏที่ <strong>หน้ากราฟฟิก → รอดำเนินการ</strong> และ <strong>รายการงาน</strong> ของ ADS</span>
               </div>
             </div>
             <div className="flex gap-2 mt-5">
