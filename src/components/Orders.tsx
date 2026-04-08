@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { Order, TOURIST_ZIPS } from '../lib/types';
 import { Upload, Search, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
@@ -91,23 +91,11 @@ function getCarrierLabel(route: string | null) {
   return { label: '-', color: 'bg-slate-100 text-slate-500' };
 }
 
-
-// ── Duplicate check types ──────────────────────────────────────────────────
-type DupType = 'date_name' | 'tel' | 'tracking';
-type DupRow = {
-  importIndex: number;
-  type: DupType;
-  existingOrderNo: string;
-  existingDate: string;
-  existingName: string;
-  existingTel: string;
-  existingProd: string;
-};
-
 export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]) => void }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  // filter วันที่
   const today = new Date().toISOString().split('T')[0];
   const [dateFrom, setDateFrom] = useState(today);
   const [dateTo,   setDateTo]   = useState(today);
@@ -117,17 +105,26 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [mappings, setMappings] = useState<Record<string, string>>({});
   const [promoOptions, setPromoOptions] = useState<PromoOption[]>([]);
   const [autoMatched, setAutoMatched] = useState<Set<string>>(new Set());
+  // map promo_id → {short_name, name} สำหรับแสดงในตาราง
   const [promoMap, setPromoMap] = useState<Record<string, { short_name: string | null; name: string }>>({});
+  // Toast notification
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4000);
   };
 
-  // ── Duplicate check state ──
-  const [dupRows,         setDupRows]         = useState<DupRow[]>([]);
-  const [dupChecking,     setDupChecking]     = useState(false);
-  const [excludedIndexes, setExcludedIndexes] = useState<Set<number>>(new Set());
+  // ── ประเด็นที่ 1: ออเดอร์ซ้ำ (วันที่ + ลูกค้า) ──
+  type DupOrder = { idx: number; order_no: string; order_date: string; customer_name: string; raw_prod: string; confirmed: boolean };
+  // ── ประเด็นที่ 2: ลูกค้าซ้ำ (ชื่อซ้ำ หรือ เบอร์ซ้ำ) ──
+  type DupCustomer = { idx: number; customer_name: string; tel: string; order_date: string; raw_prod: string; existing_date: string; existing_prod: string };
+  // ── ประเด็นที่ 3: Tracking ซ้ำ ──
+  type DupTracking = { idx: number; tracking_no: string; customer_name: string; existing_customer: string; existing_order_no: string };
+
+  const [dupOrders,    setDupOrders]    = useState<DupOrder[]>([]);
+  const [dupCustomers, setDupCustomers] = useState<DupCustomer[]>([]);
+  const [dupTrackings, setDupTrackings] = useState<DupTracking[]>([]);
+  const [checkingDups, setCheckingDups] = useState(false);
 
   useEffect(() => { loadOrders(); loadPromoOptions(); }, []);
 
@@ -223,84 +220,96 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     } catch (err) { console.error(err); showToast('เกิดข้อผิดพลาดในการนำเข้าข้อมูล', 'error'); }
   };
 
-  // ── checkDuplicates ────────────────────────────────────────────────────
+  // ── ตรวจสอบความซ้ำ 3 ประเด็น ──────────────────────────────────────────
   const checkDuplicates = async (rows: Array<Record<string, unknown>>) => {
-    setDupChecking(true);
-    const dups: DupRow[] = [];
-    const defaultExclude = new Set<number>();
-    try {
-      const { data: existingOrders } = await supabase
-        .from('orders')
-        .select('id, order_no, order_date, tracking_no, customers(name, tel), raw_prod');
-      const existing = existingOrders || [];
+    setCheckingDups(true);
+    const d1: typeof dupOrders    = [];
+    const d2: typeof dupCustomers = [];
+    const d3: typeof dupTrackings = [];
 
-      for (let i = 0; i < rows.length; i++) {
-        const o          = rows[i];
-        const importDate = String(o.order_date || '').split('T')[0];
-        const importName = String(o.customer_name || '').trim();
-        const importTel  = String(o.tel || '').replace(/\D/g, '');
-        const importTrack = String(o.tracking_no || '').trim();
+    // โหลดข้อมูลจาก DB ครั้งเดียว
+    const { data: existingOrders } = await supabase
+      .from('orders')
+      .select('order_no, order_date, tracking_no, customers(name, tel), raw_prod');
 
-        // ประเด็น 1: วันที่สั่งซื้อ + ชื่อซ้ำ
-        const dup1 = existing.find(e => {
-          const eDate = String(e.order_date || '').split('T')[0];
-          const eName = String((e.customers as any)?.name || '').trim();
-          return eDate === importDate && eName === importName;
+    for (let i = 0; i < rows.length; i++) {
+      const o = rows[i];
+      const oDate = String(o.order_date || '');
+      const oName = String(o.customer_name || '').trim();
+      const oTel  = String(o.tel || '').replace(/\D/g, '');
+      const oTrack = String(o.tracking_no || '').trim();
+
+      // ── ประเด็นที่ 1: วันที่ + ชื่อลูกค้าซ้ำกับใน DB ──
+      const matchOrder = (existingOrders || []).find((ex: any) => {
+        const exDate = String(ex.order_date || '').split('T')[0];
+        const exName = String(ex.customers?.name || '').trim();
+        return exDate === oDate && exName === oName;
+      });
+      if (matchOrder) {
+        d1.push({
+          idx: i,
+          order_no:      String(o.order_no || ''),
+          order_date:    oDate,
+          customer_name: oName,
+          raw_prod:      String(o.raw_prod || ''),
+          confirmed:     false,
         });
-        if (dup1) {
-          dups.push({
-            importIndex: i, type: 'date_name',
-            existingOrderNo: dup1.order_no,
-            existingDate:    String(dup1.order_date || '').split('T')[0],
-            existingName:    String((dup1.customers as any)?.name || ''),
-            existingTel:     String((dup1.customers as any)?.tel  || ''),
-            existingProd:    String(dup1.raw_prod || ''),
-          });
-          defaultExclude.add(i);
-        }
+      }
 
-        // ประเด็น 2: ชื่อ/เบอร์ซ้ำ (ไม่ใช่ซ้ำประเด็น 1)
-        if (!dup1) {
-          const dup2 = existing.find(e => {
-            const eTel  = String((e.customers as any)?.tel  || '').replace(/\D/g, '');
-            const eName = String((e.customers as any)?.name || '').trim();
-            return (importTel && eTel === importTel) || (importName && eName === importName);
-          });
-          if (dup2) {
-            dups.push({
-              importIndex: i, type: 'tel',
-              existingOrderNo: dup2.order_no,
-              existingDate:    String(dup2.order_date || '').split('T')[0],
-              existingName:    String((dup2.customers as any)?.name || ''),
-              existingTel:     String((dup2.customers as any)?.tel  || ''),
-              existingProd:    String(dup2.raw_prod || ''),
-            });
-          }
-        }
+      // ── ประเด็นที่ 2: ชื่อหรือเบอร์ซ้ำ → มีออเดอร์ก่อนหน้า ──
+      const matchCust = (existingOrders || []).find((ex: any) => {
+        const exName = String(ex.customers?.name || '').trim();
+        const exTel  = String(ex.customers?.tel  || '').replace(/\D/g, '');
+        return (oName && exName === oName) || (oTel && exTel === oTel);
+      });
+      // เช็คว่าไม่ใช่ตัวเดียวกับ ประเด็นที่ 1 (ไม่ซ้ำ warning)
+      if (matchCust && !matchOrder) {
+        d2.push({
+          idx:             i,
+          customer_name:   oName,
+          tel:             oTel,
+          order_date:      oDate,
+          raw_prod:        String(o.raw_prod || ''),
+          existing_date:   String((matchCust as any).order_date || '').split('T')[0],
+          existing_prod:   String((matchCust as any).raw_prod   || ''),
+        });
+      }
 
-        // ประเด็น 3: Tracking ซ้ำ — ห้ามนำเข้า
-        if (importTrack && importTrack.length > 3) {
-          const dup3 = existing.find(e =>
-            String(e.tracking_no || '').trim() === importTrack
-          );
-          if (dup3) {
-            dups.push({
-              importIndex: i, type: 'tracking',
-              existingOrderNo: dup3.order_no,
-              existingDate:    String(dup3.order_date || '').split('T')[0],
-              existingName:    String((dup3.customers as any)?.name || ''),
-              existingTel:     String((dup3.customers as any)?.tel  || ''),
-              existingProd:    String(dup3.raw_prod || ''),
-            });
-            defaultExclude.add(i);
-          }
+      // ── ประเด็นที่ 3: Tracking ซ้ำ (ใน DB หรือในไฟล์เดียวกัน) ──
+      if (oTrack && oTrack.length > 3) {
+        // เช็คกับ DB
+        const matchTrack = (existingOrders || []).find((ex: any) =>
+          String(ex.tracking_no || '').trim() === oTrack
+        );
+        if (matchTrack) {
+          d3.push({
+            idx:               i,
+            tracking_no:       oTrack,
+            customer_name:     oName,
+            existing_customer: String((matchTrack as any).customers?.name || ''),
+            existing_order_no: String((matchTrack as any).order_no || ''),
+          });
+        }
+        // เช็คซ้ำภายในไฟล์เดียวกัน
+        const sameInFile = rows.findIndex((r, j) =>
+          j !== i && String(r.tracking_no || '').trim() === oTrack
+        );
+        if (sameInFile >= 0 && !matchTrack) {
+          d3.push({
+            idx:               i,
+            tracking_no:       oTrack,
+            customer_name:     oName,
+            existing_customer: String(rows[sameInFile].customer_name || ''),
+            existing_order_no: `(ในไฟล์ row ${sameInFile + 2})`,
+          });
         }
       }
-    } finally {
-      setDupRows(dups);
-      setExcludedIndexes(defaultExclude);
-      setDupChecking(false);
     }
+
+    setDupOrders(d1);
+    setDupCustomers(d2);
+    setDupTrackings(d3);
+    setCheckingDups(false);
   };
 
   const handleMappingComplete = async () => {
@@ -310,9 +319,9 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
       if (!ex) await supabase.from('product_mappings').insert([{ raw_name: rawName, promo_id: mappings[rawName] }]);
       else await supabase.from('product_mappings').update({ promo_id: mappings[rawName] }).eq('raw_name', rawName);
     }
-    setShowMapping(false);
+    // ตรวจสอบ duplicate ก่อนเปิด verify modal
     await checkDuplicates(importedOrders);
-    setShowVerify(true);
+    setShowMapping(false); setShowVerify(true);
   };
 
   const handleVerifyComplete = async () => {
@@ -321,32 +330,47 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     const newOrderIds: string[] = [];
 
     for (let idx = 0; idx < importedOrders.length; idx++) {
-      if (excludedIndexes.has(idx)) { skip++; continue; }
       const order = importedOrders[idx];
       try {
+        // ── ประเด็นที่ 1: ถ้าซ้ำ (วันที่+ลูกค้า) และยังไม่ confirm → ข้าม ──
+        const isDupOrder = dupOrders.find(d => d.idx === idx);
+        if (isDupOrder && !isDupOrder.confirmed) { skip++; continue; }
+
+        // หาลูกค้าจากเบอร์โทร
         let customerId: string | undefined;
-        const { data: cust } = await supabase.from('customers').select('id').eq('tel', String(order.tel)).maybeSingle();
+        const { data: cust } = await supabase
+          .from('customers').select('id').eq('tel', String(order.tel)).maybeSingle();
 
         if (cust?.id) {
+          // มีลูกค้าอยู่แล้ว — อัพเดตที่อยู่
           customerId = cust.id;
           await supabase.from('customers').update({
-            name: order.customer_name, facebook_name: order.facebook_name || undefined,
-            address: order.address, subdistrict: order.subdistrict, district: order.district,
-            province: order.province, postal_code: order.postal_code, channel: order.channel || undefined,
+            name: order.customer_name,
+            facebook_name: order.facebook_name || undefined,
+            address: order.address,
+            subdistrict: order.subdistrict, district: order.district,
+            province: order.province, postal_code: order.postal_code,
+            channel: order.channel || undefined,
           }).eq('id', cust.id);
         } else {
+          // ลูกค้าใหม่ — insert
           const { data: nc, error: ce } = await supabase.from('customers').insert([{
             name: order.customer_name, tel: String(order.tel),
             facebook_name: order.facebook_name || undefined,
             address: order.address, subdistrict: order.subdistrict,
             district: order.district, province: order.province,
             postal_code: order.postal_code, channel: order.channel,
-            payment_method: order.payment_method || undefined, tag: 'ใหม่',
+            payment_method: order.payment_method || undefined,
+            tag: 'ใหม่',
           }]).select('id').single();
-          if (ce) { errors.push(`customer: ${order.customer_name} — ${ce.message}`); fail++; continue; }
+          if (ce) {
+            errors.push(`customer: ${order.customer_name} — ${ce.message}`);
+            fail++; continue;
+          }
           customerId = nc?.id;
         }
 
+        // จับคู่สินค้า
         const rawProds = String(order.raw_prod).split('|').map((s: string) => s.trim()).filter(Boolean);
         const promoIds: string[] = [];
         for (const rp of rawProds) {
@@ -354,16 +378,18 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           if (mp?.promo_id) promoIds.push(mp.promo_id);
         }
 
-        const hasTrack  = order.tracking_no && String(order.tracking_no).length > 3;
-        const isTourist = TOURIST_ZIPS.has(String(order.postal_code));
-        const route     = hasTrack ? 'A' : isTourist ? 'C' : 'B';
+        const hasTrack   = order.tracking_no && String(order.tracking_no).length > 3;
+        const isTourist  = TOURIST_ZIPS.has(String(order.postal_code));
+        const route      = hasTrack ? 'A' : isTourist ? 'C' : 'B';
+        // มี tracking → รอแพ็ค, ไม่มี tracking → รอคีย์ออเดอร์ (ต้อง export Flash ก่อน)
         const orderStatus = hasTrack ? 'รอแพ็ค' : 'รอคีย์ออเดอร์';
 
         const { error: oe } = await supabase.from('orders').insert([{
           order_no: String(order.order_no), customer_id: customerId, channel: order.channel,
           order_date: order.order_date, order_time: order.order_time || null,
           raw_prod: order.raw_prod, promo_ids: promoIds,
-          quantity: order.quantity, quantities: String(order.quantities || order.quantity || '1'),
+          quantity: order.quantity,
+          quantities: String(order.quantities || order.quantity || '1'),
           weight_kg: order.weight_kg,
           tracking_no: hasTrack ? String(order.tracking_no).trim() : null,
           courier: order.courier || null,
@@ -376,24 +402,43 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           else { errors.push(`order ${order.order_no}: ${oe.message}`); fail++; }
         } else {
           ok++;
+          // เก็บ id ออเดอร์ใหม่ (ต้อง query กลับมา)
           const { data: newO } = await supabase.from('orders').select('id').eq('order_no', String(order.order_no)).maybeSingle();
           if (newO?.id) newOrderIds.push(newO.id);
         }
-      } catch (err: any) { errors.push(`catch: ${err?.message || err}`); fail++; }
+
+      } catch (err: any) {
+        errors.push(`catch: ${err?.message || err}`);
+        fail++;
+      }
     }
 
+    console.log('Import errors:', errors);
     const msg = ok > 0
-      ? `✓ นำเข้าสำเร็จ ${ok} ออเดอร์${skip > 0 ? ` · ข้าม ${skip}` : ''}${fail > 0 ? ` · ล้มเหลว ${fail}` : ''}`
-      : `นำเข้าไม่สำเร็จ — ข้าม ${skip}${fail > 0 ? ` · error ${fail}` : ''}`;
-    showToast(msg, ok > 0 ? 'success' : 'error');
-    setShowVerify(false);
-    setImportedOrders([]); setMappings({}); setAutoMatched(new Set());
-    setDupRows([]); setExcludedIndexes(new Set());
+      ? `✓ นำเข้าสำเร็จ ${ok} ออเดอร์${skip > 0 ? ` · ข้าม ${skip} ซ้ำ` : ''}${fail > 0 ? ` · ล้มเหลว ${fail}` : ''}`
+      : `นำเข้าไม่สำเร็จ — ออเดอร์ซ้ำ ${skip} รายการ${fail > 0 ? ` · error ${fail}` : ''}`;
+    showToast(msg, ok > 0 ? 'success' : skip > 0 ? 'success' : 'error');
+    setShowVerify(false); setImportedOrders([]); setMappings({}); setAutoMatched(new Set());
+
+    // ถ้า import สำเร็จ → ไปหน้าแพ็คสินค้าอัตโนมัติ
     if (ok > 0 && onImportDone && newOrderIds.length > 0) {
       setTimeout(() => onImportDone(newOrderIds), 1200);
-    } else { loadOrders(); }
+    } else {
+      loadOrders();
+    }
   };
 
+  // อัพเดต tracking → อัพเดต order_status อัตโนมัติ
+  const updateTracking = async (orderId: string, tracking: string) => {
+    const newStatus = tracking.trim().length > 3 ? 'รอแพ็ค' : 'รอคีย์ออเดอร์';
+    await supabase.from('orders').update({ tracking_no: tracking.trim() || null, order_status: newStatus }).eq('id', orderId);
+    loadOrders();
+  };
+
+  const updatePaymentStatus = async (orderId: string, val: string) => {
+    await supabase.from('orders').update({ payment_status: val }).eq('id', orderId);
+    loadOrders();
+  };
 
   const uniqueRawProds = [...new Set(importedOrders.flatMap(o =>
     String(o.raw_prod).split('|').map((s: string) => s.trim()).filter(Boolean)
@@ -679,139 +724,153 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         </div>
       )}
 
-      {/* Modal: ตรวจสอบ + แจ้งเตือนซ้ำ */}
+      {/* Modal: ตรวจสอบ */}
       {showVerify && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 max-w-5xl w-full max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold">ตรวจสอบข้อมูล ({importedOrders.length} รายการ)</h3>
-              {dupChecking && <span className="text-sm text-slate-400 flex items-center gap-2"><RefreshCw size={13} className="animate-spin"/>กำลังตรวจสอบซ้ำ...</span>}
-            </div>
+          <div className="bg-white rounded-xl p-6 max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <h3 className="text-xl font-bold mb-1">ตรวจสอบข้อมูล ({importedOrders.length} รายการ)</h3>
 
-            {/* warning banners */}
-            {dupRows.length > 0 && (
-              <div className="shrink-0 mb-3 space-y-2">
-                {dupRows.filter(d => d.type === 'tracking').length > 0 && (
-                  <div className="p-3 bg-red-50 border border-red-300 rounded-lg text-sm text-red-700 flex items-start gap-2">
-                    <span className="font-bold">🔴</span>
-                    <div><span className="font-bold">Tracking ซ้ำ {dupRows.filter(d=>d.type==='tracking').length} รายการ</span><span className="ml-1 text-red-500">— ถูกยกเว้นอัตโนมัติ ไม่สามารถนำเข้าได้</span></div>
-                  </div>
-                )}
-                {dupRows.filter(d => d.type === 'date_name').length > 0 && (
-                  <div className="p-3 bg-yellow-50 border border-yellow-300 rounded-lg text-sm text-yellow-800 flex items-start gap-2">
-                    <span className="font-bold">🟡</span>
-                    <div><span className="font-bold">วันที่ + ลูกค้าซ้ำ {dupRows.filter(d=>d.type==='date_name').length} รายการ</span><span className="ml-1">— ติ๊กถูกเพื่อยืนยันเพิ่ม</span></div>
-                  </div>
-                )}
-                {dupRows.filter(d => d.type === 'tel').length > 0 && (
-                  <div className="p-3 bg-orange-50 border border-orange-300 rounded-lg text-sm text-orange-700 flex items-start gap-2">
-                    <span className="font-bold">🟠</span>
-                    <div><span className="font-bold">ลูกค้าเคยสั่งซื้อมาก่อน {dupRows.filter(d=>d.type==='tel').length} รายการ</span><span className="ml-1">— แจ้งเตือนเท่านั้น นำเข้าได้ปกติ</span></div>
-                  </div>
-                )}
+            {checkingDups && (
+              <div className="flex items-center gap-2 text-sm text-slate-500 mb-3">
+                <RefreshCw size={14} className="animate-spin"/> กำลังตรวจสอบข้อมูลซ้ำ...
               </div>
             )}
 
-            <div className="overflow-auto flex-1">
+            {/* ── ประเด็นที่ 3: Tracking ซ้ำ — แดงเลย ── */}
+            {dupTrackings.length > 0 && (
+              <div className="mb-3 bg-red-50 border border-red-300 rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertCircle size={16} className="text-red-600 shrink-0"/>
+                  <span className="font-bold text-red-700 text-sm">⚠ Tracking ซ้ำ {dupTrackings.length} รายการ — จะถูกข้ามอัตโนมัติ</span>
+                </div>
+                <div className="space-y-1.5">
+                  {dupTrackings.map((d, i) => (
+                    <div key={i} className="bg-red-100 rounded-lg px-3 py-2 text-xs text-red-800 flex items-start gap-2">
+                      <span className="font-mono font-bold shrink-0">{d.tracking_no}</span>
+                      <span>ลูกค้า <strong>{d.customer_name}</strong> ซ้ำกับ <strong>{d.existing_customer}</strong> ({d.existing_order_no})</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── ประเด็นที่ 1: วันที่+ลูกค้าซ้ำ — ถามก่อน ── */}
+            {dupOrders.length > 0 && (
+              <div className="mb-3 bg-amber-50 border border-amber-300 rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertCircle size={16} className="text-amber-600 shrink-0"/>
+                  <span className="font-bold text-amber-700 text-sm">ออเดอร์ซ้ำ {dupOrders.length} รายการ (วันที่ + ลูกค้าตรงกับในระบบ)</span>
+                </div>
+                <div className="space-y-2">
+                  {dupOrders.map((d, i) => (
+                    <div key={i} className={`rounded-lg px-3 py-2 text-xs flex items-center gap-3 ${d.confirmed ? 'bg-green-100 border border-green-300' : 'bg-amber-100 border border-amber-200'}`}>
+                      <div className="flex-1">
+                        <span className="font-bold text-slate-700">{d.order_date}</span>
+                        <span className="mx-1 text-slate-400">·</span>
+                        <span className="font-bold text-slate-700">{d.customer_name}</span>
+                        <span className="mx-1 text-slate-400">·</span>
+                        <span className="text-slate-500 truncate">{d.raw_prod}</span>
+                      </div>
+                      <button
+                        onClick={() => setDupOrders(prev => prev.map((x, j) => j === i ? { ...x, confirmed: !x.confirmed } : x))}
+                        className={`shrink-0 px-3 py-1 rounded-lg text-xs font-bold transition ${d.confirmed ? 'bg-green-500 text-white' : 'bg-amber-500 text-white hover:bg-amber-600'}`}>
+                        {d.confirmed ? '✓ เพิ่มซ้ำ' : 'ตกลงเพิ่มซ้ำ?'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── ประเด็นที่ 2: ลูกค้าเคยสั่งมาก่อน (แจ้งเตือนเฉยๆ) ── */}
+            {dupCustomers.length > 0 && (
+              <div className="mb-3 bg-blue-50 border border-blue-200 rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertCircle size={16} className="text-blue-500 shrink-0"/>
+                  <span className="font-bold text-blue-700 text-sm">ลูกค้าเคยสั่งซื้อมาก่อน {dupCustomers.length} รายการ</span>
+                </div>
+                <div className="space-y-1.5">
+                  {dupCustomers.map((d, i) => (
+                    <div key={i} className="bg-blue-100 rounded-lg px-3 py-2 text-xs text-blue-800">
+                      <span className="font-bold">{d.customer_name}</span>
+                      <span className="font-mono ml-1">({d.tel || '-'})</span>
+                      <span className="text-blue-500 ml-2">เคยสั่ง {d.existing_date} · {d.existing_prod}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ตารางออเดอร์ */}
+            <div className="overflow-auto flex-1 min-h-0">
               <table className="w-full text-sm">
                 <thead className="bg-slate-100 sticky top-0">
                   <tr>
-                    <th className="p-2 w-8 text-center">นำเข้า</th>
-                    <th className="p-2 text-left">วันที่</th>
+                    <th className="p-2 text-left">เลขออเดอร์</th>
                     <th className="p-2 text-left">ลูกค้า</th>
                     <th className="p-2 text-left">เบอร์โทร</th>
                     <th className="p-2 text-left">สินค้า</th>
                     <th className="p-2 text-right">ยอด</th>
-                    <th className="p-2 text-left">Tracking</th>
                     <th className="p-2 text-center">ขนส่ง</th>
                     <th className="p-2 text-center">สถานะ</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {importedOrders.map((o, i) => {
+                  {importedOrders.slice(0, 100).map((o, i) => {
                     const hasTrack  = o.tracking_no && String(o.tracking_no).length > 3;
                     const isTourist = TOURIST_ZIPS.has(String(o.postal_code));
                     const route     = hasTrack ? 'A' : isTourist ? 'C' : 'B';
-                    // หา ALL dups ของ row นี้ — ไม่ใช่แค่ first
-                    const rowDups   = dupRows.filter(d => d.importIndex === i);
-                    const trackDup  = rowDups.find(d => d.type === 'tracking');
-                    const dateDup   = rowDups.find(d => d.type === 'date_name');
-                    const telDup    = rowDups.find(d => d.type === 'tel');
-                    // ใช้ tracking dup ก่อน (รุนแรงสุด), fallback date_name, fallback tel
-                    const dup        = trackDup || dateDup || telDup;
-                    const isExcluded = excludedIndexes.has(i);
-                    const isTrackDup = !!trackDup;
-                    const isDateDup  = !!dateDup && !trackDup;
-                    const isTelDup   = !!telDup  && !trackDup && !dateDup;
-                    const rowBg = isTrackDup ? 'bg-red-50' : isDateDup ? 'bg-yellow-50' : isTelDup ? 'bg-orange-50' : '';
+                    const isDupOrd  = dupOrders.find(d => d.idx === i);
+                    const isDupTrk  = dupTrackings.find(d => d.idx === i);
+                    const isDupCust = dupCustomers.find(d => d.idx === i);
+                    const rowClass  = isDupTrk
+                      ? 'border-b bg-red-50'
+                      : isDupOrd && !isDupOrd.confirmed
+                        ? 'border-b bg-amber-50'
+                        : isDupCust
+                          ? 'border-b bg-blue-50'
+                          : 'border-b';
                     return (
-                      <React.Fragment key={i}>
-                        <tr className={`border-b ${rowBg}`}>
-                          <td className="p-2 text-center">
-                            {isTrackDup ? (
-                              <span className="text-red-500 font-bold text-lg leading-none">✕</span>
-                            ) : (
-                              <input type="checkbox" checked={!isExcluded}
-                                onChange={e => setExcludedIndexes(prev => {
-                                  const next = new Set(prev);
-                                  if (e.target.checked) next.delete(i); else next.add(i);
-                                  return next;
-                                })}
-                                className="rounded accent-blue-500 w-4 h-4"/>
-                            )}
-                          </td>
-                          <td className="p-2 text-xs text-slate-500 whitespace-nowrap">{String(o.order_date ?? '')}</td>
-                          <td className="p-2 font-medium">{String(o.customer_name ?? '')}</td>
-                          <td className="p-2 font-mono text-xs">{String(o.tel ?? '')}</td>
-                          <td className="p-2 max-w-xs truncate text-xs">{String(o.raw_prod ?? '')}</td>
-                          <td className="p-2 text-right font-bold">฿{Number(o.total_thb).toLocaleString()}</td>
-                          <td className={`p-2 font-mono text-xs whitespace-nowrap ${isTrackDup ? 'text-red-600 font-bold' : 'text-slate-500'}`}>
-                            {String(o.tracking_no || '-')}
-                            {isTrackDup && <span className="ml-1 px-1 bg-red-100 text-red-700 rounded text-[10px] font-bold">ซ้ำ!</span>}
-                          </td>
-                          <td className="p-2 text-center">
-                            <span className={`px-2 py-0.5 rounded text-xs font-bold ${route==='A'?'bg-green-100 text-green-800':route==='C'?'bg-purple-100 text-purple-800':'bg-yellow-100 text-yellow-800'}`}>
-                              {route==='B'?'FLASH':route==='C'?'ไปรษณีย์':'มี Track'}
+                      <tr key={i} className={rowClass}>
+                        <td className="p-2 font-mono text-xs">{String(o.order_no ?? '')}</td>
+                        <td className="p-2">
+                          <div>{String(o.customer_name ?? '')}</div>
+                          {isDupCust && <div className="text-xs text-blue-500">ลูกค้าเก่า</div>}
+                        </td>
+                        <td className="p-2 font-mono text-xs">{String(o.tel ?? '')}</td>
+                        <td className="p-2 max-w-xs truncate text-xs">{String(o.raw_prod ?? '')}</td>
+                        <td className="p-2 text-right font-bold">฿{Number(o.total_thb).toLocaleString()}</td>
+                        <td className="p-2 text-center">
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${route === 'A' ? 'bg-green-100 text-green-800' : route === 'C' ? 'bg-purple-100 text-purple-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                            {route === 'B' ? 'FLASH' : route === 'C' ? 'ไปรษณีย์' : 'มี Track'}
+                          </span>
+                        </td>
+                        <td className="p-2 text-center">
+                          {isDupTrk && <span className="px-2 py-0.5 bg-red-500 text-white rounded text-xs font-bold">Track ซ้ำ!</span>}
+                          {isDupOrd && !isDupTrk && (
+                            <span className={`px-2 py-0.5 rounded text-xs font-bold ${isDupOrd.confirmed ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {isDupOrd.confirmed ? 'จะเพิ่ม' : 'ออเดอร์ซ้ำ'}
                             </span>
-                          </td>
-                          <td className="p-2 text-center">
-                            {isTrackDup && <span className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-bold">Tracking ซ้ำ</span>}
-                            {isDateDup  && <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-[10px] font-bold">วันที่+ชื่อซ้ำ</span>}
-                            {isTelDup   && <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded-full text-[10px] font-bold">ลูกค้าเดิม</span>}
-                          </td>
-                        </tr>
-                        {dup && (
-                          <tr key={`dup-${i}`} className={`text-xs ${isTrackDup?'bg-red-100':isDateDup?'bg-yellow-100':'bg-orange-100'}`}>
-                            <td/>
-                            <td colSpan={8} className="px-3 py-1.5 text-slate-600">
-                              <span className="text-slate-400">↪ ออเดอร์เดิม:</span>
-                              <span className="ml-2 font-mono font-bold">{dup.existingOrderNo}</span>
-                              <span className="ml-2 text-slate-500">{dup.existingDate}</span>
-                              <span className="ml-2 font-medium">{dup.existingName}</span>
-                              <span className="ml-2 font-mono text-slate-400">{dup.existingTel}</span>
-                              <span className="ml-2 text-slate-400 truncate max-w-[200px] inline-block align-bottom">{dup.existingProd}</span>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
+                          )}
+                        </td>
+                      </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-
-            <div className="mt-4 pt-4 border-t flex items-center justify-between flex-wrap gap-3">
-              <div className="text-sm text-slate-500">
-                นำเข้า <span className="font-bold text-blue-600">{importedOrders.length - excludedIndexes.size}</span> รายการ
-                {excludedIndexes.size > 0 && <span className="ml-2 text-slate-400">· ข้าม {excludedIndexes.size} รายการ</span>}
+            <div className="mt-4 pt-3 border-t flex items-center justify-between gap-3 shrink-0">
+              <div className="text-xs text-slate-400">
+                {dupTrackings.length > 0 && <span className="text-red-500 font-bold mr-3">⚠ Track ซ้ำ {dupTrackings.length} จะถูกข้าม</span>}
+                {dupOrders.filter(d => !d.confirmed).length > 0 && <span className="text-amber-600 mr-3">ออเดอร์ซ้ำ {dupOrders.filter(d=>!d.confirmed).length} จะถูกข้าม</span>}
+                {dupOrders.filter(d => d.confirmed).length > 0 && <span className="text-green-600">ยืนยันเพิ่ม {dupOrders.filter(d=>d.confirmed).length}</span>}
               </div>
-              <div className="flex gap-3">
-                <button onClick={handleVerifyComplete}
-                  disabled={importedOrders.length - excludedIndexes.size === 0}
-                  className="bg-blue-500 text-white py-2.5 px-5 rounded-lg hover:bg-blue-600 font-medium disabled:opacity-40">
+              <div className="flex gap-2 shrink-0">
+                <button onClick={() => setShowVerify(false)} className="px-4 py-2 bg-slate-200 rounded-lg text-sm">ยกเลิก</button>
+                <button onClick={handleVerifyComplete} disabled={checkingDups}
+                  className="px-5 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-50">
                   ✓ ยืนยันและนำเข้าออเดอร์
                 </button>
-                <button onClick={() => setShowVerify(false)} className="px-4 py-2 bg-slate-200 rounded-lg text-sm">ยกเลิก</button>
               </div>
             </div>
           </div>
