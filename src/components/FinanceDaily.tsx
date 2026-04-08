@@ -1,7 +1,6 @@
-import { useState, useEffect, type ChangeEvent } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { RefreshCw, ChevronDown, ChevronRight, Plus, X, Upload } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { RefreshCw, ChevronDown, ChevronRight, X } from 'lucide-react';
 
 type DailyOrder = {
   id: string; order_no: string; channel: string | null;
@@ -53,16 +52,7 @@ export default function FinanceDaily() {
   // Step 3: filter ลูกค้า
   const [filterCustomer, setFilterCustomer] = useState('');
 
-  // Ad cost form
-  const [showAdModal, setShowAdModal] = useState(false);
-  const [adDate, setAdDate]   = useState(new Date().toISOString().split('T')[0]);
-  const [adChannel, setAdChannel] = useState('');
-  const [adAmount, setAdAmount] = useState('');
-  const [adNote, setAdNote]   = useState('');
-  const [savingAd, setSavingAd] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
 
   useEffect(() => { loadData(); }, [dateFrom, dateTo]);
@@ -166,47 +156,6 @@ export default function FinanceDaily() {
     } finally { setLoading(false); }
   };
 
-  const handleAddAd = async () => {
-    if (!adAmount) return;
-    setSavingAd(true);
-    await supabase.from('finance_expense').insert([{
-      category: 'ค่าโฆษณา', description: adNote || `ค่าโฆษณา${adChannel ? ` ${adChannel}` : ''}`,
-      amount_thb: Number(adAmount), expense_date: adDate,
-      channel: adChannel || null,
-    }]);
-    showToast('✓ บันทึกค่าโฆษณาสำเร็จ');
-    setSavingAd(false); setShowAdModal(false);
-    setAdAmount(''); setAdNote(''); setAdChannel('');
-    loadData();
-  };
-
-  // Upload ค่าโฆษณาจากไฟล์ Excel
-  const handleAdUpload = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    setUploading(true);
-    try {
-      const buf  = await file.arrayBuffer();
-      const wb   = XLSX.read(buf, { type:'array', cellDates:true });
-      const rows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, defval:'' });
-      let count = 0;
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        const date    = row[0] instanceof Date ? row[0].toISOString().split('T')[0] : String(row[0]).split('T')[0];
-        const channel = String(row[1] || '').trim();
-        const amount  = Number(row[2]);
-        const note    = String(row[3] || '').trim();
-        if (!date || !amount) continue;
-        await supabase.from('finance_expense').insert([{
-          category:'ค่าโฆษณา', description: note||`ค่าโฆษณา${channel?` ${channel}`:''}`,
-          amount_thb: amount, expense_date: date, channel: channel||null,
-        }]);
-        count++;
-      }
-      showToast(`✓ นำเข้าค่าโฆษณา ${count} รายการ`);
-      loadData();
-    } finally { setUploading(false); e.target.value = ''; }
-  };
-
   const toggle = (date: string) => setExpanded(p => { const n = new Set(p); n.has(date)?n.delete(date):n.add(date); return n; });
 
   // Step 3: กรองตามลูกค้า
@@ -257,14 +206,6 @@ export default function FinanceDaily() {
           className="px-3 py-2 bg-slate-200 rounded-lg hover:bg-slate-300 flex items-center gap-2 text-sm">
           <RefreshCw size={13} className={loading?'animate-spin':''}/> โหลด
         </button>
-        <button onClick={() => setShowAdModal(true)}
-          className="px-3 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 flex items-center gap-2 text-sm">
-          <Plus size={13}/> เพิ่มค่าโฆษณา
-        </button>
-        <label className={`px-3 py-2 rounded-lg flex items-center gap-2 text-sm cursor-pointer ${uploading?'bg-slate-200 text-slate-400':'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'}`}>
-          <Upload size={13}/> {uploading?'กำลังนำเข้า...':'นำเข้าค่าโฆษณา (.xlsx)'}
-          <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleAdUpload} disabled={uploading}/>
-        </label>
       </div>
 
       {/* KPI */}
@@ -414,53 +355,6 @@ export default function FinanceDaily() {
           )}
         </table>
       </div>
-
-      {/* Modal ค่าโฆษณา */}
-      {showAdModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full">
-            <div className="flex justify-between items-center mb-5">
-              <h3 className="text-lg font-bold text-slate-800">เพิ่มค่าโฆษณา</h3>
-              <button onClick={() => setShowAdModal(false)}><X size={20} className="text-slate-400"/></button>
-            </div>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">วันที่ *</label>
-                  <input type="date" value={adDate} onChange={e=>setAdDate(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"/>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">ยอด (฿) *</label>
-                  <input type="number" value={adAmount} onChange={e=>setAdAmount(e.target.value)}
-                    placeholder="0.00" className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"/>
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">เพจ / ช่องทาง</label>
-                <input value={adChannel} onChange={e=>setAdChannel(e.target.value)}
-                  placeholder="เช่น Facebook, TikTok..." className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"/>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">หมายเหตุ</label>
-                <input value={adNote} onChange={e=>setAdNote(e.target.value)}
-                  placeholder="รายละเอียด..." className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"/>
-              </div>
-              <div className="bg-indigo-50 rounded-lg p-3 text-xs text-indigo-600">
-                <div className="font-semibold mb-1">รูปแบบไฟล์ Excel สำหรับนำเข้า:</div>
-                <div>Col A: วันที่ | Col B: เพจ | Col C: ยอด | Col D: หมายเหตุ</div>
-              </div>
-            </div>
-            <div className="flex gap-2 mt-5">
-              <button onClick={() => setShowAdModal(false)} className="flex-1 py-2 bg-slate-200 rounded-lg text-sm hover:bg-slate-300">ยกเลิก</button>
-              <button onClick={handleAddAd} disabled={!adAmount||savingAd}
-                className="flex-1 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 font-medium">
-                {savingAd?'กำลังบันทึก...':'บันทึก'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {toast && (
         <div className="fixed bottom-6 right-6 z-[100] px-5 py-4 rounded-xl shadow-2xl bg-emerald-500 text-white text-sm font-medium">
