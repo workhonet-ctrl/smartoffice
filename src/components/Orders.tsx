@@ -463,6 +463,19 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     return true;
   });
 
+  // ── หา tracking ที่ซ้ำในตารางปัจจุบัน ──────────────────────────────────
+  const dupTrackingSet = (() => {
+    const seen: Record<string, number> = {};
+    const dup = new Set<string>();
+    orders.forEach(o => {
+      const t = (o.tracking_no || '').trim();
+      if (!t || t.length <= 3) return;
+      seen[t] = (seen[t] || 0) + 1;
+      if (seen[t] > 1) dup.add(t);
+    });
+    return dup;
+  })();
+
   if (loading) return <div className="p-6 flex items-center gap-2 text-slate-500"><RefreshCw size={16} className="animate-spin"/>กำลังโหลด...</div>;
 
   return (
@@ -547,10 +560,12 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                 <tr><td colSpan={10} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์ — กด "นำเข้า Excel" เพื่อเริ่ม</td></tr>
               )}
               {filtered.map(o => {
-                const carrier = getCarrierLabel(o.route);
-                const status  = getAutoStatus(o);
+                const carrier    = getCarrierLabel(o.route);
+                const status     = getAutoStatus(o);
+                const trackVal   = (o.tracking_no || '').trim();
+                const isDupTrack = trackVal.length > 3 && dupTrackingSet.has(trackVal);
                 return (
-                  <tr key={o.id} className="border-b hover:bg-slate-50">
+                  <tr key={o.id} className={`border-b hover:bg-slate-50 ${isDupTrack ? 'bg-red-50' : ''}`}>
                     {/* วันที่สั่งซื้อ + เวลา */}
                     <td className="p-3 whitespace-nowrap">
                       {o.order_date ? (
@@ -665,8 +680,13 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                         defaultValue={o.tracking_no || ''}
                         onBlur={e => { if (e.target.value !== (o.tracking_no || '')) updateTracking(o.id, e.target.value); }}
                         placeholder="กรอก Tracking..."
-                        className="font-mono text-xs border rounded px-2 py-1 w-36 focus:outline-none focus:ring-1 focus:ring-cyan-300"
+                        className={`font-mono text-xs border rounded px-2 py-1 w-36 focus:outline-none focus:ring-1 ${isDupTrack ? 'border-red-500 bg-red-50 text-red-700 focus:ring-red-300' : 'focus:ring-cyan-300'}`}
                       />
+                      {isDupTrack && (
+                        <div className="text-[10px] text-red-600 font-bold mt-0.5 flex items-center gap-0.5">
+                          ⚠ Track ซ้ำ!
+                        </div>
+                      )}
                     </td>
                     {/* สถานะออเดอร์ */}
                     <td className="p-3 text-center">
