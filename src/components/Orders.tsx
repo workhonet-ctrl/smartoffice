@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { Order, TOURIST_ZIPS } from '../lib/types';
 import { Upload, Search, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
@@ -732,15 +732,21 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                     const hasTrack  = o.tracking_no && String(o.tracking_no).length > 3;
                     const isTourist = TOURIST_ZIPS.has(String(o.postal_code));
                     const route     = hasTrack ? 'A' : isTourist ? 'C' : 'B';
-                    const dup       = dupRows.find(d => d.importIndex === i);
-                    const isExcluded  = excludedIndexes.has(i);
-                    const isTrackDup  = dup?.type === 'tracking';
-                    const isDateDup   = dup?.type === 'date_name';
-                    const isTelDup    = dup?.type === 'tel';
+                    // หา ALL dups ของ row นี้ — ไม่ใช่แค่ first
+                    const rowDups   = dupRows.filter(d => d.importIndex === i);
+                    const trackDup  = rowDups.find(d => d.type === 'tracking');
+                    const dateDup   = rowDups.find(d => d.type === 'date_name');
+                    const telDup    = rowDups.find(d => d.type === 'tel');
+                    // ใช้ tracking dup ก่อน (รุนแรงสุด), fallback date_name, fallback tel
+                    const dup        = trackDup || dateDup || telDup;
+                    const isExcluded = excludedIndexes.has(i);
+                    const isTrackDup = !!trackDup;
+                    const isDateDup  = !!dateDup && !trackDup;
+                    const isTelDup   = !!telDup  && !trackDup && !dateDup;
                     const rowBg = isTrackDup ? 'bg-red-50' : isDateDup ? 'bg-yellow-50' : isTelDup ? 'bg-orange-50' : '';
                     return (
-                      <>
-                        <tr key={i} className={`border-b ${rowBg}`}>
+                      <React.Fragment key={i}>
+                        <tr className={`border-b ${rowBg}`}>
                           <td className="p-2 text-center">
                             {isTrackDup ? (
                               <span className="text-red-500 font-bold text-lg leading-none">✕</span>
@@ -787,7 +793,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                             </td>
                           </tr>
                         )}
-                      </>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
