@@ -316,6 +316,22 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     setCheckingDups(false);
   };
 
+  // ── pre-check: ลูกค้าที่ไม่พบใน DB ──────────────────────────────────────
+  const [missingCustomers, setMissingCustomers] = useState<{idx: number; name: string; tel: string}[]>([]);
+
+  const checkMissingCustomers = async (rows: Array<Record<string, unknown>>) => {
+    const missing: typeof missingCustomers = [];
+    for (let i = 0; i < rows.length; i++) {
+      const tel = String(rows[i].tel || '').trim();
+      if (!tel) continue;
+      const { data } = await supabase.from('customers').select('id').eq('tel', tel).maybeSingle();
+      if (!data?.id) {
+        missing.push({ idx: i, name: String(rows[i].customer_name || ''), tel });
+      }
+    }
+    setMissingCustomers(missing);
+  };
+
   const handleMappingComplete = async () => {
     for (const rawName in mappings) {
       if (!mappings[rawName]) continue;
@@ -323,8 +339,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
       if (!ex) await supabase.from('product_mappings').insert([{ raw_name: rawName, promo_id: mappings[rawName] }]);
       else await supabase.from('product_mappings').update({ promo_id: mappings[rawName] }).eq('raw_name', rawName);
     }
-    // ตรวจสอบ duplicate ก่อนเปิด verify modal
-    await checkDuplicates(importedOrders);
+    // ตรวจสอบลูกค้าที่ไม่พบ + dup ก่อนเปิด verify
+    await Promise.all([checkDuplicates(importedOrders), checkMissingCustomers(importedOrders)]);
     setShowMapping(false); setShowVerify(true);
   };
 
@@ -340,7 +356,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         const isDupOrder = dupOrders.find(d => d.idx === idx);
         if (isDupOrder && !isDupOrder.confirmed) { skip++; continue; }
 
-        // หาลูกค้าจากเบอร์โทร
+        // หาลูกค้าจากเบอร์โทร — ต้องมีในระบบแล้ว (Step 1)
         let customerId: string | undefined;
         const { data: cust } = await supabase
           .from('customers').select('id').eq('tel', String(order.tel)).maybeSingle();
@@ -357,21 +373,10 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             channel: order.channel || undefined,
           }).eq('id', cust.id);
         } else {
-          // ลูกค้าใหม่ — insert
-          const { data: nc, error: ce } = await supabase.from('customers').insert([{
-            name: order.customer_name, tel: String(order.tel),
-            facebook_name: order.facebook_name || undefined,
-            address: order.address, subdistrict: order.subdistrict,
-            district: order.district, province: order.province,
-            postal_code: order.postal_code, channel: order.channel,
-            payment_method: order.payment_method || undefined,
-            tag: 'ใหม่',
-          }]).select('id').single();
-          if (ce) {
-            errors.push(`customer: ${order.customer_name} — ${ce.message}`);
-            fail++; continue;
-          }
-          customerId = nc?.id;
+          // ไม่พบลูกค้า → ข้ามและแจ้งเตือน (ต้องนำเข้าลูกค้าก่อน Step 1)
+          errors.push(`ไม่พบลูกค้า "${order.customer_name}" (${order.tel}) — กรุณานำเข้ารายชื่อที่หน้าลูกค้าก่อน`);
+          skip++;
+          continue;
         }
 
         // จับคู่สินค้า
@@ -495,7 +500,10 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
       <div className="shrink-0 mb-3">
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between mb-3">
           <div>
-            <h2 className="text-2xl font-bold text-slate-800">จัดการออเดอร์</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-2xl font-bold text-slate-800">จัดการออเดอร์</h2>
+              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">Step 2</span>
+            </div>
             <p className="text-sm text-slate-500 mt-0.5">
               แสดง {filtered.length} / {orders.length} รายการ
               {dupCount > 0 && (
@@ -814,6 +822,32 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               </div>
             )}
 
+            {/* ── ไม่พบลูกค้าในระบบ — ต้องทำ Step 1 ก่อน ── */}
+            {missingCustomers.length > 0 && (
+              <div className="mb-3 bg-orange-50 border border-orange-400 rounded-xl p-3">
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle size={16} className="text-orange-600 shrink-0"/>
+                    <span className="font-bold text-orange-700 text-sm">
+                      ⚠ ไม่พบลูกค้าในระบบ {missingCustomers.length} รายการ — จะถูกข้ามอัตโนมัติ
+                    </span>
+                  </div>
+                  <span className="text-xs text-orange-600 bg-orange-100 px-2 py-1 rounded-lg font-medium">
+                    กรุณาไปนำเข้าที่ <strong>หน้าลูกค้า (Step 1)</strong> ก่อน
+                  </span>
+                </div>
+                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                  {missingCustomers.map((d, i) => (
+                    <div key={i} className="bg-orange-100 rounded-lg px-3 py-2 text-xs text-orange-800 flex items-center gap-3">
+                      <span className="font-bold">{d.name}</span>
+                      <span className="font-mono text-orange-600">{d.tel}</span>
+                      <span className="text-orange-400 text-[10px]">row {d.idx + 2}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* ── ประเด็นที่ 3: Tracking ซ้ำ — แดงเลย ── */}
             {dupTrackings.length > 0 && (
               <div className="mb-3 bg-red-50 border border-red-300 rounded-xl p-3">
@@ -901,13 +935,16 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                     const isDupOrd  = dupOrders.find(d => d.idx === i);
                     const isDupTrk  = dupTrackings.find(d => d.idx === i);
                     const isDupCust = dupCustomers.find(d => d.idx === i);
+                    const isMissing = missingCustomers.find(d => d.idx === i);
                     const rowClass  = isDupTrk
                       ? 'border-b bg-red-50'
-                      : isDupOrd && !isDupOrd.confirmed
-                        ? 'border-b bg-amber-50'
-                        : isDupCust
-                          ? 'border-b bg-blue-50'
-                          : 'border-b';
+                      : isMissing
+                        ? 'border-b bg-orange-50'
+                        : isDupOrd && !isDupOrd.confirmed
+                          ? 'border-b bg-amber-50'
+                          : isDupCust
+                            ? 'border-b bg-blue-50'
+                            : 'border-b';
                     return (
                       <tr key={i} className={rowClass}>
                         <td className="p-2 font-mono text-xs">{String(o.order_no ?? '')}</td>
@@ -925,7 +962,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                         </td>
                         <td className="p-2 text-center">
                           {isDupTrk && <span className="px-2 py-0.5 bg-red-500 text-white rounded text-xs font-bold">Track ซ้ำ!</span>}
-                          {isDupOrd && !isDupTrk && (
+                          {isMissing && !isDupTrk && <span className="px-2 py-0.5 bg-orange-500 text-white rounded text-xs font-bold">ไม่พบลูกค้า!</span>}
+                          {isDupOrd && !isDupTrk && !isMissing && (
                             <span className={`px-2 py-0.5 rounded text-xs font-bold ${isDupOrd.confirmed ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
                               {isDupOrd.confirmed ? 'จะเพิ่ม' : 'ออเดอร์ซ้ำ'}
                             </span>
@@ -939,6 +977,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             </div>
             <div className="mt-4 pt-3 border-t flex items-center justify-between gap-3 shrink-0">
               <div className="text-xs text-slate-400">
+                {missingCustomers.length > 0 && <span className="text-orange-500 font-bold mr-3">⚠ ไม่พบลูกค้า {missingCustomers.length} (ข้าม)</span>}
                 {dupTrackings.length > 0 && <span className="text-red-500 font-bold mr-3">⚠ Track ซ้ำ {dupTrackings.length} จะถูกข้าม</span>}
                 {dupOrders.filter(d => !d.confirmed).length > 0 && <span className="text-amber-600 mr-3">ออเดอร์ซ้ำ {dupOrders.filter(d=>!d.confirmed).length} จะถูกข้าม</span>}
                 {dupOrders.filter(d => d.confirmed).length > 0 && <span className="text-green-600">ยืนยันเพิ่ม {dupOrders.filter(d=>d.confirmed).length}</span>}
