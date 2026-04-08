@@ -134,7 +134,11 @@ export default function FlashExport() {
         if (i === 0) { boxL = Number(p?.boxes?.length_cm)||1; boxW = Number(p?.boxes?.width_cm)||1; boxH = Number(p?.boxes?.height_cm)||1; flashItemType = p?.item_type||'พัสดุ'; }
       }
       if (totalWeightKg === 0) totalWeightKg = Math.max(Number(order.weight_kg ?? 0), 0.1);
-      const weightKgStr = Math.max(totalWeightKg, 0.1).toFixed(2);
+      // ปัดน้ำหนักตามเกณฑ์ Flash: < 0.5 → 1.0 kg, >= 0.5 → ปัดขึ้นทีละ 0.5
+      const roundedWeight = totalWeightKg < 0.5
+        ? 1.0
+        : Math.ceil(totalWeightKg / 0.5) * 0.5 + 0.5;
+      const weightKgStr = roundedWeight.toFixed(2);
       const [d1='',d2='',d3='',d4='',d5=''] = [...itemDescs,'','','','',''];
       const phone = (order.customers?.tel||'').replace(/[^0-9]/g,'');
 
