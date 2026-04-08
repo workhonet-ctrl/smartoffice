@@ -48,6 +48,10 @@ export default function FlashExport() {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [searchProduct, setSearchProduct]   = useState('');
   const [searchExported, setSearchExported] = useState('');
+  // ข้อ 1: filter เพิ่มเติมใน tab รอส่งออก
+  const [filterCustomer, setFilterCustomer] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo,   setFilterDateTo]   = useState('');
   // upload tracking file
   const [uploadResult, setUploadResult] = useState<{ matched: number; notFound: number } | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -123,9 +127,10 @@ export default function FlashExport() {
           p = data;
         }
         const shortName = p?.short_name || p?.name || rawProds[i];
-        const qty = qtyFromSel; // ใช้จำนวนที่ผู้ใช้กำหนด
+        const qty = qtyFromSel; // จำนวน pack ที่ user กำหนด
+        const pieces = p?.name ? extractQty(p.name) * qty : qty; // จำนวนชิ้นจริง (เช่น 1แถม1 × 1 = 2 ชิ้น)
         itemDescs.push(`${shortName}|-|-|${qty}`);
-        if (p?.products_master?.weight_g) totalWeightKg += (Number(p.products_master.weight_g) * qty) / 1000;
+        if (p?.products_master?.weight_g) totalWeightKg += (Number(p.products_master.weight_g) * pieces) / 1000;
         if (i === 0) { boxL = Number(p?.boxes?.length_cm)||1; boxW = Number(p?.boxes?.width_cm)||1; boxH = Number(p?.boxes?.height_cm)||1; flashItemType = p?.item_type||'พัสดุ'; }
       }
       if (totalWeightKg === 0) totalWeightKg = Math.max(Number(order.weight_kg ?? 0), 0.1);
@@ -266,9 +271,13 @@ export default function FlashExport() {
 
   const togglePending  = (id: string) => setSelectedPending(s  => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleExported = (id: string) => setSelectedExported(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const filteredOrders = searchProduct.trim()
-    ? orders.filter(o => (o.raw_prod || '').toLowerCase().includes(searchProduct.toLowerCase()))
-    : orders;
+  const filteredOrders = orders.filter(o => {
+    if (searchProduct.trim() && !(o.raw_prod || '').toLowerCase().includes(searchProduct.toLowerCase())) return false;
+    if (filterCustomer.trim() && !(o.customers?.name || '').toLowerCase().includes(filterCustomer.toLowerCase()) && !(o.customers?.tel || '').includes(filterCustomer)) return false;
+    if (filterDateFrom && o.order_date && o.order_date < filterDateFrom) return false;
+    if (filterDateTo   && o.order_date && o.order_date > filterDateTo)   return false;
+    return true;
+  });
 
   const filteredExportedOrders = searchExported.trim()
     ? exportedOrders.filter(o => (o.raw_prod || '').toLowerCase().includes(searchExported.toLowerCase()))
@@ -302,26 +311,54 @@ export default function FlashExport() {
       {/* ── Tab: รอส่งออก ── */}
       {tab === 'pending' && (
         <>
-          <div className="flex gap-3 mb-3 shrink-0 flex-wrap items-center">
-            {/* Search */}
-            <div className="relative flex-1 min-w-[200px]">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
-              <input type="text" value={searchProduct} onChange={e => setSearchProduct(e.target.value)}
-                placeholder="ค้นหาชื่อสินค้า เช่น ครีม Secret Rose(1 แถม 1)..."
-                className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+          {/* Filter bar */}
+          <div className="shrink-0 mb-3 bg-white rounded-xl border px-4 py-3 space-y-2">
+            <div className="flex gap-2 flex-wrap items-center">
+              {/* ค้นหาสินค้า */}
+              <div className="relative flex-1 min-w-[180px]">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">📦</span>
+                <input type="text" value={searchProduct} onChange={e => setSearchProduct(e.target.value)}
+                  placeholder="ค้นหาสินค้า..."
+                  className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+              </div>
+              {/* ค้นหาลูกค้า */}
+              <div className="relative flex-1 min-w-[160px]">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">👤</span>
+                <input type="text" value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)}
+                  placeholder="ค้นหาลูกค้า / เบอร์..."
+                  className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+              </div>
+              {/* วันที่ */}
+              <div className="flex items-center gap-1.5 text-sm">
+                <span className="text-slate-500 whitespace-nowrap text-xs">วันที่</span>
+                <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)}
+                  className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+                <span className="text-slate-400">—</span>
+                <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)}
+                  className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+              </div>
+              {/* Clear */}
+              {(searchProduct || filterCustomer || filterDateFrom || filterDateTo) && (
+                <button onClick={() => { setSearchProduct(''); setFilterCustomer(''); setFilterDateFrom(''); setFilterDateTo(''); }}
+                  className="px-2.5 py-2 bg-slate-100 text-slate-500 rounded-lg text-xs hover:bg-slate-200 whitespace-nowrap">
+                  ล้าง ✕
+                </button>
+              )}
             </div>
-            {searchProduct && (
-              <span className="text-xs text-slate-500 shrink-0">พบ {filteredOrders.length} รายการ</span>
-            )}
-            <button onClick={handlePreview} disabled={orders.length===0||previewing}
-              className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 text-sm">
-              <Eye size={16}/> {previewing?'กำลังโหลด...':'ดูตัวอย่าง'}{selectedPending.size>0?` (${selectedPending.size})`:''}
-            </button>
-            <button onClick={handleExport} disabled={orders.length===0||exporting}
-              className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 flex items-center gap-2 disabled:opacity-50 text-sm">
-              <Download size={16}/> {exporting?'กำลังส่งออก...':`ส่งออก Flash (${pendingCount} รายการ)`}
-            </button>
-            {selectedPending.size>0 && <span className="self-center text-xs text-slate-500">เลือก {selectedPending.size} จาก {orders.length}</span>}
+            <div className="flex gap-2 flex-wrap items-center">
+              {filteredOrders.length !== orders.length && (
+                <span className="text-xs text-slate-500">แสดง {filteredOrders.length} / {orders.length} รายการ</span>
+              )}
+              <button onClick={handlePreview} disabled={orders.length===0||previewing}
+                className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 text-sm">
+                <Eye size={16}/> {previewing?'กำลังโหลด...':'ดูตัวอย่าง'}{selectedPending.size>0?` (${selectedPending.size})`:''}
+              </button>
+              <button onClick={handleExport} disabled={orders.length===0||exporting}
+                className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 flex items-center gap-2 disabled:opacity-50 text-sm">
+                <Download size={16}/> {exporting?'กำลังส่งออก...':`ส่งออก Flash (${pendingCount} รายการ)`}
+              </button>
+              {selectedPending.size>0 && <span className="self-center text-xs text-slate-500">เลือก {selectedPending.size} จาก {orders.length}</span>}
+            </div>
           </div>
 
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
