@@ -486,6 +486,13 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     return dup;
   })();
 
+  // ── แสดงจำนวนลูกค้าที่พร้อม (Step 1) ──────────────────────────────────
+  const [customerCount, setCustomerCount] = useState<number | null>(null);
+  useEffect(() => {
+    supabase.from('customers').select('id', { count: 'exact', head: true })
+      .then(({ count }) => setCustomerCount(count ?? 0));
+  }, []);
+
   if (loading) return <div className="p-6 flex items-center gap-2 text-slate-500"><RefreshCw size={16} className="animate-spin"/>กำลังโหลด...</div>;
 
   // unique values สำหรับ dropdown filter
@@ -503,6 +510,11 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             <div className="flex items-center gap-2">
               <h2 className="text-2xl font-bold text-slate-800">จัดการออเดอร์</h2>
               <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">Step 2</span>
+              {customerCount !== null && (
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${customerCount > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-600'}`}>
+                  {customerCount > 0 ? `✓ ลูกค้าพร้อม ${customerCount} คน` : '⚠ ยังไม่มีลูกค้า'}
+                </span>
+              )}
             </div>
             <p className="text-sm text-slate-500 mt-0.5">
               แสดง {filtered.length} / {orders.length} รายการ
@@ -620,7 +632,40 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && (
+            {orders.length === 0 && !loading && (
+              <tr>
+                <td colSpan={12} className="p-0">
+                  <div className="flex flex-col items-center justify-center py-16 gap-4">
+                    {customerCount === 0 ? (
+                      // ยังไม่ได้ทำ Step 1
+                      <div className="text-center max-w-sm">
+                        <div className="text-4xl mb-3">👥</div>
+                        <p className="font-bold text-slate-700 text-lg mb-1">ยังไม่มีลูกค้าในระบบ</p>
+                        <p className="text-sm text-slate-400 mb-4">ต้องนำเข้ารายชื่อลูกค้าก่อน แล้วค่อยนำเข้าออเดอร์</p>
+                        <div className="flex items-center gap-3 justify-center text-sm">
+                          <span className="px-3 py-2 bg-cyan-100 text-cyan-700 rounded-lg font-bold">Step 1 → หน้าลูกค้า</span>
+                          <span className="text-slate-400">→</span>
+                          <span className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg font-bold">Step 2 → นำเข้า Excel ที่นี่</span>
+                        </div>
+                      </div>
+                    ) : (
+                      // Step 1 เสร็จแล้ว รอ Step 2
+                      <div className="text-center max-w-sm">
+                        <div className="text-4xl mb-3">📋</div>
+                        <p className="font-bold text-slate-700 text-lg mb-1">ลูกค้าพร้อมแล้ว {customerCount} คน</p>
+                        <p className="text-sm text-slate-400 mb-4">กด "นำเข้า Excel" ด้านบน เพื่อนำเข้าออเดอร์จากไฟล์เดิม</p>
+                        <div className="flex items-center gap-3 justify-center text-sm">
+                          <span className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold">✓ Step 1 เสร็จแล้ว</span>
+                          <span className="text-slate-400">→</span>
+                          <span className="px-3 py-2 bg-blue-500 text-white rounded-lg font-bold animate-pulse">Step 2 → นำเข้า Excel</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            )}
+            {filtered.length === 0 && orders.length > 0 && (
               <tr><td colSpan={12} className="p-8 text-center text-slate-400">ไม่พบออเดอร์ที่ตรงกับตัวกรอง</td></tr>
             )}
               {filtered.map(o => {
