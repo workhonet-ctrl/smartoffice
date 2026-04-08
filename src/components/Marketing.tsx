@@ -3,6 +3,7 @@ import GraphicBoard from './GraphicBoard';
 import GraphicTasks from './GraphicTasks';
 import GraphicBrief from './GraphicBrief';
 import GraphicAssets from './GraphicAssets';
+import MarketingAds from './MarketingAds';
 
 type MarketingPage = 'graphic' | 'ads' | 'admin';
 type GraphicSub = 'board' | 'tasks' | 'brief' | 'assets';
@@ -26,7 +27,26 @@ function Placeholder({ title }: { title: string }) {
 }
 
 export default function Marketing({ page }: { page: MarketingPage }) {
-  return page === 'graphic' ? <GraphicModule /> : <Placeholder title={page === 'ads' ? 'โฆษณา ADS' : 'แอดมิน'} />;
+  if (page === 'graphic') return <GraphicModule />;
+  if (page === 'ads')     return <AdsModule />;
+  return <Placeholder title="แอดมิน" />;
+}
+
+function AdsModule() {
+  return (
+    <div className="flex flex-col h-screen p-6 pb-2">
+      <div className="shrink-0 mb-4 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-purple-500 flex items-center justify-center text-white font-bold text-lg">A</div>
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">ฝ่ายการตลาด / โฆษณา ADS</h2>
+          <p className="text-xs text-slate-400">สร้างงาน · ติดตามสถานะ · อนุมัติกราฟฟิก</p>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <MarketingAds />
+      </div>
+    </div>
+  );
 }
 
 function GraphicModule() {
