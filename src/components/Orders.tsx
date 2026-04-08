@@ -95,20 +95,24 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  // filter วันที่
   const today = new Date().toISOString().split('T')[0];
-  const [dateFrom, setDateFrom] = useState(today);
-  const [dateTo,   setDateTo]   = useState(today);
+  // ข้อ 2: เริ่มต้นเห็นทั้งหมด (ไม่ filter วันที่)
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo,   setDateTo]   = useState('');
+  // ข้อ 1: filter เพิ่มเติม
+  const [filterRoute,  setFilterRoute]  = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterPay,    setFilterPay]    = useState('');
   const [importedOrders, setImportedOrders] = useState<Array<Record<string, unknown>>>([]);
   const [showMapping, setShowMapping] = useState(false);
   const [showVerify, setShowVerify] = useState(false);
   const [mappings, setMappings] = useState<Record<string, string>>({});
   const [promoOptions, setPromoOptions] = useState<PromoOption[]>([]);
   const [autoMatched, setAutoMatched] = useState<Set<string>>(new Set());
-  // map promo_id → {short_name, name} สำหรับแสดงในตาราง
   const [promoMap, setPromoMap] = useState<Record<string, { short_name: string | null; name: string }>>({});
-  // Toast notification
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  // ข้อ 3: ref map สำหรับ scroll-to row
+  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4000);
@@ -445,9 +449,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   ))];
   const allMapped = uniqueRawProds.every(rp => !!mappings[rp]);
 
-  // filter ด้วย search + วันที่
+  // filter ด้วย search + วันที่ + route + status + pay
   const filtered = orders.filter(o => {
-    // search
     if (search) {
       const q = search.toLowerCase();
       const matchSearch = o.order_no?.toLowerCase().includes(q) ||
@@ -456,10 +459,12 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         o.raw_prod?.toLowerCase().includes(q);
       if (!matchSearch) return false;
     }
-    // วันที่ — อ้างอิง order_date หรือ created_at
     const orderDay = o.order_date || o.created_at?.split('T')[0];
     if (dateFrom && orderDay && orderDay < dateFrom) return false;
     if (dateTo   && orderDay && orderDay > dateTo)   return false;
+    if (filterRoute  && o.route         !== filterRoute)  return false;
+    if (filterStatus && o.order_status  !== filterStatus) return false;
+    if (filterPay    && o.payment_status !== filterPay)   return false;
     return true;
   });
 
@@ -478,14 +483,25 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
 
   if (loading) return <div className="p-6 flex items-center gap-2 text-slate-500"><RefreshCw size={16} className="animate-spin"/>กำลังโหลด...</div>;
 
+  // unique values สำหรับ dropdown filter
+  const allStatuses = [...new Set(orders.map(o => o.order_status).filter(Boolean))].sort();
+  const dupCount = dupTrackingSet.size > 0
+    ? orders.filter(o => dupTrackingSet.has((o.tracking_no||'').trim())).length
+    : 0;
+
   return (
-    <div className="p-6">
+    <div className="flex flex-col h-screen p-6 pb-2">
       {/* Header */}
-      <div className="mb-5">
+      <div className="shrink-0 mb-3">
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between mb-3">
           <div>
             <h2 className="text-2xl font-bold text-slate-800">จัดการออเดอร์</h2>
-            <p className="text-sm text-slate-500 mt-0.5">{filtered.length} รายการ</p>
+            <p className="text-sm text-slate-500 mt-0.5">
+              แสดง {filtered.length} / {orders.length} รายการ
+              {dupCount > 0 && (
+                <span className="ml-2 text-red-600 font-bold">· ⚠ Track ซ้ำ {dupCount} รายการ</span>
+              )}
+            </p>
           </div>
           <label className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-start">
             <Upload size={17}/> นำเข้า Excel
@@ -494,78 +510,121 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         </div>
 
         {/* Filter bar */}
-        <div className="flex flex-wrap gap-3 items-center bg-white rounded-xl border px-4 py-3">
-          {/* Search */}
-          <div className="relative flex-1 min-w-[180px]">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-            <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="ค้นหา ออเดอร์ / ลูกค้า / เบอร์..."
-              className="pl-9 pr-4 py-1.5 border rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+        <div className="bg-white rounded-xl border px-4 py-3 space-y-2">
+          {/* Row 1: Search + Date */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="relative flex-1 min-w-[180px]">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+              <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="ค้นหา ออเดอร์ / ลูกค้า / เบอร์ / สินค้า..."
+                className="pl-8 pr-4 py-1.5 border rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+            </div>
+            <div className="flex items-center gap-1.5 text-sm">
+              <span className="text-slate-500 whitespace-nowrap">วันที่</span>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              <span className="text-slate-400">—</span>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+            </div>
+            {/* Date shortcuts */}
+            <div className="flex gap-1">
+              {[
+                { label: 'วันนี้', from: today, to: today },
+                { label: '7 วัน', from: new Date(Date.now()-6*86400000).toISOString().split('T')[0], to: today },
+                { label: '30 วัน', from: new Date(Date.now()-29*86400000).toISOString().split('T')[0], to: today },
+                { label: 'ทั้งหมด', from: '', to: '' },
+              ].map(btn => (
+                <button key={btn.label} onClick={() => { setDateFrom(btn.from); setDateTo(btn.to); }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                    dateFrom === btn.from && dateTo === btn.to ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}>
+                  {btn.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* วันที่ From */}
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-slate-500 whitespace-nowrap">วันที่</span>
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-              className="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-            <span className="text-slate-400">—</span>
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-              className="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-          </div>
-
-          {/* Shortcut buttons */}
-          <div className="flex gap-1.5">
-            {[
-              { label: 'วันนี้',     from: today, to: today },
-              { label: '7 วัน',     from: new Date(Date.now() - 6*86400000).toISOString().split('T')[0], to: today },
-              { label: '30 วัน',    from: new Date(Date.now() - 29*86400000).toISOString().split('T')[0], to: today },
-              { label: 'ทั้งหมด',   from: '', to: '' },
-            ].map(btn => (
-              <button key={btn.label}
-                onClick={() => { setDateFrom(btn.from); setDateTo(btn.to); }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
-                  dateFrom === btn.from && dateTo === btn.to
-                    ? 'bg-cyan-600 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}>
-                {btn.label}
+          {/* Row 2: Dropdown filters */}
+          <div className="flex flex-wrap gap-2 items-center">
+            {/* Route */}
+            <select value={filterRoute} onChange={e => setFilterRoute(e.target.value)}
+              className="border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
+              <option value="">ขนส่ง: ทั้งหมด</option>
+              <option value="A">A — มี Tracking</option>
+              <option value="B">B — Flash</option>
+              <option value="C">C — ไปรษณีย์</option>
+            </select>
+            {/* Order status */}
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+              className="border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
+              <option value="">สถานะออเดอร์: ทั้งหมด</option>
+              {allStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            {/* Payment status */}
+            <select value={filterPay} onChange={e => setFilterPay(e.target.value)}
+              className="border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
+              <option value="">สถานะชำระ: ทั้งหมด</option>
+              <option value="รอชำระเงิน">รอชำระเงิน</option>
+              <option value="ชำระแล้ว">ชำระแล้ว</option>
+            </select>
+            {/* ข้อ 3: ปุ่ม scroll ไปยัง tracking ซ้ำ */}
+            {dupCount > 0 && (
+              <button
+                onClick={() => {
+                  const firstDup = filtered.find(o => dupTrackingSet.has((o.tracking_no||'').trim()));
+                  if (firstDup && rowRefs.current[firstDup.id]) {
+                    rowRefs.current[firstDup.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }
+                }}
+                className="px-3 py-1.5 bg-red-500 text-white rounded-lg text-xs font-bold hover:bg-red-600 flex items-center gap-1.5">
+                ⚠ ไปที่ Track ซ้ำ ({dupCount})
               </button>
-            ))}
+            )}
+            {/* Clear filters */}
+            {(filterRoute || filterStatus || filterPay || dateFrom || dateTo || search) && (
+              <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setFilterRoute(''); setFilterStatus(''); setFilterPay(''); }}
+                className="px-2.5 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs hover:bg-slate-200">
+                ล้างตัวกรอง ✕
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl shadow overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-800 text-slate-200 text-xs">
-              <tr>
-                <th className="p-3 text-left whitespace-nowrap">วันที่สั่งซื้อ</th>
-                <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
-                <th className="p-3 text-left">ลูกค้า</th>
-                <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
-                <th className="p-3 text-left whitespace-nowrap">ที่อยู่</th>
-                <th className="p-3 text-center whitespace-nowrap">ไปรษณีย์</th>
-                <th className="p-3 text-left">สินค้า</th>
-                <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
-                <th className="p-3 text-center whitespace-nowrap">ขนส่ง</th>
-                <th className="p-3 text-center whitespace-nowrap">สถานะชำระ</th>
-                <th className="p-3 text-left whitespace-nowrap">Tracking</th>
-                <th className="p-3 text-center whitespace-nowrap">สถานะออเดอร์</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 && (
-                <tr><td colSpan={10} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์ — กด "นำเข้า Excel" เพื่อเริ่ม</td></tr>
-              )}
+      {/* Table — ข้อ 4: flex-1 + overflow scroll ทั้ง X และ Y, sticky header */}
+      <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+        <table className="text-sm" style={{ minWidth: '1100px', width: '100%' }}>
+          <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+            <tr>
+              <th className="p-3 text-left whitespace-nowrap">วันที่สั่งซื้อ</th>
+              <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
+              <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+              <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
+              <th className="p-3 text-left whitespace-nowrap">ที่อยู่</th>
+              <th className="p-3 text-center whitespace-nowrap">ไปรษณีย์</th>
+              <th className="p-3 text-left whitespace-nowrap">สินค้า</th>
+              <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
+              <th className="p-3 text-center whitespace-nowrap">ขนส่ง</th>
+              <th className="p-3 text-center whitespace-nowrap">สถานะชำระ</th>
+              <th className="p-3 text-left whitespace-nowrap">Tracking</th>
+              <th className="p-3 text-center whitespace-nowrap">สถานะออเดอร์</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={12} className="p-8 text-center text-slate-400">ไม่พบออเดอร์ที่ตรงกับตัวกรอง</td></tr>
+            )}
               {filtered.map(o => {
                 const carrier    = getCarrierLabel(o.route);
                 const status     = getAutoStatus(o);
                 const trackVal   = (o.tracking_no || '').trim();
                 const isDupTrack = trackVal.length > 3 && dupTrackingSet.has(trackVal);
                 return (
-                  <tr key={o.id} className={`border-b hover:bg-slate-50 ${isDupTrack ? 'bg-red-50' : ''}`}>
+                  // ข้อ 3: ref สำหรับ scroll-to
+                  <tr key={o.id}
+                    ref={el => { rowRefs.current[o.id] = el; }}
+                    className={`border-b hover:bg-slate-50 ${isDupTrack ? 'bg-red-50' : ''}`}>
                     {/* วันที่สั่งซื้อ + เวลา */}
                     <td className="p-3 whitespace-nowrap">
                       {o.order_date ? (
@@ -698,7 +757,6 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             </tbody>
           </table>
         </div>
-      </div>
 
       {/* Modal: จับคู่สินค้า */}
       {showMapping && (
