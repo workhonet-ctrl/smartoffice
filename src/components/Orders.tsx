@@ -653,11 +653,11 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                       <div className="text-center max-w-sm">
                         <div className="text-4xl mb-3">📋</div>
                         <p className="font-bold text-slate-700 text-lg mb-1">ลูกค้าพร้อมแล้ว {customerCount} คน</p>
-                        <p className="text-sm text-slate-400 mb-4">กด "นำเข้า Excel" ด้านบน เพื่อนำเข้าออเดอร์จากไฟล์เดิม</p>
-                        <div className="flex items-center gap-3 justify-center text-sm">
-                          <span className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold">✓ Step 1 เสร็จแล้ว</span>
+                        <p className="text-sm text-slate-400 mb-4">ออเดอร์จะถูกบันทึกอัตโนมัติเมื่อนำเข้า Excel ที่หน้าลูกค้า</p>
+                        <div className="flex items-center gap-2 justify-center text-sm">
+                          <span className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold">✓ ลูกค้าพร้อมแล้ว</span>
                           <span className="text-slate-400">→</span>
-                          <span className="px-3 py-2 bg-blue-500 text-white rounded-lg font-bold animate-pulse">Step 2 → นำเข้า Excel</span>
+                          <span className="px-3 py-2 bg-cyan-100 text-cyan-700 rounded-lg font-bold">นำเข้า Excel ที่หน้าลูกค้า</span>
                         </div>
                       </div>
                     )}
