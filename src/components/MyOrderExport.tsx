@@ -280,28 +280,24 @@ export default function MyOrderExport() {
       let matched = 0, notFound = 0;
       for (let i = 1; i < rows.length; i++) {
         const row      = rows[i];
-        const rawDate  = row[3];
-        const name     = String(row[4] || '').trim();
-        const tel      = String(row[6] || '').replace(/\D/g, '');
-        const rawTrack = String(row[17] || '').trim();
+        const name     = String(row[4] || '').trim();               // Col E ชื่อลูกค้า
+        const tel      = String(row[6] || '').replace(/\D/g, '');   // Col G เบอร์โทร
+        const rawTrack = String(row[17] || '').trim();              // Col R TRACKING NO.
+
         if (!rawTrack || (!name && !tel)) continue;
 
-        let dateStr = '';
-        if (rawDate instanceof Date) dateStr = rawDate.toISOString().split('T')[0];
-        else { const m = String(rawDate).match(/(\d{4}-\d{2}-\d{2})/); if (m) dateStr = m[1]; }
-        if (!dateStr) continue;
-
+        // ตัด suffix เช่น "(THAI_POST)" ออก
         const tracking = rawTrack.split('(')[0].trim();
 
+        // จับคู่ด้วยเบอร์โทรก่อน ถ้าไม่ได้ใช้ชื่อ — ไม่เช็คเลขออเดอร์และวันที่
         const match = (allOrders || []).find((o: any) => {
-          const oDate = String(o.order_date || '').split('T')[0];
           const cTel  = String((o.customers as any)?.tel  || '').replace(/\D/g, '');
           const cName = String((o.customers as any)?.name || '').trim();
-          return oDate === dateStr && (cTel === tel || cName === name);
+          return cTel === tel || cName === name;
         });
 
         if (match) { await supabase.from('orders').update({ tracking_no: tracking, order_status: 'รอแพ็ค' }).eq('id', match.id); matched++; }
-        else { notFound++; console.log(`ไม่พบ: วันที่=${dateStr} ชื่อ=${name} เบอร์=${tel}`); }
+        else { notFound++; console.log(`ไม่พบ: ชื่อ=${name} เบอร์=${tel}`); }
       }
       setUploadResult({ matched, notFound });
       await Promise.all([loadOrders(), loadExportedOrders(), loadPrintedOrders()]);
