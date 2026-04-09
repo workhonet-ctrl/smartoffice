@@ -55,7 +55,24 @@ export default function Packaging({
         const qtys     = String(o.quantities || o.quantity || '1').split('|');
         const promos: PromoDetail[] = [];
         for (let i = 0; i < rawProds.length; i++) {
-          const pid = o.promo_ids?.[i];
+          let pid = o.promo_ids?.[i];
+
+          // ── Fallback: ถ้าไม่มี promo_id → หาจาก product_mappings ──
+          if (!pid && rawProds[i]) {
+            const { data: mapping } = await supabase
+              .from('product_mappings')
+              .select('promo_id')
+              .eq('raw_name', rawProds[i])
+              .maybeSingle();
+            if (mapping?.promo_id) {
+              pid = mapping.promo_id;
+              // บันทึก promo_ids กลับลงออเดอร์ให้ถูกต้องสำหรับครั้งต่อไป
+              const updatedPromoIds = [...(o.promo_ids || rawProds.map(() => null))];
+              updatedPromoIds[i] = pid;
+              await supabase.from('orders').update({ promo_ids: updatedPromoIds }).eq('id', o.id);
+            }
+          }
+
           let promoData: any = null;
           if (pid) {
             const { data } = await supabase.from('products_promo')
