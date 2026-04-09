@@ -328,11 +328,12 @@ export default function Customers() {
 
       {/* Table */}
       <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-        <table className="text-sm w-full" style={{minWidth:'800px'}}>
+        <table className="text-sm w-full" style={{minWidth:'900px'}}>
           <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
             <tr>
               <th className="p-3 w-8"/>
               <th className="p-3 text-left">ชื่อลูกค้า</th>
+              <th className="p-3 text-left whitespace-nowrap">ชื่อเฟสบุ๊ก</th>
               <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
               <th className="p-3 text-left whitespace-nowrap">จังหวัด</th>
               <th className="p-3 text-left whitespace-nowrap">ช่องทาง</th>
@@ -343,8 +344,8 @@ export default function Customers() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={9} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
-            {!loading && filtered.length === 0 && <tr><td colSpan={9} className="p-8 text-center text-slate-400">ไม่พบลูกค้า</td></tr>}
+            {loading && <tr><td colSpan={10} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
+            {!loading && filtered.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-slate-400">ไม่พบลูกค้า</td></tr>}
             {filtered.map(c => (
               <>
                 <tr key={c.id} onClick={() => toggleExpand(c.id)}
@@ -354,9 +355,11 @@ export default function Customers() {
                   </td>
                   <td className="p-3">
                     <div className="font-medium text-slate-800">{c.name}</div>
-                    {c.facebook_name && c.facebook_name !== c.name && (
-                      <div className="text-xs text-slate-400">{c.facebook_name}</div>
-                    )}
+                  </td>
+                  <td className="p-3 text-xs text-blue-600 whitespace-nowrap">
+                    {c.facebook_name && c.facebook_name !== c.name && c.facebook_name !== '-'
+                      ? c.facebook_name
+                      : <span className="text-slate-300">-</span>}
                   </td>
                   <td className="p-3 font-mono text-xs text-slate-600">{c.tel}</td>
                   <td className="p-3 text-xs text-slate-500">{c.province || '-'}</td>
@@ -383,7 +386,7 @@ export default function Customers() {
                 {/* ExpandedRow: รายละเอียด + ประวัติออเดอร์ */}
                 {expanded === c.id && (
                   <tr key={`${c.id}-detail`}>
-                    <td colSpan={9} className="bg-cyan-50 px-6 py-4 border-b">
+                    <td colSpan={10} className="bg-cyan-50 px-6 py-4 border-b">
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                         <div>
                           <div className="text-xs text-slate-400 mb-0.5">ที่อยู่</div>
