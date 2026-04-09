@@ -48,13 +48,19 @@ export default function FlashExport() {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [searchProduct, setSearchProduct]   = useState('');
   const [searchExported, setSearchExported] = useState('');
-  // ข้อ 1: filter เพิ่มเติมใน tab รอส่งออก
-  const [filterCustomer, setFilterCustomer] = useState('');
-  const [filterDateFrom, setFilterDateFrom] = useState('');
-  const [filterDateTo,   setFilterDateTo]   = useState('');
   // upload tracking file
-  const [uploadResult, setUploadResult] = useState<{ matched: number; notFound: number } | null>(null);
+  const [uploadResult, setUploadResult] = useState<{ matched: number; notFound: number; conflicts: number } | null>(null);
   const [uploading, setUploading] = useState(false);
+
+  // ── Conflict resolution ──────────────────────────────────────────────
+  type ConflictItem = {
+    tracking: string; name: string; tel: string;
+    cod: string; size: string; time: string;
+    candidates: { id: string; raw_prod: string | null; order_date: string | null; total_thb: number }[];
+    chosen: string | null; // order id ที่เลือก
+  };
+  const [conflicts, setConflicts]   = useState<ConflictItem[]>([]);
+  const [showConflict, setShowConflict] = useState(false);
 
   useEffect(() => { loadOrders(); loadExportedOrders(); loadPrintedOrders(); }, []);
 
@@ -100,9 +106,9 @@ export default function FlashExport() {
       const codAmount = isCOD ? Math.floor(order.total_thb) : '';
       const address = [
         order.customers?.address,
-        order.customers?.subdistrict ? `ตำบล${order.customers.subdistrict}` : null,
-        order.customers?.district    ? `อำเภอ${order.customers.district}` : null,
-        order.customers?.province    ? `จังหวัด${order.customers.province}` : null,
+        order.customers?.subdistrict ? `ต.${order.customers.subdistrict}` : null,
+        order.customers?.district    ? `อ.${order.customers.district}` : null,
+        order.customers?.province    ? `จ.${order.customers.province}` : null,
       ].filter(Boolean).join(' ');
       const orderNoWithName = `${order.order_no} ${order.raw_prod || ''}`.trim();
 
@@ -127,18 +133,13 @@ export default function FlashExport() {
           p = data;
         }
         const shortName = p?.short_name || p?.name || rawProds[i];
-        const qty = qtyFromSel; // จำนวน pack ที่ user กำหนด
-        const pieces = p?.name ? extractQty(p.name) * qty : qty; // จำนวนชิ้นจริง (เช่น 1แถม1 × 1 = 2 ชิ้น)
+        const qty = qtyFromSel; // ใช้จำนวนที่ผู้ใช้กำหนด
         itemDescs.push(`${shortName}|-|-|${qty}`);
-        if (p?.products_master?.weight_g) totalWeightKg += (Number(p.products_master.weight_g) * pieces) / 1000;
+        if (p?.products_master?.weight_g) totalWeightKg += (Number(p.products_master.weight_g) * qty) / 1000;
         if (i === 0) { boxL = Number(p?.boxes?.length_cm)||1; boxW = Number(p?.boxes?.width_cm)||1; boxH = Number(p?.boxes?.height_cm)||1; flashItemType = p?.item_type||'พัสดุ'; }
       }
       if (totalWeightKg === 0) totalWeightKg = Math.max(Number(order.weight_kg ?? 0), 0.1);
-      // ปัดน้ำหนักตามเกณฑ์ Flash: < 0.5 → 1.0 kg, >= 0.5 → ปัดขึ้นทีละ 0.5
-      const roundedWeight = totalWeightKg < 0.5
-        ? 1.0
-        : Math.ceil(totalWeightKg / 0.5) * 0.5 + 0.5;
-      const weightKgStr = roundedWeight.toFixed(2);
+      const weightKgStr = Math.max(totalWeightKg, 0.1).toFixed(2);
       const [d1='',d2='',d3='',d4='',d5=''] = [...itemDescs,'','','','',''];
       const phone = (order.customers?.tel||'').replace(/[^0-9]/g,'');
 
@@ -216,53 +217,63 @@ export default function FlashExport() {
       const ws  = wb.Sheets[wb.SheetNames[0]];
       const rows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-      let matched = 0; let notFound = 0;
+      let matched = 0; let notFound = 0; let conflictCount = 0;
+      const newConflicts: ConflictItem[] = [];
 
-      // โหลดออเดอร์ route B ที่ยังไม่มี tracking ทั้งหมด
+      // โหลดออเดอร์ route B ที่ยังไม่มี tracking
       const { data: allOrders } = await supabase
         .from('orders')
-        .select('id, order_date, order_status, customers(name, tel)')
+        .select('id, order_date, order_status, total_thb, raw_prod, customers(name, tel)')
         .eq('route', 'B')
         .or('tracking_no.is.null,tracking_no.eq.');
 
       for (let i = 1; i < rows.length; i++) {
         const row      = rows[i];
-        const rawDate  = row[0];
         const tracking = String(row[1] || '').trim();
         const name     = String(row[10] || '').trim();
-        const tel      = String(row[11] || '').replace(/\D/g, ''); // เบอร์เฉพาะตัวเลข
+        const tel      = String(row[11] || '').replace(/\D/g, '');
+        const cod      = String(row[17] || '');
+        const size     = String(row[16] || '');
+        const time     = String(row[0] || '').substring(0, 16);
 
         if (!tracking || (!name && !tel)) continue;
 
-        // parse วันที่
-        let dateStr = '';
-        if (rawDate instanceof Date) {
-          dateStr = rawDate.toISOString().split('T')[0];
-        } else {
-          const m = String(rawDate).match(/(\d{4}-\d{2}-\d{2})/);
-          if (m) dateStr = m[1];
-        }
-        if (!dateStr) continue;
-
-        // จับคู่จากชื่อ + เบอร์โทรเท่านั้น (ไม่ใช้วันที่ เพราะวันที่ในไฟล์ Flash = วันรับพัสดุ ≠ วันสั่งซื้อ)
-        const match = (allOrders || []).find((o: any) => {
+        // หา orders ที่ตรงกับ name หรือ tel ทั้งหมด
+        const matches = (allOrders || []).filter((o: any) => {
           const cTel  = String((o.customers as any)?.tel || '').replace(/\D/g, '');
           const cName = String((o.customers as any)?.name || '').trim();
           return cTel === tel || cName === name;
         });
 
-        if (match) {
+        if (matches.length === 0) {
+          notFound++;
+        } else if (matches.length === 1) {
+          // ตรงเดียว → assign ทันที
           await supabase.from('orders')
             .update({ tracking_no: tracking, order_status: 'รอแพ็ค' })
-            .eq('id', match.id);
+            .eq('id', matches[0].id);
           matched++;
         } else {
-          notFound++;
-          console.log(`ไม่พบ: วันที่=${dateStr} ชื่อ=${name} เบอร์=${tel}`);
+          // ซ้ำ → เพิ่มเข้า conflict queue ให้ user เลือก
+          conflictCount++;
+          newConflicts.push({
+            tracking, name, tel, cod, size, time,
+            candidates: matches.map((o: any) => ({
+              id: o.id,
+              raw_prod: o.raw_prod,
+              order_date: o.order_date,
+              total_thb: o.total_thb,
+            })),
+            chosen: null,
+          });
         }
       }
 
-      setUploadResult({ matched, notFound });
+      setUploadResult({ matched, notFound, conflicts: conflictCount });
+      if (newConflicts.length > 0) {
+        setConflicts(newConflicts);
+        setShowConflict(true);
+      }
       await Promise.all([loadOrders(), loadPrintedOrders()]);
     } catch (err) {
       console.error(err);
@@ -273,15 +284,24 @@ export default function FlashExport() {
     }
   };
 
+  // ── บันทึก conflict ที่ user เลือกแล้ว ──────────────────────────────────
+  const handleConflictSave = async () => {
+    for (const c of conflicts) {
+      if (!c.chosen) continue;
+      await supabase.from('orders')
+        .update({ tracking_no: c.tracking, order_status: 'รอแพ็ค' })
+        .eq('id', c.chosen);
+    }
+    setShowConflict(false);
+    setConflicts([]);
+    await Promise.all([loadOrders(), loadPrintedOrders()]);
+  };
+
   const togglePending  = (id: string) => setSelectedPending(s  => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleExported = (id: string) => setSelectedExported(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const filteredOrders = orders.filter(o => {
-    if (searchProduct.trim() && !(o.raw_prod || '').toLowerCase().includes(searchProduct.toLowerCase())) return false;
-    if (filterCustomer.trim() && !(o.customers?.name || '').toLowerCase().includes(filterCustomer.toLowerCase()) && !(o.customers?.tel || '').includes(filterCustomer)) return false;
-    if (filterDateFrom && o.order_date && o.order_date < filterDateFrom) return false;
-    if (filterDateTo   && o.order_date && o.order_date > filterDateTo)   return false;
-    return true;
-  });
+  const filteredOrders = searchProduct.trim()
+    ? orders.filter(o => (o.raw_prod || '').toLowerCase().includes(searchProduct.toLowerCase()))
+    : orders;
 
   const filteredExportedOrders = searchExported.trim()
     ? exportedOrders.filter(o => (o.raw_prod || '').toLowerCase().includes(searchExported.toLowerCase()))
@@ -315,54 +335,26 @@ export default function FlashExport() {
       {/* ── Tab: รอส่งออก ── */}
       {tab === 'pending' && (
         <>
-          {/* Filter bar */}
-          <div className="shrink-0 mb-3 bg-white rounded-xl border px-4 py-3 space-y-2">
-            <div className="flex gap-2 flex-wrap items-center">
-              {/* ค้นหาสินค้า */}
-              <div className="relative flex-1 min-w-[180px]">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">📦</span>
-                <input type="text" value={searchProduct} onChange={e => setSearchProduct(e.target.value)}
-                  placeholder="ค้นหาสินค้า..."
-                  className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
-              </div>
-              {/* ค้นหาลูกค้า */}
-              <div className="relative flex-1 min-w-[160px]">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">👤</span>
-                <input type="text" value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)}
-                  placeholder="ค้นหาลูกค้า / เบอร์..."
-                  className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
-              </div>
-              {/* วันที่ */}
-              <div className="flex items-center gap-1.5 text-sm">
-                <span className="text-slate-500 whitespace-nowrap text-xs">วันที่</span>
-                <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)}
-                  className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
-                <span className="text-slate-400">—</span>
-                <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)}
-                  className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
-              </div>
-              {/* Clear */}
-              {(searchProduct || filterCustomer || filterDateFrom || filterDateTo) && (
-                <button onClick={() => { setSearchProduct(''); setFilterCustomer(''); setFilterDateFrom(''); setFilterDateTo(''); }}
-                  className="px-2.5 py-2 bg-slate-100 text-slate-500 rounded-lg text-xs hover:bg-slate-200 whitespace-nowrap">
-                  ล้าง ✕
-                </button>
-              )}
+          <div className="flex gap-3 mb-3 shrink-0 flex-wrap items-center">
+            {/* Search */}
+            <div className="relative flex-1 min-w-[200px]">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
+              <input type="text" value={searchProduct} onChange={e => setSearchProduct(e.target.value)}
+                placeholder="ค้นหาชื่อสินค้า เช่น ครีม Secret Rose(1 แถม 1)..."
+                className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
             </div>
-            <div className="flex gap-2 flex-wrap items-center">
-              {filteredOrders.length !== orders.length && (
-                <span className="text-xs text-slate-500">แสดง {filteredOrders.length} / {orders.length} รายการ</span>
-              )}
-              <button onClick={handlePreview} disabled={orders.length===0||previewing}
-                className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 text-sm">
-                <Eye size={16}/> {previewing?'กำลังโหลด...':'ดูตัวอย่าง'}{selectedPending.size>0?` (${selectedPending.size})`:''}
-              </button>
-              <button onClick={handleExport} disabled={orders.length===0||exporting}
-                className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 flex items-center gap-2 disabled:opacity-50 text-sm">
-                <Download size={16}/> {exporting?'กำลังส่งออก...':`ส่งออก Flash (${pendingCount} รายการ)`}
-              </button>
-              {selectedPending.size>0 && <span className="self-center text-xs text-slate-500">เลือก {selectedPending.size} จาก {orders.length}</span>}
-            </div>
+            {searchProduct && (
+              <span className="text-xs text-slate-500 shrink-0">พบ {filteredOrders.length} รายการ</span>
+            )}
+            <button onClick={handlePreview} disabled={orders.length===0||previewing}
+              className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 text-sm">
+              <Eye size={16}/> {previewing?'กำลังโหลด...':'ดูตัวอย่าง'}{selectedPending.size>0?` (${selectedPending.size})`:''}
+            </button>
+            <button onClick={handleExport} disabled={orders.length===0||exporting}
+              className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 flex items-center gap-2 disabled:opacity-50 text-sm">
+              <Download size={16}/> {exporting?'กำลังส่งออก...':`ส่งออก Flash (${pendingCount} รายการ)`}
+            </button>
+            {selectedPending.size>0 && <span className="self-center text-xs text-slate-500">เลือก {selectedPending.size} จาก {orders.length}</span>}
           </div>
 
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
@@ -526,9 +518,19 @@ export default function FlashExport() {
               </label>
             </div>
             {uploadResult && (
-              <div className={`mt-3 p-3 rounded-lg text-sm flex items-center gap-3 ${uploadResult.matched > 0 ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
+              <div className={`mt-3 p-3 rounded-lg text-sm flex items-center gap-3 flex-wrap
+                ${uploadResult.conflicts > 0 ? 'bg-orange-50 text-orange-700' : uploadResult.matched > 0 ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
                 <span>✓ จับคู่สำเร็จ <strong>{uploadResult.matched}</strong> ออเดอร์</span>
-                {uploadResult.notFound > 0 && <span className="text-orange-600">· ไม่พบ {uploadResult.notFound} รายการ</span>}
+                {uploadResult.notFound > 0 && <span className="text-slate-500">· ไม่พบ {uploadResult.notFound} รายการ</span>}
+                {uploadResult.conflicts > 0 && (
+                  <span className="flex items-center gap-2">
+                    · ⚠ ชื่อ+เบอร์ซ้ำ <strong>{uploadResult.conflicts}</strong> รายการ ต้องเลือก tracking เอง
+                    <button onClick={() => setShowConflict(true)}
+                      className="px-2.5 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 font-bold">
+                      เลือก Tracking
+                    </button>
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -685,6 +687,85 @@ export default function FlashExport() {
                 <button onClick={() => { setShowPreview(false); handleExport(); }} disabled={exporting}
                   className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 flex items-center gap-2 text-sm">
                   <Download size={16}/> ส่งออก Flash
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Conflict Resolution Modal ─────────────────────────────────────── */}
+      {showConflict && conflicts.length > 0 && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b shrink-0">
+              <h3 className="text-lg font-bold text-slate-800">⚠ พบออเดอร์ที่ชื่อ + เบอร์ซ้ำกัน — เลือก Tracking เอง</h3>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {conflicts.length} รายการ · กรุณาเลือกว่า Tracking ไหน ตรงกับออเดอร์ไหน
+              </p>
+            </div>
+            <div className="overflow-auto flex-1 p-4 space-y-4">
+              {conflicts.map((c, ci) => (
+                <div key={ci} className="border rounded-xl p-4 bg-orange-50 border-orange-200">
+                  {/* Tracking info */}
+                  <div className="flex items-center gap-3 mb-3 flex-wrap">
+                    <span className="font-mono font-bold text-orange-700 text-sm">{c.tracking}</span>
+                    <span className="text-xs text-slate-500">ผู้รับ: <strong>{c.name}</strong> {c.tel}</span>
+                    <span className="text-xs text-slate-400">COD ฿{c.cod}</span>
+                    <span className="text-xs text-slate-400">ขนาด {c.size}</span>
+                    <span className="text-xs text-slate-400">เวลา {c.time}</span>
+                  </div>
+                  <p className="text-xs text-slate-600 mb-2 font-medium">เลือกออเดอร์ที่ตรงกับ Tracking นี้:</p>
+                  <div className="grid grid-cols-1 gap-2">
+                    {c.candidates.map(order => {
+                      // เช็คว่าออเดอร์นี้ถูกเลือกให้ conflict อื่นแล้วหรือไม่
+                      const takenBy = conflicts.findIndex((x, xi) => xi !== ci && x.chosen === order.id);
+                      const isTaken = takenBy >= 0;
+                      const isChosen = c.chosen === order.id;
+                      return (
+                        <button key={order.id}
+                          disabled={isTaken}
+                          onClick={() => setConflicts(prev => prev.map((x, xi) =>
+                            xi === ci ? { ...x, chosen: isChosen ? null : order.id } : x
+                          ))}
+                          className={`w-full text-left px-4 py-3 rounded-lg border-2 transition text-sm
+                            ${isTaken ? 'border-slate-200 bg-slate-100 opacity-40 cursor-not-allowed' :
+                              isChosen ? 'border-green-500 bg-green-50' :
+                              'border-slate-200 bg-white hover:border-orange-400 cursor-pointer'}`}>
+                          <div className="flex items-center gap-3 flex-wrap">
+                            {isChosen && <span className="text-green-600 font-bold">✓</span>}
+                            <span className="font-medium text-slate-700">{order.raw_prod || '-'}</span>
+                            <span className="text-slate-400 text-xs">วันที่ {order.order_date || '-'}</span>
+                            <span className="text-slate-600 text-xs font-bold ml-auto">฿{Number(order.total_thb).toLocaleString()}</span>
+                            {isTaken && <span className="text-[10px] text-slate-400">(เลือกใน #{takenBy + 1} แล้ว)</span>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                    <button
+                      onClick={() => setConflicts(prev => prev.map((x, xi) =>
+                        xi === ci ? { ...x, chosen: 'skip' } : x
+                      ))}
+                      className={`w-full text-left px-4 py-2 rounded-lg border-2 transition text-xs
+                        ${c.chosen === 'skip' ? 'border-slate-500 bg-slate-100 text-slate-700 font-bold' : 'border-dashed border-slate-300 text-slate-400 hover:border-slate-400'}`}>
+                      ข้ามรายการนี้ (ไม่ assign tracking)
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 py-4 border-t flex justify-between items-center shrink-0">
+              <p className="text-xs text-slate-400">
+                เลือกแล้ว {conflicts.filter(c => c.chosen && c.chosen !== 'skip').length} / {conflicts.length} รายการ
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => { setShowConflict(false); }}
+                  className="px-4 py-2 bg-slate-200 rounded-lg text-sm hover:bg-slate-300">ปิด</button>
+                <button
+                  onClick={handleConflictSave}
+                  disabled={conflicts.some(c => !c.chosen)}
+                  className="px-5 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm font-bold disabled:opacity-50">
+                  บันทึก Tracking ที่เลือก
                 </button>
               </div>
             </div>
