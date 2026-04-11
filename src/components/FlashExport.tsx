@@ -445,6 +445,28 @@ export default function FlashExport() {
                 className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-300"/>
             </div>
             {searchExported && <span className="text-xs text-slate-500 shrink-0">พบ {filteredExportedOrders.length} รายการ</span>}
+            {/* ปุ่มย้ายไป MyOrder */}
+            <button
+              onClick={() => {
+                const targets = selectedExported.size > 0
+                  ? exportedOrders.filter(o => selectedExported.has(o.id))
+                  : exportedOrders;
+                if (targets.length === 0) return;
+                if (!confirm(`ย้าย ${targets.length} ออเดอร์ไปยัง MyOrder Export?\nRoute จะเปลี่ยนจาก Flash → MyOrder`)) return;
+                setMovingToMyOrder(true);
+                supabase.from('orders')
+                  .update({ route: 'A', order_status: 'รอคีย์ออเดอร์' })
+                  .in('id', targets.map(o => o.id))
+                  .then(() => {
+                    setSelectedExported(new Set());
+                    Promise.all([loadOrders(), loadExportedOrders(), loadPrintedOrders()])
+                      .finally(() => setMovingToMyOrder(false));
+                  });
+              }}
+              disabled={exportedOrders.length === 0 || movingToMyOrder}
+              className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-2 text-sm disabled:opacity-50">
+              📦 {movingToMyOrder ? 'กำลังย้าย...' : `ย้ายไป MyOrder${selectedExported.size > 0 ? ` (${selectedExported.size})` : ''}`}
+            </button>
             <button onClick={handleReExport} disabled={exportedOrders.length===0||reExporting}
               className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 flex items-center gap-2 disabled:opacity-50 text-sm">
               <Download size={16}/> {reExporting?'กำลังส่งออก...':`ส่งออกซ้ำ (${exportedCount} รายการ)`}
