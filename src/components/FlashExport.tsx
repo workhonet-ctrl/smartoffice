@@ -44,6 +44,7 @@ export default function FlashExport() {
   const [tab, setTab]                     = useState<'pending' | 'exported' | 'printed'>('pending');
   const [selectedPending,  setSelectedPending]  = useState<Set<string>>(new Set());
   const [selectedExported, setSelectedExported] = useState<Set<string>>(new Set());
+  const [selectedPrinted,  setSelectedPrinted]  = useState<Set<string>>(new Set());
   const [orderSelections, setOrderSelections] = useState<OrderSelections>({});
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [searchProduct, setSearchProduct]   = useState('');
@@ -204,6 +205,24 @@ export default function FlashExport() {
     await supabase.from('orders').update({ order_status: 'รอคีย์ออเดอร์' }).in('id', ids);
     setSelectedExported(new Set());
     await Promise.all([loadOrders(), loadExportedOrders()]);
+  };
+
+  // ── ย้าย route B → A เพื่อส่งผ่าน MyOrder Export ─────────────────────
+  const [movingToMyOrder, setMovingToMyOrder] = useState(false);
+  const handleMoveToMyOrder = async () => {
+    const targets = selectedPrinted.size > 0
+      ? printedOrders.filter(o => selectedPrinted.has(o.id))
+      : printedOrders;
+    if (targets.length === 0) return;
+    if (!confirm(`ย้าย ${targets.length} ออเดอร์ไปยัง MyOrder Export?\nออเดอร์จะเปลี่ยน route เป็น MyOrder และกลับไปที่ "รอคีย์ออเดอร์"`)) return;
+    setMovingToMyOrder(true);
+    try {
+      await supabase.from('orders')
+        .update({ route: 'A', order_status: 'รอคีย์ออเดอร์' })
+        .in('id', targets.map(o => o.id));
+      setSelectedPrinted(new Set());
+      await Promise.all([loadOrders(), loadExportedOrders(), loadPrintedOrders()]);
+    } finally { setMovingToMyOrder(false); }
   };
 
   const handleFlashUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -535,11 +554,41 @@ export default function FlashExport() {
             )}
           </div>
 
+          {/* Toolbar ปริ้นแล้ว */}
+          <div className="shrink-0 flex gap-2 mb-3 flex-wrap items-center">
+            <span className="text-sm text-slate-600 font-medium">
+              {selectedPrinted.size > 0
+                ? `เลือก ${selectedPrinted.size} / ${printedOrders.length} รายการ`
+                : `${printedOrders.length} รายการ`}
+            </span>
+            <button
+              onClick={handleMoveToMyOrder}
+              disabled={movingToMyOrder || printedOrders.length === 0}
+              className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 text-sm font-medium flex items-center gap-2 disabled:opacity-50">
+              📦 {movingToMyOrder ? 'กำลังย้าย...' : `ย้ายไป MyOrder${selectedPrinted.size > 0 ? ` (${selectedPrinted.size})` : ' (ทั้งหมด)'}`}
+            </button>
+            {selectedPrinted.size > 0 && (
+              <button onClick={() => setSelectedPrinted(new Set())}
+                className="px-3 py-2 bg-slate-100 text-slate-500 rounded-lg text-xs hover:bg-slate-200">
+                ยกเลิกเลือก
+              </button>
+            )}
+            <div className="ml-auto text-xs text-slate-400 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+              💡 ย้าย route Flash → MyOrder · ออเดอร์จะไปปรากฏในหน้า MyOrder Export
+            </div>
+          </div>
+
           {/* ตารางออเดอร์ที่มี tracking แล้ว (รอแพ็ค) */}
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
             <table className="text-sm w-full" style={{minWidth:'700px'}}>
               <thead className="bg-green-800 text-green-100 text-xs sticky top-0 z-10">
                 <tr>
+                  <th className="p-3 w-8">
+                    <input type="checkbox"
+                      checked={printedOrders.length > 0 && printedOrders.every(o => selectedPrinted.has(o.id))}
+                      onChange={e => setSelectedPrinted(e.target.checked ? new Set(printedOrders.map(o => o.id)) : new Set())}
+                      className="rounded"/>
+                  </th>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
@@ -551,12 +600,18 @@ export default function FlashExport() {
               </thead>
               <tbody>
                 {printedOrders.length === 0 && (
-                  <tr><td colSpan={7} className="p-8 text-center text-slate-400">
+                  <tr><td colSpan={8} className="p-8 text-center text-slate-400">
                     ยังไม่มีออเดอร์ที่ส่งออกแล้ว — อัพโหลดไฟล์ Flash เพื่อจับคู่ tracking
                   </td></tr>
                 )}
                 {printedOrders.map(o => (
-                  <tr key={o.id} className="border-b hover:bg-green-50">
+                  <tr key={o.id} className={`border-b hover:bg-green-50 ${selectedPrinted.has(o.id) ? 'bg-indigo-50' : ''}`}>
+                    <td className="p-3">
+                      <input type="checkbox"
+                        checked={selectedPrinted.has(o.id)}
+                        onChange={() => setSelectedPrinted(s => { const n = new Set(s); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n; })}
+                        className="rounded"/>
+                    </td>
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
                     <td className="p-3 font-mono text-xs text-green-700 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
