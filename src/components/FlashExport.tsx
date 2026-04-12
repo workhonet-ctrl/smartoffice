@@ -662,10 +662,33 @@ export default function FlashExport() {
                       <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
                       <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
                       <td className="p-3 text-xs text-slate-500 max-w-[160px] truncate">{o.raw_prod || '-'}</td>
-                      <td className="p-3 font-mono text-xs whitespace-nowrap">
-                        {hasTracking
-                          ? <span className="text-blue-600 font-bold">{(o as any).tracking_no}</span>
-                          : <span className="text-slate-300">รอ Tracking</span>}
+                      <td className="p-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            defaultValue={(o as any).tracking_no || ''}
+                            placeholder="กรอก Tracking..."
+                            className={`border rounded px-2 py-1 text-xs font-mono w-40 focus:outline-none focus:ring-1 ${hasTracking ? 'border-blue-300 focus:ring-blue-300 text-blue-700' : 'border-slate-200 focus:ring-orange-300'}`}
+                            onBlur={async (e) => {
+                              const val = e.target.value.trim();
+                              if (!val || val === ((o as any).tracking_no || '')) return;
+                              await supabase.from('orders')
+                                .update({ tracking_no: val })
+                                .eq('id', o.id);
+                              await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
+                            }}
+                            onKeyDown={async (e) => {
+                              if (e.key === 'Enter') {
+                                const val = (e.target as HTMLInputElement).value.trim();
+                                if (!val) return;
+                                await supabase.from('orders')
+                                  .update({ tracking_no: val })
+                                  .eq('id', o.id);
+                                await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
+                                (e.target as HTMLInputElement).blur();
+                              }
+                            }}
+                          />
+                        </div>
                       </td>
                       <td className="p-3 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${hasTracking ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
