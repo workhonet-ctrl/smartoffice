@@ -467,36 +467,75 @@ export default function FlashExport() {
       {/* ── Tab: รอแพ็ค (export แล้ว ยังไม่มี tracking) ── */}
       {tab === 'pack' && (
         <>
-          <div className="shrink-0 mb-3 px-3 py-2 bg-teal-50 border border-teal-100 rounded-lg text-xs text-teal-700">
-            📦 ออเดอร์ที่ส่งออก Flash แล้ว · กำลังรอ Flash คืน Tracking · <strong>หน้าแพ็คสินค้าจะดึงข้อมูลจากนี้</strong>
+          {/* Tracking Upload */}
+          <div className="shrink-0 bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-3">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h3 className="font-semibold text-slate-700">อัพโหลดไฟล์ Tracking จาก Flash</h3>
+                <p className="text-xs text-slate-400 mt-0.5">จับคู่ชื่อ + เบอร์ → ใส่ Tracking อัตโนมัติ</p>
+              </div>
+              <label className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer flex items-center gap-2 ${uploading ? 'bg-slate-200 text-slate-400' : 'bg-green-500 text-white hover:bg-green-600'}`}>
+                <Download size={14}/> {uploading ? 'กำลังประมวลผล...' : 'อัพโหลดไฟล์ Flash (.xlsx)'}
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFlashUpload} disabled={uploading}/>
+              </label>
+            </div>
+            {uploadResult && (
+              <div className={`mt-3 p-3 rounded-lg text-sm flex items-center gap-3 flex-wrap
+                ${uploadResult.conflicts > 0 ? 'bg-orange-50 text-orange-700' : uploadResult.matched > 0 ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
+                <span>✓ จับคู่สำเร็จ <strong>{uploadResult.matched}</strong> ออเดอร์</span>
+                {uploadResult.notFound > 0 && <span className="text-slate-500">· ไม่พบ {uploadResult.notFound} รายการ</span>}
+                {uploadResult.conflicts > 0 && (
+                  <span className="flex items-center gap-2">
+                    · ⚠ ชื่อ+เบอร์ซ้ำ <strong>{uploadResult.conflicts}</strong> รายการ
+                    <button onClick={() => setShowConflict(true)} className="px-2.5 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 font-bold">เลือก Tracking</button>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="shrink-0 flex gap-2 mb-3 items-center flex-wrap">
+            <span className="text-xs text-teal-700 bg-teal-50 border border-teal-100 rounded-lg px-3 py-2">
+              📦 ออเดอร์รอแพ็ค {packReadyOrders.length} รายการ · หน้าแพ็คสินค้าดึงข้อมูลจากนี้
+            </span>
+            <button onClick={handleMoveToMyOrder} disabled={movingToMyOrder || packReadyOrders.length === 0}
+              className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 text-xs font-medium disabled:opacity-50">
+              📦 {movingToMyOrder ? 'กำลังย้าย...' : `ย้ายไป MyOrder${selectedPrinted.size > 0 ? ` (${selectedPrinted.size})` : ''}`}
+            </button>
           </div>
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-            <table className="text-sm w-full" style={{minWidth:'700px'}}>
+            <table className="text-sm w-full" style={{minWidth:'750px'}}>
               <thead className="bg-teal-800 text-teal-100 text-xs sticky top-0 z-10">
                 <tr>
+                  <th className="p-3 w-8"><input type="checkbox"
+                    checked={packReadyOrders.length > 0 && packReadyOrders.every(o => selectedPrinted.has(o.id))}
+                    onChange={e => setSelectedPrinted(e.target.checked ? new Set(packReadyOrders.map(o => o.id)) : new Set())}
+                    className="rounded"/></th>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
                   <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
                   <th className="p-3 text-left">สินค้า</th>
-                  <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
+                  <th className="p-3 text-left whitespace-nowrap">Tracking</th>
                   <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
                 </tr>
               </thead>
               <tbody>
                 {packReadyOrders.length === 0 && (
-                  <tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์รอแพ็ค</td></tr>
+                  <tr><td colSpan={8} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์รอแพ็ค</td></tr>
                 )}
                 {packReadyOrders.map(o => (
-                  <tr key={o.id} className="border-b hover:bg-teal-50">
+                  <tr key={o.id} className={`border-b hover:bg-teal-50 ${selectedPrinted.has(o.id) ? 'bg-indigo-50' : ''}`}>
+                    <td className="p-3"><input type="checkbox" checked={selectedPrinted.has(o.id)}
+                      onChange={() => setSelectedPrinted(s => { const n = new Set(s); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n; })}
+                      className="rounded"/></td>
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
                     <td className="p-3 font-mono text-xs text-teal-700 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
-                    <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod || '-'}</td>
-                    <td className="p-3 text-right font-bold">฿{Number(o.total_thb).toLocaleString()}</td>
+                    <td className="p-3 text-xs text-slate-500 max-w-[160px] truncate">{o.raw_prod || '-'}</td>
+                    <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{(o as any).tracking_no || <span className="text-slate-300 text-xs">รอ Tracking</span>}</td>
                     <td className="p-3 text-center">
-                      <span className="px-2 py-0.5 bg-teal-100 text-teal-700 rounded-full text-xs font-bold">รอ Tracking</span>
+                      <span className="px-2 py-0.5 bg-teal-100 text-teal-700 rounded-full text-xs font-bold">รอแพ็ค</span>
                     </td>
                   </tr>
                 ))}
@@ -615,74 +654,16 @@ export default function FlashExport() {
 
       {/* ── Modal แก้ไขสินค้า ── */}
 
-      {/* ── Tab: ส่งออกแล้ว — upload tracking + แสดงออเดอร์ที่มี tracking แล้ว ── */}
+      {/* ── Tab: กำลังแพ็ค ── */}
       {tab === 'printed' && (
         <>
-          {/* Upload */}
-          <div className="shrink-0 bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-4">
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <h3 className="font-semibold text-slate-700">อัพโหลดไฟล์ Tracking จาก Flash</h3>
-                <p className="text-xs text-slate-400 mt-0.5">จับคู่ วันที่ + ชื่อ + เบอร์ → ใส่ Tracking → เปลี่ยนสถานะเป็น รอแพ็ค</p>
-              </div>
-              <label className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer flex items-center gap-2 ${uploading ? 'bg-slate-200 text-slate-400' : 'bg-green-500 text-white hover:bg-green-600'}`}>
-                <Download size={14}/> {uploading ? 'กำลังประมวลผล...' : 'อัพโหลดไฟล์ Flash (.xlsx)'}
-                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFlashUpload} disabled={uploading}/>
-              </label>
-            </div>
-            {uploadResult && (
-              <div className={`mt-3 p-3 rounded-lg text-sm flex items-center gap-3 flex-wrap
-                ${uploadResult.conflicts > 0 ? 'bg-orange-50 text-orange-700' : uploadResult.matched > 0 ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
-                <span>✓ จับคู่สำเร็จ <strong>{uploadResult.matched}</strong> ออเดอร์</span>
-                {uploadResult.notFound > 0 && <span className="text-slate-500">· ไม่พบ {uploadResult.notFound} รายการ</span>}
-                {uploadResult.conflicts > 0 && (
-                  <span className="flex items-center gap-2">
-                    · ⚠ ชื่อ+เบอร์ซ้ำ <strong>{uploadResult.conflicts}</strong> รายการ ต้องเลือก tracking เอง
-                    <button onClick={() => setShowConflict(true)}
-                      className="px-2.5 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 font-bold">
-                      เลือก Tracking
-                    </button>
-                  </span>
-                )}
-              </div>
-            )}
+          <div className="shrink-0 mb-3 px-3 py-2 bg-orange-50 border border-orange-100 rounded-lg text-xs text-orange-700">
+            📦 ออเดอร์ที่กำลังแพ็คอยู่ — สร้างใบเบิกจากหน้าแพ็คสินค้าแล้ว · รอแพ็คเสร็จ
           </div>
-
-          {/* Toolbar ปริ้นแล้ว */}
-          <div className="shrink-0 flex gap-2 mb-3 flex-wrap items-center">
-            <span className="text-sm text-slate-600 font-medium">
-              {selectedPrinted.size > 0
-                ? `เลือก ${selectedPrinted.size} / ${printedOrders.length} รายการ`
-                : `${printedOrders.length} รายการ`}
-            </span>
-            <button
-              onClick={handleMoveToMyOrder}
-              disabled={movingToMyOrder || printedOrders.length === 0}
-              className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 text-sm font-medium flex items-center gap-2 disabled:opacity-50">
-              📦 {movingToMyOrder ? 'กำลังย้าย...' : `ย้ายไป MyOrder${selectedPrinted.size > 0 ? ` (${selectedPrinted.size})` : ' (ทั้งหมด)'}`}
-            </button>
-            {selectedPrinted.size > 0 && (
-              <button onClick={() => setSelectedPrinted(new Set())}
-                className="px-3 py-2 bg-slate-100 text-slate-500 rounded-lg text-xs hover:bg-slate-200">
-                ยกเลิกเลือก
-              </button>
-            )}
-            <div className="ml-auto text-xs text-slate-400 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
-              💡 ย้าย route Flash → MyOrder · ออเดอร์จะไปปรากฏในหน้า MyOrder Export
-            </div>
-          </div>
-
-          {/* ตารางออเดอร์ที่มี tracking แล้ว (รอแพ็ค) */}
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
             <table className="text-sm w-full" style={{minWidth:'700px'}}>
-              <thead className="bg-green-800 text-green-100 text-xs sticky top-0 z-10">
+              <thead className="bg-orange-700 text-orange-100 text-xs sticky top-0 z-10">
                 <tr>
-                  <th className="p-3 w-8">
-                    <input type="checkbox"
-                      checked={printedOrders.length > 0 && printedOrders.every(o => selectedPrinted.has(o.id))}
-                      onChange={e => setSelectedPrinted(e.target.checked ? new Set(printedOrders.map(o => o.id)) : new Set())}
-                      className="rounded"/>
-                  </th>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
@@ -694,26 +675,20 @@ export default function FlashExport() {
               </thead>
               <tbody>
                 {printedOrders.length === 0 && (
-                  <tr><td colSpan={8} className="p-8 text-center text-slate-400">
-                    ยังไม่มีออเดอร์ที่ส่งออกแล้ว — อัพโหลดไฟล์ Flash เพื่อจับคู่ tracking
+                  <tr><td colSpan={7} className="p-8 text-center text-slate-400">
+                    ยังไม่มีออเดอร์กำลังแพ็ค — สร้างใบเบิกจากหน้าแพ็คสินค้าก่อน
                   </td></tr>
                 )}
                 {printedOrders.map(o => (
-                  <tr key={o.id} className={`border-b hover:bg-green-50 ${selectedPrinted.has(o.id) ? 'bg-indigo-50' : ''}`}>
-                    <td className="p-3">
-                      <input type="checkbox"
-                        checked={selectedPrinted.has(o.id)}
-                        onChange={() => setSelectedPrinted(s => { const n = new Set(s); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n; })}
-                        className="rounded"/>
-                    </td>
+                  <tr key={o.id} className="border-b hover:bg-orange-50">
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
-                    <td className="p-3 font-mono text-xs text-green-700 whitespace-nowrap">{o.order_no}</td>
+                    <td className="p-3 font-mono text-xs text-orange-700 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
                     <td className="p-3 text-xs text-slate-500 max-w-[160px] truncate">{o.raw_prod || '-'}</td>
                     <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{(o as any).tracking_no || '-'}</td>
                     <td className="p-3 text-center">
-                      <span className="px-2 py-0.5 bg-teal-100 text-teal-700 rounded-full text-xs font-bold">รอแพ็ค</span>
+                      <span className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full text-xs font-bold">กำลังแพ็ค</span>
                     </td>
                   </tr>
                 ))}
