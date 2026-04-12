@@ -565,7 +565,6 @@ function AdsExpenseDaily() {
               {[
                 { label: 'วันที่ *', val: mapDate,   set: setMapDate   },
                 { label: 'ชื่อโฆษณา', val: mapAdName, set: setMapAdName },
-                { label: 'ชื่อเพจโฆษณา', val: mapPage, set: setMapPage },
                 { label: 'จำนวนเงินที่ใช้จ่ายไป (THB) *', val: mapSpend, set: setMapSpend },
               ].map(({ label, val, set }) => (
                 <div key={label}>
@@ -588,6 +587,7 @@ function AdsExpenseDaily() {
                 const s = parseFloat(String(r[mapSpend] || '').replace(/,/g,''));
                 return mapDate >= 0 && mapSpend >= 0 && r[mapDate] && !isNaN(s) && s > 0;
               }).length}</strong> รายการ (กรองแถวที่ไม่มียอดออก)
+              <br/><span className="text-slate-400">* ชื่อเพจโฆษณา — กรอกเองในฟอร์มแยก หรือเพิ่ม Dropdown ทีหลัง</span>
             </div>
 
             <div className="flex gap-2">
