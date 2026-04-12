@@ -125,7 +125,7 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
   const loadAndAggregate = async () => {
     setLoading(true);
     try {
-      const { data: orders } = await supabase.from('orders').select('id, raw_prod, quantities, quantity, promo_ids').eq('order_status', 'รอแพ็ค');
+      const { data: orders } = await supabase.from('orders').select('id, raw_prod, quantities, quantity, promo_ids').eq('order_status', 'กำลังแพ็ค');
       if (!orders || orders.length === 0) { setItems([]); setOrderCount(0); setLoading(false); return; }
       setOrderCount(orders.length);
 
@@ -274,7 +274,7 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
             await supabase.from('orders')
               .update({ order_status: 'แพ็คสินค้า' })
               .in('order_no', orderNos)
-              .eq('order_status', 'รอแพ็ค');
+              .eq('order_status', 'กำลังแพ็ค');
           }
         }
       }
