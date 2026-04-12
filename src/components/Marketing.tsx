@@ -55,7 +55,7 @@ export default function Marketing({ page }: { page: MarketingPage }) {
 function AdsModule() {
   const [sub, setSub] = useState<AdsSub>('board');
 
-  const groups = ['', 'สินค้า', 'ลงค่าโฆษณา'];
+  const groups = ['', 'สินค้า', 'ลงค่าโฆษณา', 'จัดการข้อมูล'];
 
   return (
     <div className="flex h-screen overflow-hidden">
