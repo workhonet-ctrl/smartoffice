@@ -225,9 +225,9 @@ export default function MyOrderExport() {
   };
 
   const loadPrintedOrders = async () => {
-    // กำลังแพ็ค = order_status กำลังแพ็ค, route A/C
+    // กำลังแพ็ค = กำลังแพ็ค + แพ็คสินค้า (อนุมัติใบเบิกแล้ว รอส่ง)
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .in('route', ['A', 'C']).eq('order_status', 'กำลังแพ็ค').order('updated_at', { ascending: false });
+      .in('route', ['A', 'C']).in('order_status', ['กำลังแพ็ค', 'แพ็คสินค้า']).order('updated_at', { ascending: false });
     if (data) setPrintedOrders(data);
   };
 
