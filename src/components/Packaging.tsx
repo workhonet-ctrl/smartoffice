@@ -152,9 +152,13 @@ export default function Packaging({
 
       if (error) {
         console.error('pack_history insert error:', error);
-        // ถ้า insert ล้มเหลว ยังคง navigate ไปหน้าใบเบิกได้ แต่ไม่มี historyId
         onCreateRequisition('');
       } else {
+        // ✅ อัพเดต order_status รอแพ็ค → กำลังแพ็ค
+        const orderIds = orders.map(o => o.id);
+        await supabase.from('orders')
+          .update({ order_status: 'กำลังแพ็ค' })
+          .in('id', orderIds);
         onCreateRequisition(ph?.id || '');
       }
     } catch (err) {
