@@ -336,14 +336,25 @@ function AdsExpenseDaily() {
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate()-6); return d.toISOString().split('T')[0]; });
   const [dateTo, setDateTo]     = useState(new Date().toISOString().split('T')[0]);
   const [showForm, setShowForm] = useState(false);
-  const [fDate, setFDate]       = useState(new Date().toISOString().split('T')[0]);
-  const [fChannel, setFChannel] = useState('Facebook');
-  const [fReach, setFReach]     = useState('');
-  const [fClick, setFClick]     = useState('');
-  const [fSpend, setFSpend]     = useState('');
-  const [fRevenue, setFRevenue] = useState('');
-  const [fNote, setFNote]       = useState('');
   const [saving, setSaving]     = useState(false);
+
+  // form fields
+  const [fDate,    setFDate]    = useState(new Date().toISOString().split('T')[0]);
+  const [fAdName,  setFAdName]  = useState('');
+  const [fPage,    setFPage]    = useState('');
+  const [fSpend,   setFSpend]   = useState('');
+
+  // excel import state
+  const [showImport,   setShowImport]   = useState(false);
+  const [xlsHeaders,   setXlsHeaders]   = useState<string[]>([]);
+  const [xlsRows,      setXlsRows]      = useState<any[][]>([]);
+  const [importing,    setImporting]     = useState(false);
+  const [importResult, setImportResult] = useState<string>('');
+  // column mapping (index into xlsRows[i])
+  const [mapDate,   setMapDate]   = useState<number>(-1);
+  const [mapAdName, setMapAdName] = useState<number>(-1);
+  const [mapPage,   setMapPage]   = useState<number>(-1);
+  const [mapSpend,  setMapSpend]  = useState<number>(-1);
 
   const load = async () => {
     setLoading(true);
@@ -358,30 +369,91 @@ function AdsExpenseDaily() {
   useEffect(() => { load(); }, [dateFrom, dateTo]);
 
   const handleSave = async () => {
-    if (!fSpend) return;
+    if (!fSpend || !fDate) return;
     setSaving(true);
-    const meta = JSON.stringify({ reach: fReach, click: fClick, revenue: fRevenue });
     await supabase.from('finance_expense').insert([{
       category: 'ค่าโฆษณารายวัน',
-      description: fNote || `โฆษณา ${fChannel} ${fDate}`,
+      description: fAdName || '-',
       amount_thb: Number(fSpend),
-      expense_date: fDate, channel: fChannel,
-      notes: meta,
+      expense_date: fDate,
+      channel: fPage || '-',
+      notes: JSON.stringify({ ad_name: fAdName, page: fPage }),
     }]);
     setSaving(false); setShowForm(false);
-    setFReach(''); setFClick(''); setFSpend(''); setFRevenue(''); setFNote('');
+    setFAdName(''); setFPage(''); setFSpend('');
     load();
   };
 
-  const totSpend   = records.reduce((s, r) => s + Number(r.amount_thb), 0);
-  const totRevenue = records.reduce((s, r) => { try { return s + Number(JSON.parse(r.notes || '{}').revenue || 0); } catch { return s; } }, 0);
+  // read Excel file → extract headers + rows
+  const handleFileRead = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const XLSX = await import('xlsx');
+    const buf  = await file.arrayBuffer();
+    const wb   = XLSX.read(buf, { type: 'array', cellDates: true });
+    const ws   = wb.Sheets[wb.SheetNames[0]];
+    const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (data.length < 2) return;
+    const headers = (data[0] as any[]).map(h => String(h || ''));
+    setXlsHeaders(headers);
+    setXlsRows(data.slice(1));
+    // auto-map by keywords
+    const find = (kw: string[]) => headers.findIndex(h => kw.some(k => h.includes(k)));
+    setMapDate(find(['เริ่มการรายงาน', 'วันที่', 'Date']));
+    setMapAdName(find(['ชื่อโฆษณา', 'Ad Name']));
+    setMapPage(find(['ชื่อชุดโฆษณา', 'ชุดโฆษณา', 'Ad Set']));
+    setMapSpend(find(['จำนวนเงินที่ใช้จ่าย', 'Spend', 'ยอดใช้จ่าย']));
+    setImportResult('');
+    setShowImport(true);
+    e.target.value = '';
+  };
+
+  const handleImport = async () => {
+    if (mapDate < 0 || mapSpend < 0) return;
+    setImporting(true);
+    let inserted = 0;
+    for (const row of xlsRows) {
+      const rawDate = String(row[mapDate] || '').trim();
+      const adName  = mapAdName >= 0 ? String(row[mapAdName] || '').trim() : '';
+      const page    = mapPage   >= 0 ? String(row[mapPage]   || '').trim() : '';
+      const spendRaw = String(row[mapSpend] || '').replace(/,/g, '');
+      const spend   = parseFloat(spendRaw);
+      if (!rawDate || isNaN(spend) || spend <= 0) continue;
+      // normalize date (YYYY-MM-DD or DD/MM/YYYY)
+      let dateStr = rawDate;
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(rawDate)) {
+        const [d, m, y] = rawDate.split('/');
+        dateStr = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+      } else if (/^\d{4}-\d{2}-\d{2}/.test(rawDate)) {
+        dateStr = rawDate.substring(0, 10);
+      }
+      await supabase.from('finance_expense').insert([{
+        category: 'ค่าโฆษณารายวัน',
+        description: adName || '-',
+        amount_thb: spend,
+        expense_date: dateStr,
+        channel: page || '-',
+        notes: JSON.stringify({ ad_name: adName, page }),
+      }]);
+      inserted++;
+    }
+    setImportResult(`✓ นำเข้าสำเร็จ ${inserted} รายการ`);
+    setImporting(false);
+    setShowImport(false);
+    setXlsRows([]); setXlsHeaders([]);
+    load();
+  };
+
+  const totSpend = records.reduce((s, r) => s + Number(r.amount_thb), 0);
+
+  const SELECT_CLS = "w-full border rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-purple-300";
 
   return (
     <div className="flex flex-col h-full">
+      {/* Header */}
       <div className="shrink-0 mb-3 flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-xl font-bold text-slate-800">📅 ลงโฆษณารายวัน</h2>
-          <p className="text-xs text-slate-400 mt-0.5">บันทึก Reach · Click · ยอดใช้จ่าย · รายรับ</p>
+          <p className="text-xs text-slate-400 mt-0.5">บันทึกชื่อโฆษณา · เพจ · ยอดใช้จ่าย</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
@@ -389,6 +461,10 @@ function AdsExpenseDaily() {
           <span className="text-slate-400">–</span>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
             className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+          <label className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 text-sm font-medium cursor-pointer flex items-center gap-2">
+            📂 นำเข้า Excel
+            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileRead}/>
+          </label>
           <button onClick={() => setShowForm(true)}
             className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 text-sm font-medium">
             + บันทึก
@@ -396,54 +472,43 @@ function AdsExpenseDaily() {
         </div>
       </div>
 
-      {/* KPI summary */}
-      <div className="shrink-0 grid grid-cols-3 gap-3 mb-3">
-        <div className="bg-red-50 rounded-xl p-3 border border-red-100">
-          <div className="text-xs text-red-500 font-semibold mb-1">ค่าโฆษณารวม</div>
-          <div className="text-xl font-bold text-red-600">฿{totSpend.toLocaleString()}</div>
-        </div>
-        <div className="bg-emerald-50 rounded-xl p-3 border border-emerald-100">
-          <div className="text-xs text-emerald-600 font-semibold mb-1">รายรับที่ได้</div>
-          <div className="text-xl font-bold text-emerald-600">฿{totRevenue.toLocaleString()}</div>
-        </div>
-        <div className={`rounded-xl p-3 border ${totRevenue-totSpend >= 0 ? 'bg-teal-50 border-teal-100' : 'bg-orange-50 border-orange-100'}`}>
-          <div className={`text-xs font-semibold mb-1 ${totRevenue-totSpend >= 0 ? 'text-teal-600' : 'text-orange-600'}`}>กำไร / ขาดทุน</div>
-          <div className={`text-xl font-bold ${totRevenue-totSpend >= 0 ? 'text-teal-600' : 'text-orange-600'}`}>
-            {totRevenue-totSpend >= 0 ? '+' : ''}฿{(totRevenue-totSpend).toLocaleString()}
-          </div>
-        </div>
+      {importResult && (
+        <div className="shrink-0 mb-3 bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-700">{importResult}</div>
+      )}
+
+      {/* KPI */}
+      <div className="shrink-0 bg-red-50 border border-red-100 rounded-xl p-3 mb-3">
+        <div className="text-xs text-red-500 font-semibold mb-1">ค่าโฆษณารวม</div>
+        <div className="text-2xl font-bold text-red-600">฿{totSpend.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
       </div>
 
+      {/* Table */}
       <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-        <table className="text-sm w-full" style={{ minWidth: '700px' }}>
+        <table className="text-sm w-full" style={{ minWidth: '650px' }}>
           <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
             <tr>
               <th className="p-3 text-left whitespace-nowrap">วันที่</th>
-              <th className="p-3 text-left whitespace-nowrap">ช่องทาง</th>
-              <th className="p-3 text-right whitespace-nowrap">Reach</th>
-              <th className="p-3 text-right whitespace-nowrap">Click</th>
-              <th className="p-3 text-right whitespace-nowrap">ค่าโฆษณา (฿)</th>
-              <th className="p-3 text-right whitespace-nowrap">รายรับ (฿)</th>
-              <th className="p-3 text-left whitespace-nowrap">หมายเหตุ</th>
+              <th className="p-3 text-left">ชื่อโฆษณา</th>
+              <th className="p-3 text-left whitespace-nowrap">ชื่อเพจ</th>
+              <th className="p-3 text-right whitespace-nowrap">ยอดใช้จ่าย (฿)</th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={7} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
-            {!loading && records.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีรายการ</td></tr>}
+            {loading && <tr><td colSpan={4} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
+            {!loading && records.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-slate-400">ยังไม่มีรายการ</td></tr>}
             {records.map(r => {
               let meta: any = {};
-              try { meta = JSON.parse(r.notes || '{}'); } catch { /* ignore */ }
+              try { meta = JSON.parse(r.notes || '{}'); } catch { /* */ }
               return (
                 <tr key={r.id} className="border-b hover:bg-purple-50">
                   <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{r.expense_date}</td>
-                  <td className="p-3">
-                    <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-[10px] font-bold">{r.channel || '-'}</span>
+                  <td className="p-3 text-sm text-slate-700 max-w-[220px] truncate" title={meta.ad_name || r.description}>
+                    {meta.ad_name || r.description || '-'}
                   </td>
-                  <td className="p-3 text-right text-xs text-slate-600">{meta.reach ? Number(meta.reach).toLocaleString() : '-'}</td>
-                  <td className="p-3 text-right text-xs text-slate-600">{meta.click ? Number(meta.click).toLocaleString() : '-'}</td>
-                  <td className="p-3 text-right font-bold text-red-600">฿{Number(r.amount_thb).toLocaleString()}</td>
-                  <td className="p-3 text-right font-bold text-emerald-600">{meta.revenue ? `฿${Number(meta.revenue).toLocaleString()}` : '-'}</td>
-                  <td className="p-3 text-xs text-slate-400 max-w-[150px] truncate">{r.description || '-'}</td>
+                  <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{meta.page || r.channel || '-'}</td>
+                  <td className="p-3 text-right font-bold text-red-600">
+                    ฿{Number(r.amount_thb).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+                  </td>
                 </tr>
               );
             })}
@@ -451,60 +516,87 @@ function AdsExpenseDaily() {
         </table>
       </div>
 
+      {/* Manual entry form */}
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full">
             <h3 className="text-lg font-bold text-slate-800 mb-4">บันทึกโฆษณารายวัน</h3>
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">วันที่ *</label>
-                  <input type="date" value={fDate} onChange={e => setFDate(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">ช่องทาง</label>
-                  <select value={fChannel} onChange={e => setFChannel(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300">
-                    {['Facebook', 'Instagram', 'TikTok', 'LINE OA', 'Google', 'อื่นๆ'].map(o => <option key={o}>{o}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">Reach</label>
-                  <input type="number" value={fReach} onChange={e => setFReach(e.target.value)} placeholder="จำนวนคนเห็น"
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">Click</label>
-                  <input type="number" value={fClick} onChange={e => setFClick(e.target.value)} placeholder="จำนวนคลิก"
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">ค่าโฆษณา (฿) *</label>
-                  <input type="number" value={fSpend} onChange={e => setFSpend(e.target.value)} placeholder="0.00"
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">รายรับที่ได้ (฿)</label>
-                  <input type="number" value={fRevenue} onChange={e => setFRevenue(e.target.value)} placeholder="0.00"
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
-                </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">วันที่ *</label>
+                <input type="date" value={fDate} onChange={e => setFDate(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">หมายเหตุ</label>
-                <input value={fNote} onChange={e => setFNote(e.target.value)} placeholder="เช่น ยิงโฆษณาโปรแลก..."
+                <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อโฆษณา</label>
+                <input value={fAdName} onChange={e => setFAdName(e.target.value)} placeholder="เช่น ครีมกุหลาบ หน้าใส..."
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อเพจโฆษณา</label>
+                <input value={fPage} onChange={e => setFPage(e.target.value)} placeholder="เช่น Test - Level S..."
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">จำนวนเงินที่ใช้จ่ายไป (THB) *</label>
+                <input type="number" value={fSpend} onChange={e => setFSpend(e.target.value)} placeholder="0.00"
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
               </div>
             </div>
             <div className="flex gap-2 mt-5">
               <button onClick={() => setShowForm(false)} className="flex-1 py-2 bg-slate-200 rounded-lg text-sm">ยกเลิก</button>
-              <button onClick={handleSave} disabled={!fSpend || saving}
+              <button onClick={handleSave} disabled={!fSpend || !fDate || saving}
                 className="flex-1 py-2.5 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-medium text-sm disabled:opacity-50">
                 {saving ? 'กำลังบันทึก...' : 'บันทึก'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Excel column mapping modal */}
+      {showImport && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full">
+            <h3 className="text-lg font-bold text-slate-800 mb-1">เลือกคอลัมน์จากไฟล์ Excel</h3>
+            <p className="text-xs text-slate-400 mb-4">{xlsRows.length} แถวข้อมูล · เลือกว่าแต่ละฟิลด์มาจากคอลัมน์ไหน</p>
+
+            <div className="space-y-3 mb-5">
+              {[
+                { label: 'วันที่ *', val: mapDate,   set: setMapDate   },
+                { label: 'ชื่อโฆษณา', val: mapAdName, set: setMapAdName },
+                { label: 'ชื่อเพจโฆษณา', val: mapPage, set: setMapPage },
+                { label: 'จำนวนเงินที่ใช้จ่ายไป (THB) *', val: mapSpend, set: setMapSpend },
+              ].map(({ label, val, set }) => (
+                <div key={label}>
+                  <label className="text-xs font-semibold text-slate-600 block mb-1">{label}</label>
+                  <select value={val} onChange={e => set(Number(e.target.value))} className={SELECT_CLS}>
+                    <option value={-1}>— ไม่ใช้ —</option>
+                    {xlsHeaders.map((h, i) => (
+                      <option key={i} value={i}>[{String.fromCharCode(65+i)}] {h}</option>
+                    ))}
+                  </select>
+                  {val >= 0 && xlsRows[0] && (
+                    <p className="text-[10px] text-slate-400 mt-0.5">ตัวอย่าง: {String(xlsRows[0][val] || '-').substring(0,60)}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-purple-50 rounded-lg px-3 py-2 text-xs text-purple-700 mb-4">
+              จะนำเข้า <strong>{xlsRows.filter(r => {
+                const s = parseFloat(String(r[mapSpend] || '').replace(/,/g,''));
+                return mapDate >= 0 && mapSpend >= 0 && r[mapDate] && !isNaN(s) && s > 0;
+              }).length}</strong> รายการ (กรองแถวที่ไม่มียอดออก)
+            </div>
+
+            <div className="flex gap-2">
+              <button onClick={() => { setShowImport(false); setXlsRows([]); setXlsHeaders([]); }}
+                className="flex-1 py-2 bg-slate-200 rounded-lg text-sm">ยกเลิก</button>
+              <button onClick={handleImport}
+                disabled={mapDate < 0 || mapSpend < 0 || importing}
+                className="flex-1 py-2.5 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-medium text-sm disabled:opacity-50">
+                {importing ? 'กำลังนำเข้า...' : '📥 นำเข้าข้อมูล'}
               </button>
             </div>
           </div>
