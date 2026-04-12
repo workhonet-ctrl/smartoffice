@@ -461,45 +461,50 @@ export default function MyOrderExport() {
 
       {tab === 'exported' && (
         <>
-          <div className="flex gap-3 mb-3 shrink-0 flex-wrap items-center">
+          <div className="shrink-0 flex gap-2 mb-3 items-center">
             <div className="relative flex-1 min-w-[200px]">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
-              <input value={searchExported} onChange={e=>setSearchExported(e.target.value)} placeholder="ค้นหาชื่อสินค้า..."
-                className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+              <input value={searchExported} onChange={e=>setSearchExported(e.target.value)} placeholder="ค้นหาลูกค้า / สินค้า..."
+                className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-300"/>
             </div>
-            <button onClick={()=>{const t=selectedExported.size>0?filteredExported.filter(o=>selectedExported.has(o.id)):filteredExported;handleExport(t,false);}}
-              disabled={exportedOrders.length===0||exporting}
-              className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 flex items-center gap-2 disabled:opacity-50 text-sm">
-              <Download size={16}/> ส่งออกซ้ำ ({exportedCount} รายการ)
-            </button>
-            {selectedExported.size>0&&<button onClick={()=>handleDeleteExported([...selectedExported])} className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center gap-2 text-sm"><Trash2 size={16}/> ลบที่เลือก ({selectedExported.size})</button>}
-            <button onClick={()=>handleDeleteExported(exportedOrders.map(o=>o.id))} disabled={exportedOrders.length===0}
-              className="px-4 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 flex items-center gap-2 text-sm disabled:opacity-50">
-              <Trash2 size={16}/> ลบทั้งหมด
-            </button>
+            <span className="text-xs bg-green-50 border border-green-100 text-green-700 rounded-lg px-3 py-2">
+              ✅ ส่งสำเร็จ {exportedOrders.length} รายการ
+            </span>
           </div>
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-            <table className="text-sm" style={{minWidth:'700px',width:'100%'}}>
-              <thead className="bg-indigo-800 text-indigo-100 text-xs sticky top-0 z-10">
+            <table className="text-sm w-full" style={{minWidth:'800px'}}>
+              <thead className="bg-green-800 text-green-100 text-xs sticky top-0 z-10">
                 <tr>
-                  <th className="p-3 w-8"><input type="checkbox" checked={allExportedSelected} onChange={e=>setSelectedExported(e.target.checked?new Set(filteredExported.map(o=>o.id)):new Set())} className="rounded"/></th>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
-                  <th className="p-3 text-left">ลูกค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
                   <th className="p-3 text-left">สินค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">Tracking</th>
                   <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
+                  <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredExported.length===0&&<tr><td colSpan={6} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์ที่ส่งออกแล้ว</td></tr>}
+                {filteredExported.length===0&&<tr><td colSpan={8} className="p-8 text-center text-slate-400">{searchExported?`ไม่พบ "${searchExported}"`:'ยังไม่มีออเดอร์ส่งสำเร็จ'}</td></tr>}
                 {filteredExported.map(o=>(
-                  <tr key={o.id} className={`border-b hover:bg-indigo-50 ${selectedExported.has(o.id)?'bg-indigo-50':''}`}>
-                    <td className="p-3"><input type="checkbox" checked={selectedExported.has(o.id)} onChange={()=>toggleExported(o.id)} className="rounded"/></td>
+                  <tr key={o.id} className="border-b hover:bg-green-50">
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date||'-'}</td>
-                    <td className="p-3 font-mono text-xs text-indigo-700 whitespace-nowrap">{o.order_no}</td>
-                    <td className="p-3 whitespace-nowrap"><div className="font-medium">{o.customers?.name||'-'}</div><div className="text-xs text-slate-400">{o.customers?.tel||''}</div></td>
+                    <td className="p-3 font-mono text-xs text-green-700 whitespace-nowrap">{o.order_no}</td>
+                    <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name||'-'}</td>
+                    <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel||'-'}</td>
                     <td className="p-3 text-xs text-slate-500 max-w-[180px] truncate">{o.raw_prod||'-'}</td>
+                    <td className="p-3 font-mono text-xs whitespace-nowrap">
+                      {(o as any).tracking_no
+                        ? <span className="text-blue-600 font-bold">{(o as any).tracking_no}</span>
+                        : <span className="text-slate-300">-</span>}
+                    </td>
                     <td className="p-3 text-right font-bold">฿{Number(o.total_thb).toLocaleString()}</td>
+                    <td className="p-3 text-center">
+                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">
+                        {o.order_status||'ส่งแล้ว'}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -510,11 +515,12 @@ export default function MyOrderExport() {
 
       {tab === 'printed' && (
         <>
-          <div className="shrink-0 bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-4">
+          {/* Tracking Upload */}
+          <div className="shrink-0 bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-3">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
                 <h3 className="font-semibold text-slate-700">อัพโหลดไฟล์ Tracking จาก MyOrder</h3>
-                <p className="text-xs text-slate-400 mt-0.5">จับคู่ Col D (วันที่) + Col E (ชื่อ) + Col G (เบอร์) → Col R (Tracking) → เปลี่ยนสถานะเป็น รอแพ็ค</p>
+                <p className="text-xs text-slate-400 mt-0.5">จับคู่ Col D (วันที่) + Col E (ชื่อ) + Col G (เบอร์) → Col R (Tracking) → เปลี่ยนสถานะเป็น กำลังแพ็ค</p>
               </div>
               <label className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer flex items-center gap-2 ${uploading?'bg-slate-200 text-slate-400':'bg-teal-500 text-white hover:bg-teal-600'}`}>
                 <Download size={14}/> {uploading?'กำลังประมวลผล...':'อัพโหลดไฟล์ MyOrder (.xlsx)'}
@@ -528,9 +534,29 @@ export default function MyOrderExport() {
               </div>
             )}
           </div>
+          {/* Toolbar */}
+          <div className="shrink-0 flex gap-2 mb-3 flex-wrap items-center">
+            <span className="px-3 py-2 bg-orange-50 border border-orange-100 rounded-lg text-xs text-orange-700">
+              📦 กำลังแพ็ค {printedOrders.length} รายการ · ออเดอร์ที่มี Tracking กดยืนยันส่งได้เลย
+            </span>
+            {printedOrders.some(o => (o as any).tracking_no) && (
+              <button
+                onClick={async () => {
+                  const withTracking = printedOrders.filter(o => (o as any).tracking_no);
+                  if (!confirm(`ยืนยันส่งแล้ว ${withTracking.length} ออเดอร์ที่มี Tracking?`)) return;
+                  await supabase.from('orders')
+                    .update({ order_status: 'ส่งสินค้าแล้ว' })
+                    .in('id', withTracking.map(o => o.id));
+                  await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
+                }}
+                className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm font-medium">
+                ✓ ยืนยันส่งแล้ว ({printedOrders.filter(o => (o as any).tracking_no).length} ออเดอร์)
+              </button>
+            )}
+          </div>
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-            <table className="text-sm w-full" style={{minWidth:'700px'}}>
-              <thead className="bg-teal-800 text-teal-100 text-xs sticky top-0 z-10">
+            <table className="text-sm w-full" style={{minWidth:'800px'}}>
+              <thead className="bg-orange-700 text-orange-100 text-xs sticky top-0 z-10">
                 <tr>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
@@ -539,21 +565,62 @@ export default function MyOrderExport() {
                   <th className="p-3 text-left">สินค้า</th>
                   <th className="p-3 text-left whitespace-nowrap">Tracking</th>
                   <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
+                  <th className="p-3 text-center whitespace-nowrap">ดำเนินการ</th>
                 </tr>
               </thead>
               <tbody>
-                {printedOrders.length===0&&<tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์ที่ปริ้นแล้ว — อัพโหลดไฟล์ MyOrder เพื่อจับคู่ tracking</td></tr>}
-                {printedOrders.map(o=>(
-                  <tr key={o.id} className="border-b hover:bg-teal-50">
-                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date||'-'}</td>
-                    <td className="p-3 font-mono text-xs text-teal-700 whitespace-nowrap">{o.order_no}</td>
-                    <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name||'-'}</td>
-                    <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel||'-'}</td>
-                    <td className="p-3 text-xs text-slate-500 max-w-[160px] truncate">{o.raw_prod||'-'}</td>
-                    <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{(o as any).tracking_no||'-'}</td>
-                    <td className="p-3 text-center"><span className="px-2 py-0.5 bg-teal-100 text-teal-700 rounded-full text-xs font-bold">รอแพ็ค</span></td>
-                  </tr>
-                ))}
+                {printedOrders.length===0&&<tr><td colSpan={8} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์กำลังแพ็ค</td></tr>}
+                {printedOrders.map(o=>{
+                  const hasTracking = !!(o as any).tracking_no;
+                  return (
+                    <tr key={o.id} className={`border-b ${hasTracking?'bg-green-50 hover:bg-green-100':'hover:bg-orange-50'}`}>
+                      <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date||'-'}</td>
+                      <td className="p-3 font-mono text-xs text-orange-700 whitespace-nowrap">{o.order_no}</td>
+                      <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name||'-'}</td>
+                      <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel||'-'}</td>
+                      <td className="p-3 text-xs text-slate-500 max-w-[160px] truncate">{o.raw_prod||'-'}</td>
+                      <td className="p-3 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
+                        <input
+                          defaultValue={(o as any).tracking_no||''}
+                          placeholder="กรอก Tracking..."
+                          className={`border rounded px-2 py-1 text-xs font-mono w-40 focus:outline-none focus:ring-1 ${hasTracking?'border-blue-300 focus:ring-blue-300 text-blue-700':'border-slate-200 focus:ring-orange-300'}`}
+                          onBlur={async e=>{
+                            const val=e.target.value.trim();
+                            if(!val||val===((o as any).tracking_no||'')) return;
+                            await supabase.from('orders').update({tracking_no:val}).eq('id',o.id);
+                            await Promise.all([loadPrintedOrders(),loadExportedOrders()]);
+                          }}
+                          onKeyDown={async e=>{
+                            if(e.key==='Enter'){
+                              const val=(e.target as HTMLInputElement).value.trim();
+                              if(!val) return;
+                              await supabase.from('orders').update({tracking_no:val}).eq('id',o.id);
+                              await Promise.all([loadPrintedOrders(),loadExportedOrders()]);
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
+                        />
+                      </td>
+                      <td className="p-3 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${hasTracking?'bg-green-100 text-green-700':'bg-orange-100 text-orange-700'}`}>
+                          {hasTracking?'พร้อมส่ง':'กำลังแพ็ค'}
+                        </span>
+                      </td>
+                      <td className="p-3 text-center">
+                        {hasTracking&&(
+                          <button
+                            onClick={async()=>{
+                              await supabase.from('orders').update({order_status:'ส่งสินค้าแล้ว'}).eq('id',o.id);
+                              await Promise.all([loadPrintedOrders(),loadExportedOrders()]);
+                            }}
+                            className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold whitespace-nowrap">
+                            ✓ ส่งแล้ว
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
