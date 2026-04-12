@@ -450,6 +450,15 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     loadOrders();
   };
 
+  const handleDeleteOrder = async (order: Order) => {
+    const name = order.customers?.name || order.order_no;
+    if (!confirm(`ลบออเดอร์ "${order.order_no}"\nลูกค้า: ${name}\n\nออเดอร์จะหายจากทุกหน้า (Flash Export, MyOrder Export)\nและยอดรวมลูกค้าจะอัพเดตอัตโนมัติ\n\nยืนยันลบ?`)) return;
+    const { error } = await supabase.from('orders').delete().eq('id', order.id);
+    if (error) { showToast('ลบไม่สำเร็จ: ' + error.message, 'error'); return; }
+    showToast(`✓ ลบออเดอร์ ${order.order_no} แล้ว`);
+    loadOrders();
+  };
+
   const uniqueRawProds = [...new Set(importedOrders.flatMap(o =>
     String(o.raw_prod).split('|').map((s: string) => s.trim()).filter(Boolean)
   ))];
@@ -631,12 +640,13 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               <th className="p-3 text-center whitespace-nowrap">สถานะชำระ</th>
               <th className="p-3 text-left whitespace-nowrap">Tracking</th>
               <th className="p-3 text-center whitespace-nowrap">สถานะออเดอร์</th>
+              <th className="p-3 w-10"/>
             </tr>
           </thead>
           <tbody>
             {orders.length === 0 && !loading && (
               <tr>
-                <td colSpan={13} className="p-0">
+                <td colSpan={14} className="p-0">
                   <div className="flex flex-col items-center justify-center py-16 gap-4">
                     {customerCount === 0 ? (
                       // ยังไม่ได้ทำ Step 1
@@ -668,7 +678,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               </tr>
             )}
             {filtered.length === 0 && orders.length > 0 && (
-              <tr><td colSpan={13} className="p-8 text-center text-slate-400">ไม่พบออเดอร์ที่ตรงกับตัวกรอง</td></tr>
+              <tr><td colSpan={14} className="p-8 text-center text-slate-400">ไม่พบออเดอร์ที่ตรงกับตัวกรอง</td></tr>
             )}
               {filtered.map(o => {
                 const carrier    = getCarrierLabel(o.route);
@@ -812,6 +822,15 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                     {/* สถานะออเดอร์ */}
                     <td className="p-3 text-center">
                       <span className={`px-2 py-1 rounded-full text-xs font-bold ${status.color}`}>{status.label}</span>
+                    </td>
+                    {/* ลบออเดอร์ */}
+                    <td className="p-3 text-center">
+                      <button
+                        onClick={() => handleDeleteOrder(o)}
+                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                        title="ลบออเดอร์">
+                        🗑
+                      </button>
                     </td>
                   </tr>
                 );
