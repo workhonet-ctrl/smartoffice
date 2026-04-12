@@ -337,6 +337,7 @@ export default function Customers() {
               <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
               <th className="p-3 text-left whitespace-nowrap">จังหวัด</th>
               <th className="p-3 text-left whitespace-nowrap">ช่องทาง</th>
+              <th className="p-3 text-center whitespace-nowrap">วิธีชำระ</th>
               <th className="p-3 text-center whitespace-nowrap">ออเดอร์</th>
               <th className="p-3 text-right whitespace-nowrap">ยอดรวม (฿)</th>
               <th className="p-3 text-center whitespace-nowrap">แท็ก</th>
@@ -344,8 +345,8 @@ export default function Customers() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={10} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
-            {!loading && filtered.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-slate-400">ไม่พบลูกค้า</td></tr>}
+            {loading && <tr><td colSpan={11} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
+            {!loading && filtered.length === 0 && <tr><td colSpan={11} className="p-8 text-center text-slate-400">ไม่พบลูกค้า</td></tr>}
             {filtered.map(c => (
               <>
                 <tr key={c.id} onClick={() => toggleExpand(c.id)}
@@ -364,6 +365,13 @@ export default function Customers() {
                   <td className="p-3 font-mono text-xs text-slate-600">{c.tel}</td>
                   <td className="p-3 text-xs text-slate-500">{c.province || '-'}</td>
                   <td className="p-3 text-xs text-slate-500 max-w-[120px] truncate">{c.channel || '-'}</td>
+                  <td className="p-3 text-center">
+                    {c.payment_method
+                      ? <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${c.payment_method === 'COD' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
+                          {c.payment_method}
+                        </span>
+                      : <span className="text-slate-300 text-xs">-</span>}
+                  </td>
                   <td className="p-3 text-center">
                     <span className="px-2 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-xs font-bold">{c.order_count}</span>
                   </td>
@@ -386,7 +394,7 @@ export default function Customers() {
                 {/* ExpandedRow: รายละเอียด + ประวัติออเดอร์ */}
                 {expanded === c.id && (
                   <tr key={`${c.id}-detail`}>
-                    <td colSpan={10} className="bg-cyan-50 px-6 py-4 border-b">
+                    <td colSpan={11} className="bg-cyan-50 px-6 py-4 border-b">
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                         <div>
                           <div className="text-xs text-slate-400 mb-0.5">ที่อยู่</div>
