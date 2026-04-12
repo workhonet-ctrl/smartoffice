@@ -97,10 +97,10 @@ export default function FlashExport() {
     } finally { setLoading(false); }
   };
 
-  // ส่งสำเร็จ = ส่งแฟลชแล้ว (มี tracking + ยืนยันส่ง), ทุก route
+  // ส่งสำเร็จ = ส่งสินค้าแล้ว (มี tracking + ยืนยันส่ง), ทุก route
   const loadExportedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .in('order_status', ['ส่งแฟลช', 'ส่งสินค้าแล้ว'])
+      .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งสินค้าแล้ว'])
       .order('updated_at', { ascending: false });
     if (data) {
       setExportedOrders(data);
@@ -624,7 +624,7 @@ export default function FlashExport() {
                   const withTracking = printedOrders.filter(o => (o as any).tracking_no);
                   if (!confirm(`ยืนยันส่งแล้ว ${withTracking.length} ออเดอร์ที่มี Tracking?\nจะย้ายไปแท็บ ส่งสำเร็จ`)) return;
                   await supabase.from('orders')
-                    .update({ order_status: 'ส่งแฟลช' })
+                    .update({ order_status: 'ส่งสินค้าแล้ว' })
                     .in('id', withTracking.map(o => o.id));
                   await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
                 }}
@@ -700,7 +700,7 @@ export default function FlashExport() {
                           <button
                             onClick={async () => {
                               await supabase.from('orders')
-                                .update({ order_status: 'ส่งแฟลช' }).eq('id', o.id);
+                                .update({ order_status: 'ส่งสินค้าแล้ว' }).eq('id', o.id);
                               await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
                             }}
                             className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold whitespace-nowrap">
