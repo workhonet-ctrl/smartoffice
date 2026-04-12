@@ -467,32 +467,6 @@ export default function FlashExport() {
       {/* ── Tab: รอแพ็ค (export แล้ว ยังไม่มี tracking) ── */}
       {tab === 'pack' && (
         <>
-          {/* Tracking Upload */}
-          <div className="shrink-0 bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-3">
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <h3 className="font-semibold text-slate-700">อัพโหลดไฟล์ Tracking จาก Flash</h3>
-                <p className="text-xs text-slate-400 mt-0.5">จับคู่ชื่อ + เบอร์ → ใส่ Tracking อัตโนมัติ</p>
-              </div>
-              <label className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer flex items-center gap-2 ${uploading ? 'bg-slate-200 text-slate-400' : 'bg-green-500 text-white hover:bg-green-600'}`}>
-                <Download size={14}/> {uploading ? 'กำลังประมวลผล...' : 'อัพโหลดไฟล์ Flash (.xlsx)'}
-                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFlashUpload} disabled={uploading}/>
-              </label>
-            </div>
-            {uploadResult && (
-              <div className={`mt-3 p-3 rounded-lg text-sm flex items-center gap-3 flex-wrap
-                ${uploadResult.conflicts > 0 ? 'bg-orange-50 text-orange-700' : uploadResult.matched > 0 ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
-                <span>✓ จับคู่สำเร็จ <strong>{uploadResult.matched}</strong> ออเดอร์</span>
-                {uploadResult.notFound > 0 && <span className="text-slate-500">· ไม่พบ {uploadResult.notFound} รายการ</span>}
-                {uploadResult.conflicts > 0 && (
-                  <span className="flex items-center gap-2">
-                    · ⚠ ชื่อ+เบอร์ซ้ำ <strong>{uploadResult.conflicts}</strong> รายการ
-                    <button onClick={() => setShowConflict(true)} className="px-2.5 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 font-bold">เลือก Tracking</button>
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
           <div className="shrink-0 flex gap-2 mb-3 items-center flex-wrap">
             <span className="text-xs text-teal-700 bg-teal-50 border border-teal-100 rounded-lg px-3 py-2">
               📦 ออเดอร์รอแพ็ค {packReadyOrders.length} รายการ · หน้าแพ็คสินค้าดึงข้อมูลจากนี้
@@ -612,6 +586,33 @@ export default function FlashExport() {
       {/* ── Tab: กำลังแพ็ค ── */}
       {tab === 'printed' && (
         <>
+          {/* Tracking Upload */}
+          <div className="shrink-0 bg-white rounded-xl shadow-sm border border-slate-100 p-4 mb-3">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h3 className="font-semibold text-slate-700">อัพโหลดไฟล์ Tracking จาก Flash</h3>
+                <p className="text-xs text-slate-400 mt-0.5">จับคู่ชื่อ + เบอร์ → ใส่ Tracking อัตโนมัติ</p>
+              </div>
+              <label className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer flex items-center gap-2 ${uploading ? 'bg-slate-200 text-slate-400' : 'bg-green-500 text-white hover:bg-green-600'}`}>
+                <Download size={14}/> {uploading ? 'กำลังประมวลผล...' : 'อัพโหลดไฟล์ Flash (.xlsx)'}
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFlashUpload} disabled={uploading}/>
+              </label>
+            </div>
+            {uploadResult && (
+              <div className={`mt-3 p-3 rounded-lg text-sm flex items-center gap-3 flex-wrap
+                ${uploadResult.conflicts > 0 ? 'bg-orange-50 text-orange-700' : uploadResult.matched > 0 ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
+                <span>✓ จับคู่สำเร็จ <strong>{uploadResult.matched}</strong> ออเดอร์</span>
+                {uploadResult.notFound > 0 && <span className="text-slate-500">· ไม่พบ {uploadResult.notFound} รายการ</span>}
+                {uploadResult.conflicts > 0 && (
+                  <span className="flex items-center gap-2">
+                    · ⚠ ชื่อ+เบอร์ซ้ำ <strong>{uploadResult.conflicts}</strong> รายการ
+                    <button onClick={() => setShowConflict(true)} className="px-2.5 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 font-bold">เลือก Tracking</button>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Toolbar */}
           <div className="shrink-0 flex gap-2 mb-3 flex-wrap items-center">
             <span className="px-3 py-2 bg-orange-50 border border-orange-100 rounded-lg text-xs text-orange-700">
