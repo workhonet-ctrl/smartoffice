@@ -404,6 +404,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           courier: order.courier || null,
           total_thb: order.total_thb, payment_method: order.payment_method,
           payment_status: order.payment_status, order_status: orderStatus, route,
+          imported_at: new Date().toISOString().split('T')[0], // วันที่นำเข้า
         }]);
 
         if (oe) {
@@ -618,6 +619,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
             <tr>
               <th className="p-3 text-left whitespace-nowrap">วันที่สั่งซื้อ</th>
+              <th className="p-3 text-left whitespace-nowrap">วันที่นำเข้า</th>
               <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
               <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
               <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
@@ -634,7 +636,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           <tbody>
             {orders.length === 0 && !loading && (
               <tr>
-                <td colSpan={12} className="p-0">
+                <td colSpan={13} className="p-0">
                   <div className="flex flex-col items-center justify-center py-16 gap-4">
                     {customerCount === 0 ? (
                       // ยังไม่ได้ทำ Step 1
@@ -666,7 +668,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               </tr>
             )}
             {filtered.length === 0 && orders.length > 0 && (
-              <tr><td colSpan={12} className="p-8 text-center text-slate-400">ไม่พบออเดอร์ที่ตรงกับตัวกรอง</td></tr>
+              <tr><td colSpan={13} className="p-8 text-center text-slate-400">ไม่พบออเดอร์ที่ตรงกับตัวกรอง</td></tr>
             )}
               {filtered.map(o => {
                 const carrier    = getCarrierLabel(o.route);
@@ -683,7 +685,6 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                       {o.order_date ? (
                         <div>
                           <div className="text-xs font-medium text-slate-700">
-                            {/* แปลง 2026-03-28 → 28-03-2026 */}
                             {o.order_date.split('-').reverse().join('-')}
                           </div>
                           {(o as any).order_time && (
@@ -691,6 +692,14 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                           )}
                         </div>
                       ) : <span className="text-slate-300">-</span>}
+                    </td>
+                    {/* วันที่นำเข้า */}
+                    <td className="p-3 whitespace-nowrap">
+                      {(o as any).imported_at
+                        ? <div className="text-xs text-indigo-600 font-medium">
+                            {String((o as any).imported_at).split('-').reverse().join('-')}
+                          </div>
+                        : <span className="text-slate-300 text-xs">-</span>}
                     </td>
                     {/* เลขออเดอร์ */}
                     <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{o.order_no}</td>
