@@ -218,14 +218,17 @@ export default function Customers() {
   const handleDelete = async (c: Customer, e: React.MouseEvent) => {
     e.stopPropagation();
     if (c.order_count > 0) {
-      if (!confirm(`ลูกค้า "${c.name}" มี ${c.order_count} ออเดอร์\nถ้าลบจะไม่กระทบออเดอร์เดิม แต่จะหาชื่อไม่เจอ\nยืนยันลบ?`)) return;
+      if (!confirm(`ลูกค้า "${c.name}" มี ${c.order_count} ออเดอร์\n⚠ ออเดอร์ทั้งหมดจะถูกลบด้วย ข้อมูลจะหายถาวร\nยืนยันลบ?`)) return;
     } else {
       if (!confirm(`ยืนยันลบลูกค้า "${c.name}"?`)) return;
     }
-    const { error } = await supabase.from('customers').delete().eq('id', c.id);
-    if (error) { showToast('ลบไม่สำเร็จ: ' + error.message, 'error'); return; }
+    // ลบออเดอร์ก่อน แล้วค่อยลบลูกค้า
+    const { error: oe } = await supabase.from('orders').delete().eq('customer_id', c.id);
+    if (oe) { showToast('ลบออเดอร์ไม่สำเร็จ: ' + oe.message, 'error'); return; }
+    const { error: ce } = await supabase.from('customers').delete().eq('id', c.id);
+    if (ce) { showToast('ลบลูกค้าไม่สำเร็จ: ' + ce.message, 'error'); return; }
     setCustomers(p => p.filter(x => x.id !== c.id));
-    showToast(`✓ ลบ "${c.name}" แล้ว`);
+    showToast(`✓ ลบ "${c.name}" และออเดอร์ทั้งหมดแล้ว`);
   };
 
   const filtered = customers.filter(c => {
