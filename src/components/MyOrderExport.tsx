@@ -212,8 +212,10 @@ export default function MyOrderExport() {
   };
 
   const loadExportedOrders = async () => {
+    // ส่งสำเร็จ = แพ็คสินค้า หรือ ส่งสินค้าแล้ว, route A/C
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .in('route', ['A', 'C']).eq('order_status', 'กำลังคีย์').order('updated_at', { ascending: false });
+      .in('route', ['A', 'C']).in('order_status', ['แพ็คสินค้า', 'ส่งสินค้าแล้ว', 'ส่งไปรษณีย์'])
+      .order('updated_at', { ascending: false });
     if (data) {
       setExportedOrders(data);
       const sel: OrderSelections = {};
@@ -223,8 +225,9 @@ export default function MyOrderExport() {
   };
 
   const loadPrintedOrders = async () => {
+    // กำลังแพ็ค = order_status กำลังแพ็ค, route A/C
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .in('route', ['A', 'C']).eq('order_status', 'รอแพ็ค').order('updated_at', { ascending: false });
+      .in('route', ['A', 'C']).eq('order_status', 'กำลังแพ็ค').order('updated_at', { ascending: false });
     if (data) setPrintedOrders(data);
   };
 
@@ -333,8 +336,8 @@ export default function MyOrderExport() {
         {([
           ['pending', 'รอส่งออก',  orders.length,         'bg-purple-100 text-purple-700'],
           ['pack',    'รอแพ็ค',    packReadyOrders.length, 'bg-teal-100 text-teal-700'],
-          ['printed', 'ปริ้นแล้ว', printedOrders.length,  'bg-indigo-100 text-indigo-700'],
-          ['exported','ส่งออกแล้ว',exportedOrders.length, 'bg-green-100 text-green-700'],
+          ['printed', 'กำลังแพ็ค', printedOrders.length,  'bg-orange-100 text-orange-700'],
+          ['exported','ส่งสำเร็จ', exportedOrders.length, 'bg-green-100 text-green-700'],
         ] as [Tab,string,number,string][]).map(([key,label,count,cls])=>(
           <button key={key} onClick={()=>setTab(key)} className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab===key?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
             {label} <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab===key?cls:'bg-slate-200 text-slate-500'}`}>{count}</span>
