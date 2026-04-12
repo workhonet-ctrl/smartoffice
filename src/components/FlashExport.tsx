@@ -547,103 +547,58 @@ export default function FlashExport() {
 
       {tab === 'exported' && (
         <>
-          <div className="flex gap-3 mb-3 shrink-0 flex-wrap items-center">
-            {/* Search */}
+          <div className="shrink-0 flex gap-2 mb-3 items-center flex-wrap">
             <div className="relative flex-1 min-w-[200px]">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
               <input type="text" value={searchExported} onChange={e => setSearchExported(e.target.value)}
-                placeholder="ค้นหาชื่อสินค้า เช่น ครีม Secret Rose(1 แถม 1)..."
+                placeholder="ค้นหาชื่อลูกค้า / สินค้า..."
                 className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-300"/>
             </div>
             {searchExported && <span className="text-xs text-slate-500 shrink-0">พบ {filteredExportedOrders.length} รายการ</span>}
-            {/* ปุ่มย้ายไป MyOrder */}
-            <button
-              onClick={() => {
-                const targets = selectedExported.size > 0
-                  ? exportedOrders.filter(o => selectedExported.has(o.id))
-                  : exportedOrders;
-                if (targets.length === 0) return;
-                if (!confirm(`ย้าย ${targets.length} ออเดอร์ไปยัง MyOrder Export?\nRoute จะเปลี่ยนจาก Flash → MyOrder`)) return;
-                setMovingToMyOrder(true);
-                supabase.from('orders')
-                  .update({ route: 'A', order_status: 'รอคีย์ออเดอร์' })
-                  .in('id', targets.map(o => o.id))
-                  .then(() => {
-                    setSelectedExported(new Set());
-                    Promise.all([loadOrders(), loadExportedOrders(), loadPrintedOrders()])
-                      .finally(() => setMovingToMyOrder(false));
-                  });
-              }}
-              disabled={exportedOrders.length === 0 || movingToMyOrder}
-              className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-2 text-sm disabled:opacity-50">
-              📦 {movingToMyOrder ? 'กำลังย้าย...' : `ย้ายไป MyOrder${selectedExported.size > 0 ? ` (${selectedExported.size})` : ''}`}
-            </button>
-            <button onClick={handleReExport} disabled={exportedOrders.length===0||reExporting}
-              className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 flex items-center gap-2 disabled:opacity-50 text-sm">
-              <Download size={16}/> {reExporting?'กำลังส่งออก...':`ส่งออกซ้ำ (${exportedCount} รายการ)`}
-            </button>
-            {selectedExported.size > 0 && (
-              <button onClick={() => handleDeleteExported([...selectedExported])}
-                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center gap-2 text-sm">
-                <Trash2 size={16}/> ลบที่เลือก ({selectedExported.size})
-              </button>
-            )}
-            <button onClick={() => handleDeleteExported(exportedOrders.map(o=>o.id))}
-              disabled={exportedOrders.length===0}
-              className="px-4 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 flex items-center gap-2 text-sm disabled:opacity-50">
-              <Trash2 size={16}/> ลบทั้งหมด
-            </button>
-            {selectedExported.size>0 && <span className="self-center text-xs text-slate-500">เลือก {selectedExported.size} จาก {exportedOrders.length}</span>}
+            <span className="text-xs bg-green-50 border border-green-100 text-green-700 rounded-lg px-3 py-2">
+              ✅ ส่งสำเร็จ {exportedOrders.length} รายการ
+            </span>
           </div>
-
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-            <table className="text-sm" style={{minWidth:'700px', width:'100%'}}>
-              <thead className="bg-green-800 text-green-100 text-xs sticky top-0">
+            <table className="text-sm w-full" style={{minWidth:'800px'}}>
+              <thead className="bg-green-800 text-green-100 text-xs sticky top-0 z-10">
                 <tr>
-                  <th className="p-3 w-8">
-                    <input type="checkbox" checked={allExportedSelected}
-                      onChange={e => setSelectedExported(e.target.checked ? new Set(filteredExportedOrders.map(o=>o.id)) : new Set())}
-                      className="rounded"/>
-                  </th>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
-                  <th className="p-3 text-left">ลูกค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
                   <th className="p-3 text-left">สินค้า</th>
-                  <th className="p-3 text-center w-10">แก้</th>
+                  <th className="p-3 text-left whitespace-nowrap">Tracking</th>
                   <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
-                  <th className="p-3 text-left">ที่อยู่</th>
+                  <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredExportedOrders.length===0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">{searchExported ? `ไม่พบสินค้า "${searchExported}"` : 'ยังไม่มีออเดอร์ที่ส่งออก'}</td></tr>}
+                {filteredExportedOrders.length === 0 && (
+                  <tr><td colSpan={8} className="p-8 text-center text-slate-400">
+                    {searchExported ? `ไม่พบ "${searchExported}"` : 'ยังไม่มีออเดอร์ส่งสำเร็จ'}
+                  </td></tr>
+                )}
                 {filteredExportedOrders.map(o => (
-                  <tr key={o.id} className={`border-b hover:bg-green-50 ${selectedExported.has(o.id)?'bg-green-50':''}`}>
-                    <td className="p-3 text-center">
-                      <input type="checkbox" checked={selectedExported.has(o.id)} onChange={()=>toggleExported(o.id)} className="rounded"/>
-                    </td>
+                  <tr key={o.id} className="border-b hover:bg-green-50">
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
                       {o.order_date ? o.order_date.split('-').reverse().join('-') : '-'}
-                      {(o as any).order_time && <div className="text-slate-400">{(o as any).order_time}</div>}
                     </td>
                     <td className="p-3 font-mono text-xs text-green-700 whitespace-nowrap">{o.order_no}</td>
-                    <td className="p-3 whitespace-nowrap">{o.customers?.name||'-'}</td>
-                    <td className="p-3 text-xs text-slate-500 max-w-[160px]">
-                      <div className="space-y-0.5">
-                        {(orderSelections[o.id] || makeItems(o)).map((item, idx) => (
-                          <div key={idx} className={`flex items-center gap-1 ${!item.selected?'opacity-30 line-through':''}`}>
-                            <span className="truncate text-slate-700">{item.rawProd}</span>
-                            <span className="shrink-0 text-xs text-slate-400">×{item.qty}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="p-3 text-center">
-                      <button onClick={() => setEditingOrder(o)} className="p-1 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded" title="แก้ไขสินค้า">
-                        <Edit2 size={14}/>
-                      </button>
+                    <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
+                    <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
+                    <td className="p-3 text-xs text-slate-500 max-w-[180px] truncate">{o.raw_prod || '-'}</td>
+                    <td className="p-3 font-mono text-xs whitespace-nowrap">
+                      {(o as any).tracking_no
+                        ? <span className="text-blue-600 font-bold">{(o as any).tracking_no}</span>
+                        : <span className="text-slate-300">-</span>}
                     </td>
                     <td className="p-3 text-right font-bold">฿{Number(o.total_thb).toLocaleString()}</td>
-                    <td className="p-3 text-xs text-slate-400 max-w-[200px] truncate">{[o.customers?.address,o.customers?.district,o.customers?.province].filter(Boolean).join(' ')}</td>
+                    <td className="p-3 text-center">
+                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">
+                        {o.order_status || 'ส่งแล้ว'}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
