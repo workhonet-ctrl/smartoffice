@@ -107,9 +107,9 @@ export default function FlashExport() {
       const codAmount = isCOD ? Math.floor(order.total_thb) : '';
       const address = [
         order.customers?.address,
-        order.customers?.subdistrict ? `ต.${order.customers.subdistrict}` : null,
-        order.customers?.district    ? `อ.${order.customers.district}` : null,
-        order.customers?.province    ? `จ.${order.customers.province}` : null,
+        order.customers?.subdistrict ? `ตำบล${order.customers.subdistrict}` : null,
+        order.customers?.district    ? `อำเภอ${order.customers.district}` : null,
+        order.customers?.province    ? `จังหวัด${order.customers.province}` : null,
       ].filter(Boolean).join(' ');
       const orderNoWithName = `${order.order_no} ${order.raw_prod || ''}`.trim();
 
