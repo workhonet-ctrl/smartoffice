@@ -134,13 +134,18 @@ export default function FlashExport() {
           p = data;
         }
         const shortName = p?.short_name || p?.name || rawProds[i];
-        const qty = qtyFromSel; // ใช้จำนวนที่ผู้ใช้กำหนด
+        const qty    = qtyFromSel; // จำนวน pack ที่ user กำหนด
+        const pieces = p?.name ? extractQty(p.name) * qty : qty; // จำนวนชิ้นจริง เช่น 1แถม1 × 1 = 2 ชิ้น
         itemDescs.push(`${shortName}|-|-|${qty}`);
-        if (p?.products_master?.weight_g) totalWeightKg += (Number(p.products_master.weight_g) * qty) / 1000;
+        if (p?.products_master?.weight_g) totalWeightKg += (Number(p.products_master.weight_g) * pieces) / 1000;
         if (i === 0) { boxL = Number(p?.boxes?.length_cm)||1; boxW = Number(p?.boxes?.width_cm)||1; boxH = Number(p?.boxes?.height_cm)||1; flashItemType = p?.item_type||'พัสดุ'; }
       }
       if (totalWeightKg === 0) totalWeightKg = Math.max(Number(order.weight_kg ?? 0), 0.1);
-      const weightKgStr = Math.max(totalWeightKg, 0.1).toFixed(2);
+      // ปัดน้ำหนักตามเกณฑ์ Flash: < 0.5 kg → 1.0, >= 0.5 kg → ปัดขึ้นทีละ 0.5
+      const roundedWeight = totalWeightKg < 0.5
+        ? 1.0
+        : Math.ceil(totalWeightKg / 0.5) * 0.5 + 0.5;
+      const weightKgStr = roundedWeight.toFixed(2);
       const [d1='',d2='',d3='',d4='',d5=''] = [...itemDescs,'','','','',''];
       const phone = (order.customers?.tel||'').replace(/[^0-9]/g,'');
 
