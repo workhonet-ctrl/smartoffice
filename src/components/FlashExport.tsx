@@ -74,10 +74,10 @@ export default function FlashExport() {
     if (data) setPackReadyOrders(data);
   };
 
-  // ปริ้นแล้ว → กำลังแพ็ค = กำลังแพ็ค, route B
+  // ปริ้นแล้ว → กำลังแพ็ค = กำลังแพ็ค + แพ็คสินค้า (อนุมัติใบเบิกแล้ว รอส่ง), route B
   const loadPrintedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .eq('route', 'B').eq('order_status', 'กำลังแพ็ค')
+      .eq('route', 'B').in('order_status', ['กำลังแพ็ค', 'แพ็คสินค้า'])
       .order('updated_at', { ascending: false });
     if (data) setPrintedOrders(data);
   };
@@ -97,10 +97,10 @@ export default function FlashExport() {
     } finally { setLoading(false); }
   };
 
-  // ส่งสำเร็จ = แพ็คสินค้า หรือ ส่งแฟลช, route B
+  // ส่งสำเร็จ = ส่งแฟลชแล้ว (มี tracking + ยืนยันส่ง), route B
   const loadExportedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .eq('route', 'B').in('order_status', ['แพ็คสินค้า', 'ส่งแฟลช', 'ส่งสินค้าแล้ว'])
+      .eq('route', 'B').in('order_status', ['ส่งแฟลช', 'ส่งสินค้าแล้ว'])
       .order('updated_at', { ascending: false });
     if (data) {
       setExportedOrders(data);
