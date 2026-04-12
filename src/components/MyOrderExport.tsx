@@ -212,9 +212,9 @@ export default function MyOrderExport() {
   };
 
   const loadExportedOrders = async () => {
-    // ส่งสำเร็จ = แพ็คสินค้า หรือ ส่งสินค้าแล้ว, route A/C
+    // ส่งสำเร็จ = ยืนยันส่งแล้วจริงๆ เท่านั้น (มี tracking + กดส่งแล้ว)
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .in('route', ['A', 'C']).in('order_status', ['แพ็คสินค้า', 'ส่งสินค้าแล้ว', 'ส่งไปรษณีย์'])
+      .in('route', ['A', 'C']).in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์'])
       .order('updated_at', { ascending: false });
     if (data) {
       setExportedOrders(data);
