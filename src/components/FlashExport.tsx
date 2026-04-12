@@ -74,10 +74,10 @@ export default function FlashExport() {
     if (data) setPackReadyOrders(data);
   };
 
-  // ปริ้นแล้ว = รอแพ็ค + มี tracking แล้ว
+  // ปริ้นแล้ว → กำลังแพ็ค = กำลังแพ็ค, route B
   const loadPrintedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .eq('route', 'B').eq('order_status', 'รอแพ็ค').not('tracking_no', 'is', null)
+      .eq('route', 'B').eq('order_status', 'กำลังแพ็ค')
       .order('updated_at', { ascending: false });
     if (data) setPrintedOrders(data);
   };
@@ -97,9 +97,11 @@ export default function FlashExport() {
     } finally { setLoading(false); }
   };
 
+  // ส่งสำเร็จ = แพ็คสินค้า หรือ ส่งแฟลช, route B
   const loadExportedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .eq('route', 'B').eq('order_status', 'กำลังคีย์').order('updated_at', { ascending: false });
+      .eq('route', 'B').in('order_status', ['แพ็คสินค้า', 'ส่งแฟลช', 'ส่งสินค้าแล้ว'])
+      .order('updated_at', { ascending: false });
     if (data) {
       setExportedOrders(data);
       const sel: any = {};
@@ -363,10 +365,10 @@ export default function FlashExport() {
           รอแพ็ค <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='pack'?'bg-teal-100 text-teal-700':'bg-slate-200 text-slate-500'}`}>{packReadyOrders.length}</span>
         </button>
         <button onClick={() => setTab('exported')} className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab==='exported'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
-          ปริ้นแล้ว <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='exported'?'bg-indigo-100 text-indigo-700':'bg-slate-200 text-slate-500'}`}>{printedOrders.length}</span>
+          กำลังแพ็ค <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='exported'?'bg-orange-100 text-orange-700':'bg-slate-200 text-slate-500'}`}>{printedOrders.length}</span>
         </button>
         <button onClick={() => setTab('printed')} className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab==='printed'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
-          ส่งออกแล้ว <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='printed'?'bg-green-100 text-green-700':'bg-slate-200 text-slate-500'}`}>{exportedOrders.length}</span>
+          ส่งสำเร็จ <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='printed'?'bg-green-100 text-green-700':'bg-slate-200 text-slate-500'}`}>{exportedOrders.length}</span>
         </button>
       </div>
 
