@@ -155,10 +155,10 @@ export default function Packaging({
         onCreateRequisition('');
       } else {
         // ✅ อัพเดต order_status รอแพ็ค → กำลังแพ็ค
-        const orderIds = orders.map(o => o.id);
+        const packOrderIds = orders.map(o => o.id);
         await supabase.from('orders')
           .update({ order_status: 'กำลังแพ็ค' })
-          .in('id', orderIds);
+          .in('id', packOrderIds);
         onCreateRequisition(ph?.id || '');
       }
     } catch (err) {
