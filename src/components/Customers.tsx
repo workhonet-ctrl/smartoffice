@@ -118,6 +118,7 @@ export default function Customers() {
           province:      String(row[10] || '').trim() || null,
           postal_code:   String(row[11] || '').trim() || null,
           channel:       String(row[2]  || '').trim() || null,
+          payment_method:String(row[22] || '').trim() || null,  // Col W: วิธีการชำระเงิน
         };
 
         let customerId: string | null = null;
