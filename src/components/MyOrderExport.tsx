@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 
 type OrderItem = { rawProd: string; qty: number; selected: boolean };
 type OrderSelections = Record<string, OrderItem[]>;
-type Tab = 'pending' | 'exported' | 'printed';
+type Tab = 'pending' | 'pack' | 'exported' | 'printed';
 
 const HEADERS = [
   'ชื่อผู้รับ',
@@ -187,8 +187,15 @@ export default function MyOrderExport() {
   const [previewing,       setPreviewing]       = useState(false);
   const [showPreview,      setShowPreview]      = useState(false);
   const [previewRows,      setPreviewRows]      = useState<PreviewRow[]>([]);
+  const [packReadyOrders,  setPackReadyOrders]  = useState<Order[]>([]);
 
-  useEffect(() => { loadOrders(); loadExportedOrders(); loadPrintedOrders(); }, []);
+  useEffect(() => { loadOrders(); loadPackReady(); loadExportedOrders(); loadPrintedOrders(); }, []);
+
+  const loadPackReady = async () => {
+    const { data } = await supabase.from('orders').select('*, customers(*)')
+      .in('route', ['A', 'C']).eq('order_status', 'รอแพ็ค').order('updated_at', { ascending: false });
+    if (data) setPackReadyOrders(data);
+  };
 
   const loadOrders = async () => {
     setLoading(true);
@@ -227,8 +234,8 @@ export default function MyOrderExport() {
     try {
       await exportToExcel(targetOrders, orderSelections, `MyOrder_Export_${new Date().toISOString().split('T')[0]}.xlsx`, channel);
       if (updateStatus) {
-        await supabase.from('orders').update({ order_status: 'กำลังคีย์' }).in('id', targetOrders.map(o => o.id));
-        await Promise.all([loadOrders(), loadExportedOrders()]);
+        await supabase.from('orders').update({ order_status: 'รอแพ็ค' }).in('id', targetOrders.map(o => o.id));
+        await Promise.all([loadOrders(), loadPackReady()]);
       }
     } catch (e) { console.error(e); alert('เกิดข้อผิดพลาดในการส่งออก'); }
     finally { setExporting(false); setShowPreview(false); }
@@ -263,7 +270,7 @@ export default function MyOrderExport() {
     if (!confirm(`ยืนยันลบ ${ids.length} รายการ?`)) return;
     await supabase.from('orders').update({ order_status: 'รอคีย์ออเดอร์' }).in('id', ids);
     setSelectedExported(new Set());
-    await Promise.all([loadOrders(), loadExportedOrders()]);
+    await Promise.all([loadOrders(), loadPackReady(), loadExportedOrders()]);
   };
 
   const handleMyOrderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -323,7 +330,12 @@ export default function MyOrderExport() {
       <h2 className="text-2xl font-bold text-slate-800 mb-4 shrink-0">MyOrder Export</h2>
 
       <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit mb-4 shrink-0">
-        {([['pending','รอส่งออก',orders.length,'bg-purple-100 text-purple-700'],['exported','ส่งออกแล้ว',exportedOrders.length,'bg-indigo-100 text-indigo-700'],['printed','ปริ้นแล้ว',printedOrders.length,'bg-teal-100 text-teal-700']] as [Tab,string,number,string][]).map(([key,label,count,cls])=>(
+        {([
+          ['pending', 'รอส่งออก',  orders.length,         'bg-purple-100 text-purple-700'],
+          ['pack',    'รอแพ็ค',    packReadyOrders.length, 'bg-teal-100 text-teal-700'],
+          ['printed', 'ปริ้นแล้ว', printedOrders.length,  'bg-indigo-100 text-indigo-700'],
+          ['exported','ส่งออกแล้ว',exportedOrders.length, 'bg-green-100 text-green-700'],
+        ] as [Tab,string,number,string][]).map(([key,label,count,cls])=>(
           <button key={key} onClick={()=>setTab(key)} className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab===key?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
             {label} <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab===key?cls:'bg-slate-200 text-slate-500'}`}>{count}</span>
           </button>
@@ -396,6 +408,46 @@ export default function MyOrderExport() {
                     <td className="p-3 text-center">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${o.route==='A'?'bg-green-100 text-green-700':'bg-purple-100 text-purple-700'}`}>{o.route}</span>
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* ── Tab: รอแพ็ค ── */}
+      {tab === 'pack' && (
+        <>
+          <div className="shrink-0 mb-3 px-3 py-2 bg-teal-50 border border-teal-100 rounded-lg text-xs text-teal-700">
+            📦 ออเดอร์ที่ส่งออก MyOrder แล้ว · <strong>หน้าแพ็คสินค้าจะดึงข้อมูลจากนี้</strong>
+          </div>
+          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+            <table className="text-sm w-full" style={{minWidth:'700px'}}>
+              <thead className="bg-teal-800 text-teal-100 text-xs sticky top-0 z-10">
+                <tr>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                  <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
+                  <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
+                  <th className="p-3 text-left">สินค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">Tracking</th>
+                  <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {packReadyOrders.length === 0 && (
+                  <tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์รอแพ็ค</td></tr>
+                )}
+                {packReadyOrders.map(o => (
+                  <tr key={o.id} className="border-b hover:bg-teal-50">
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
+                    <td className="p-3 font-mono text-xs text-teal-700 whitespace-nowrap">{o.order_no}</td>
+                    <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
+                    <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
+                    <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod || '-'}</td>
+                    <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{(o as any).tracking_no || '-'}</td>
+                    <td className="p-3 text-right font-bold">฿{Number(o.total_thb).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
