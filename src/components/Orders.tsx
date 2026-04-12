@@ -76,7 +76,7 @@ function getAutoStatus(order: Order): { label: string; color: string } {
   if (s === 'รอแพ็ค')        return { label: 'รอแพ็ค',        color: 'bg-yellow-100 text-yellow-700' };
   if (s === 'กำลังแพ็ค')     return { label: 'กำลังแพ็ค',     color: 'bg-orange-100 text-orange-700' };
   if (s === 'แพ็คสินค้า')    return { label: 'แพ็คสินค้า',    color: 'bg-teal-100 text-teal-700' };
-  if (s === 'ส่งแฟลช')       return { label: 'ส่งแฟลช',       color: 'bg-green-100 text-green-700' };
+  if (s === 'ส่งสินค้าแล้ว') return { label: 'ส่งสินค้าแล้ว', color: 'bg-green-100 text-green-700' };
   if (s === 'ส่งไปรษณีย์')   return { label: 'ส่งไปรษณีย์',   color: 'bg-purple-100 text-purple-800' };
   if (s === 'ส่งสินค้าแล้ว') return { label: 'ส่งสินค้าแล้ว', color: 'bg-green-100 text-green-800' };
   if (s === 'ปริ้นแล้ว')     return { label: 'ปริ้นแล้ว',     color: 'bg-sky-100 text-sky-700' };
