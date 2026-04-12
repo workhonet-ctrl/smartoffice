@@ -657,11 +657,28 @@ export default function FlashExport() {
       {/* ── Tab: กำลังแพ็ค ── */}
       {tab === 'printed' && (
         <>
-          <div className="shrink-0 mb-3 px-3 py-2 bg-orange-50 border border-orange-100 rounded-lg text-xs text-orange-700">
-            📦 ออเดอร์ที่กำลังแพ็คอยู่ — สร้างใบเบิกจากหน้าแพ็คสินค้าแล้ว · รอแพ็คเสร็จ
+          {/* Toolbar */}
+          <div className="shrink-0 flex gap-2 mb-3 flex-wrap items-center">
+            <span className="px-3 py-2 bg-orange-50 border border-orange-100 rounded-lg text-xs text-orange-700">
+              📦 กำลังแพ็ค {printedOrders.length} รายการ · ออเดอร์ที่มี Tracking กดยืนยันส่งได้เลย
+            </span>
+            {printedOrders.some(o => (o as any).tracking_no) && (
+              <button
+                onClick={async () => {
+                  const withTracking = printedOrders.filter(o => (o as any).tracking_no);
+                  if (!confirm(`ยืนยันส่งแล้ว ${withTracking.length} ออเดอร์ที่มี Tracking?\nจะย้ายไปแท็บ ส่งสำเร็จ`)) return;
+                  await supabase.from('orders')
+                    .update({ order_status: 'ส่งแฟลช' })
+                    .in('id', withTracking.map(o => o.id));
+                  await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
+                }}
+                className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm font-medium flex items-center gap-2">
+                ✓ ยืนยันส่งแล้ว ({printedOrders.filter(o => (o as any).tracking_no).length} ออเดอร์มี Tracking)
+              </button>
+            )}
           </div>
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-            <table className="text-sm w-full" style={{minWidth:'700px'}}>
+            <table className="text-sm w-full" style={{minWidth:'750px'}}>
               <thead className="bg-orange-700 text-orange-100 text-xs sticky top-0 z-10">
                 <tr>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
@@ -671,27 +688,50 @@ export default function FlashExport() {
                   <th className="p-3 text-left">สินค้า</th>
                   <th className="p-3 text-left whitespace-nowrap">Tracking</th>
                   <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
+                  <th className="p-3 text-center whitespace-nowrap">ดำเนินการ</th>
                 </tr>
               </thead>
               <tbody>
                 {printedOrders.length === 0 && (
-                  <tr><td colSpan={7} className="p-8 text-center text-slate-400">
+                  <tr><td colSpan={8} className="p-8 text-center text-slate-400">
                     ยังไม่มีออเดอร์กำลังแพ็ค — สร้างใบเบิกจากหน้าแพ็คสินค้าก่อน
                   </td></tr>
                 )}
-                {printedOrders.map(o => (
-                  <tr key={o.id} className="border-b hover:bg-orange-50">
-                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
-                    <td className="p-3 font-mono text-xs text-orange-700 whitespace-nowrap">{o.order_no}</td>
-                    <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
-                    <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
-                    <td className="p-3 text-xs text-slate-500 max-w-[160px] truncate">{o.raw_prod || '-'}</td>
-                    <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{(o as any).tracking_no || '-'}</td>
-                    <td className="p-3 text-center">
-                      <span className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full text-xs font-bold">กำลังแพ็ค</span>
-                    </td>
-                  </tr>
-                ))}
+                {printedOrders.map(o => {
+                  const hasTracking = !!(o as any).tracking_no;
+                  return (
+                    <tr key={o.id} className={`border-b ${hasTracking ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-orange-50'}`}>
+                      <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
+                      <td className="p-3 font-mono text-xs text-orange-700 whitespace-nowrap">{o.order_no}</td>
+                      <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
+                      <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
+                      <td className="p-3 text-xs text-slate-500 max-w-[160px] truncate">{o.raw_prod || '-'}</td>
+                      <td className="p-3 font-mono text-xs whitespace-nowrap">
+                        {hasTracking
+                          ? <span className="text-blue-600 font-bold">{(o as any).tracking_no}</span>
+                          : <span className="text-slate-300">รอ Tracking</span>}
+                      </td>
+                      <td className="p-3 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${hasTracking ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                          {hasTracking ? 'พร้อมส่ง' : 'กำลังแพ็ค'}
+                        </span>
+                      </td>
+                      <td className="p-3 text-center">
+                        {hasTracking && (
+                          <button
+                            onClick={async () => {
+                              await supabase.from('orders')
+                                .update({ order_status: 'ส่งแฟลช' }).eq('id', o.id);
+                              await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
+                            }}
+                            className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold whitespace-nowrap">
+                            ✓ ส่งแล้ว
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
