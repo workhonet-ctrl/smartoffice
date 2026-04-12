@@ -287,7 +287,7 @@ export default function FlashExport() {
         } else if (matches.length === 1) {
           // ตรงเดียว → assign ทันที
           await supabase.from('orders')
-            .update({ tracking_no: tracking, order_status: 'รอแพ็ค' })
+            .update({ tracking_no: tracking, order_status: 'กำลังแพ็ค' })
             .eq('id', matches[0].id);
           matched++;
         } else {
@@ -326,7 +326,7 @@ export default function FlashExport() {
     for (const c of conflicts) {
       if (!c.chosen) continue;
       await supabase.from('orders')
-        .update({ tracking_no: c.tracking, order_status: 'รอแพ็ค' })
+        .update({ tracking_no: c.tracking, order_status: 'กำลังแพ็ค' })
         .eq('id', c.chosen);
     }
     setShowConflict(false);
