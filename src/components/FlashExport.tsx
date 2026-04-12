@@ -103,7 +103,7 @@ export default function FlashExport() {
     const previews: PreviewRow[] = [];
 
     for (const order of targetOrders) {
-      const isCOD     = order.payment_status !== 'ชำระแล้ว';
+      const isCOD     = order.payment_method === 'COD' || (order.payment_method !== 'BANK' && order.payment_status !== 'ชำระแล้ว');
       const codAmount = isCOD ? Math.floor(order.total_thb) : '';
       const address = [
         order.customers?.address,
@@ -398,7 +398,7 @@ export default function FlashExport() {
               <tbody>
                 {filteredOrders.length===0 && <tr><td colSpan={9} className="p-8 text-center text-slate-400">{searchProduct ? `ไม่พบสินค้า "${searchProduct}"` : 'ไม่มีออเดอร์รอส่งออก'}</td></tr>}
                 {filteredOrders.map(o => {
-                  const isCOD = o.payment_status !== 'ชำระแล้ว' || o.payment_method === 'COD';
+                  const isCOD = o.payment_method === 'COD' || (o.payment_method !== 'BANK' && o.payment_status !== 'ชำระแล้ว');
                   return (
                   <tr key={o.id} className={`border-b hover:bg-slate-50 ${selectedPending.has(o.id)?'bg-yellow-50':''}`}>
                     <td className="p-3 text-center">
