@@ -97,10 +97,10 @@ export default function FlashExport() {
     } finally { setLoading(false); }
   };
 
-  // ส่งสำเร็จ = ส่งแฟลชแล้ว (มี tracking + ยืนยันส่ง), route B
+  // ส่งสำเร็จ = ส่งแฟลชแล้ว (มี tracking + ยืนยันส่ง), ทุก route
   const loadExportedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .eq('route', 'B').in('order_status', ['ส่งแฟลช', 'ส่งสินค้าแล้ว'])
+      .in('order_status', ['ส่งแฟลช', 'ส่งสินค้าแล้ว'])
       .order('updated_at', { ascending: false });
     if (data) {
       setExportedOrders(data);
