@@ -306,7 +306,7 @@ export default function MyOrderExport() {
           return cTel === tel || cName === name;
         });
 
-        if (match) { await supabase.from('orders').update({ tracking_no: tracking, order_status: 'รอแพ็ค' }).eq('id', match.id); matched++; }
+        if (match) { await supabase.from('orders').update({ tracking_no: tracking, order_status: 'กำลังแพ็ค' }).eq('id', match.id); matched++; }
         else { notFound++; console.log(`ไม่พบ: ชื่อ=${name} เบอร์=${tel}`); }
       }
       setUploadResult({ matched, notFound });
