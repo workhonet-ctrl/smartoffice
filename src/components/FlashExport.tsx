@@ -41,7 +41,7 @@ export default function FlashExport() {
   const [previewing, setPreviewing]       = useState(false);
   const [previewRows, setPreviewRows]     = useState<PreviewRow[]>([]);
   const [showPreview, setShowPreview]     = useState(false);
-  const [tab, setTab]                     = useState<'pending' | 'exported' | 'printed'>('pending');
+  const [tab, setTab] = useState<'pending' | 'pack' | 'exported' | 'printed'>('pending');
   const [selectedPending,  setSelectedPending]  = useState<Set<string>>(new Set());
   const [selectedExported, setSelectedExported] = useState<Set<string>>(new Set());
   const [selectedPrinted,  setSelectedPrinted]  = useState<Set<string>>(new Set());
@@ -63,11 +63,22 @@ export default function FlashExport() {
   const [conflicts, setConflicts]   = useState<ConflictItem[]>([]);
   const [showConflict, setShowConflict] = useState(false);
 
-  useEffect(() => { loadOrders(); loadExportedOrders(); loadPrintedOrders(); }, []);
+  useEffect(() => { loadOrders(); loadPackReady(); loadPrintedOrders(); loadExportedOrders(); }, []);
 
+  // รอแพ็ค = export แล้ว ยังไม่มี tracking
+  const [packReadyOrders, setPackReadyOrders] = useState<Order[]>([]);
+  const loadPackReady = async () => {
+    const { data } = await supabase.from('orders').select('*, customers(*)')
+      .eq('route', 'B').eq('order_status', 'รอแพ็ค').is('tracking_no', null)
+      .order('updated_at', { ascending: false });
+    if (data) setPackReadyOrders(data);
+  };
+
+  // ปริ้นแล้ว = รอแพ็ค + มี tracking แล้ว
   const loadPrintedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
-      .eq('route', 'B').eq('order_status', 'รอแพ็ค').order('updated_at', { ascending: false });
+      .eq('route', 'B').eq('order_status', 'รอแพ็ค').not('tracking_no', 'is', null)
+      .order('updated_at', { ascending: false });
     if (data) setPrintedOrders(data);
   };
 
@@ -169,9 +180,9 @@ export default function FlashExport() {
     URL.revokeObjectURL(url);
     if (updateStatus) {
       const ids = targetOrders.map(o => o.id);
-      await supabase.from('orders').update({ order_status: 'กำลังคีย์' }).in('id', ids);
+      await supabase.from('orders').update({ order_status: 'รอแพ็ค' }).in('id', ids);
       setOrders([]); setSelectedPending(new Set());
-      await Promise.all([loadOrders(), loadExportedOrders()]);
+      await Promise.all([loadOrders(), loadPackReady()]);
     }
   };
 
@@ -298,7 +309,7 @@ export default function FlashExport() {
         setConflicts(newConflicts);
         setShowConflict(true);
       }
-      await Promise.all([loadOrders(), loadPrintedOrders()]);
+      await Promise.all([loadOrders(), loadPackReady(), loadPrintedOrders()]);
     } catch (err) {
       console.error(err);
       alert('เกิดข้อผิดพลาดในการอ่านไฟล์');
@@ -348,11 +359,14 @@ export default function FlashExport() {
         <button onClick={() => setTab('pending')} className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab==='pending'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
           รอส่งออก <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='pending'?'bg-yellow-100 text-yellow-700':'bg-slate-200 text-slate-500'}`}>{orders.length}</span>
         </button>
+        <button onClick={() => setTab('pack')} className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab==='pack'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
+          รอแพ็ค <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='pack'?'bg-teal-100 text-teal-700':'bg-slate-200 text-slate-500'}`}>{packReadyOrders.length}</span>
+        </button>
         <button onClick={() => setTab('exported')} className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab==='exported'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
-          ปริ้นแล้ว <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='exported'?'bg-indigo-100 text-indigo-700':'bg-slate-200 text-slate-500'}`}>{exportedOrders.length}</span>
+          ปริ้นแล้ว <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='exported'?'bg-indigo-100 text-indigo-700':'bg-slate-200 text-slate-500'}`}>{printedOrders.length}</span>
         </button>
         <button onClick={() => setTab('printed')} className={`px-5 py-2 rounded-lg text-sm font-medium transition ${tab==='printed'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
-          ส่งออกแล้ว <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='printed'?'bg-green-100 text-green-700':'bg-slate-200 text-slate-500'}`}>{printedOrders.length}</span>
+          ส่งออกแล้ว <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${tab==='printed'?'bg-green-100 text-green-700':'bg-slate-200 text-slate-500'}`}>{exportedOrders.length}</span>
         </button>
       </div>
 
@@ -448,6 +462,48 @@ export default function FlashExport() {
       )}
 
       {/* ── Tab: ส่งออกแล้ว ── */}
+      {/* ── Tab: รอแพ็ค (export แล้ว ยังไม่มี tracking) ── */}
+      {tab === 'pack' && (
+        <>
+          <div className="shrink-0 mb-3 px-3 py-2 bg-teal-50 border border-teal-100 rounded-lg text-xs text-teal-700">
+            📦 ออเดอร์ที่ส่งออก Flash แล้ว · กำลังรอ Flash คืน Tracking · <strong>หน้าแพ็คสินค้าจะดึงข้อมูลจากนี้</strong>
+          </div>
+          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+            <table className="text-sm w-full" style={{minWidth:'700px'}}>
+              <thead className="bg-teal-800 text-teal-100 text-xs sticky top-0 z-10">
+                <tr>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                  <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
+                  <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
+                  <th className="p-3 text-left">สินค้า</th>
+                  <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
+                  <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {packReadyOrders.length === 0 && (
+                  <tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีออเดอร์รอแพ็ค</td></tr>
+                )}
+                {packReadyOrders.map(o => (
+                  <tr key={o.id} className="border-b hover:bg-teal-50">
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
+                    <td className="p-3 font-mono text-xs text-teal-700 whitespace-nowrap">{o.order_no}</td>
+                    <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
+                    <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
+                    <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod || '-'}</td>
+                    <td className="p-3 text-right font-bold">฿{Number(o.total_thb).toLocaleString()}</td>
+                    <td className="p-3 text-center">
+                      <span className="px-2 py-0.5 bg-teal-100 text-teal-700 rounded-full text-xs font-bold">รอ Tracking</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
       {tab === 'exported' && (
         <>
           <div className="flex gap-3 mb-3 shrink-0 flex-wrap items-center">
