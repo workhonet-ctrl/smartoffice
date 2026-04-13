@@ -70,27 +70,6 @@ export default function HREmployees() {
   const [fEmgTel,    setFEmgTel]    = useState('');
   const [fLineId,    setFLineId]    = useState('');
 
-  useEffect(() => { load(); }, []);
-
-  // สร้างรหัสพนักงานอัตโนมัติจาก prefix แผนก
-  const generateCode = async (deptCode: string) => {
-    if (!deptCode) return;
-    const prefix = deptCode;
-    const { data } = await supabase.from('employees')
-      .select('employee_code')
-      .like('employee_code', `${prefix}%`)
-      .order('employee_code', { ascending: false })
-      .limit(1);
-    const last = data?.[0]?.employee_code;
-    const num  = last ? parseInt(last.replace(prefix, '')) + 1 : 1;
-    setFCode(`${prefix}${String(num).padStart(4, '0')}`);
-  };
-
-  const handleDeptChange = async (code: string) => {
-    setFDeptCode(code);
-    if (fCodeAuto) await generateCode(code);
-  };
-
   const load = async () => {
     setLoading(true);
     const [{ data: emp }, { data: dept }, { data: pos }] = await Promise.all([
@@ -102,6 +81,26 @@ export default function HREmployees() {
     if (dept) setDepartments(dept);
     if (pos)  setPositions(pos);
     setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  // สร้างรหัสพนักงานอัตโนมัติจาก prefix แผนก
+  const generateCode = async (deptCode: string) => {
+    if (!deptCode) return;
+    const { data } = await supabase.from('employees')
+      .select('employee_code')
+      .like('employee_code', `${deptCode}%`)
+      .order('employee_code', { ascending: false })
+      .limit(1);
+    const last = data?.[0]?.employee_code;
+    const num  = last ? parseInt(last.replace(deptCode, '')) + 1 : 1;
+    setFCode(`${deptCode}${String(num).padStart(4, '0')}`);
+  };
+
+  const handleDeptChange = async (code: string) => {
+    setFDeptCode(code);
+    if (fCodeAuto) await generateCode(code);
   };
 
   const openForm = (emp?: Employee) => {
@@ -126,9 +125,11 @@ export default function HREmployees() {
     setShowForm(true);
   };
 
+  const [saveError, setSaveError] = useState('');
+
   const handleSave = async () => {
     if (!fName.trim()) return;
-    setSaving(true);
+    setSaving(true); setSaveError('');
     const payload: any = {
       name: fName.trim(), nickname: fNickname||null, employee_code: fCode||null,
       tel: fTel||null, email: fEmail||null, gender: fGender, role: fRole,
@@ -138,9 +139,17 @@ export default function HREmployees() {
       bank_name: fBank||null, bank_account: fBankAcc||null,
       emergency_name: fEmgName||null, emergency_tel: fEmgTel||null, line_id: fLineId||null,
     };
-    if (editing) await supabase.from('employees').update(payload).eq('id', editing.id);
-    else         await supabase.from('employees').insert([payload]);
-    setSaving(false); setShowForm(false); load();
+    let err;
+    if (editing) ({ error: err } = await supabase.from('employees').update(payload).eq('id', editing.id));
+    else         ({ error: err } = await supabase.from('employees').insert([payload]));
+    setSaving(false);
+    if (err) {
+      if (err.code === '23505') setSaveError('รหัสพนักงานนี้มีอยู่แล้ว กรุณาเปลี่ยนรหัส');
+      else setSaveError('เกิดข้อผิดพลาด: ' + err.message);
+      return;
+    }
+    setShowForm(false);
+    await load();
   };
 
   const filtered = employees.filter(e =>
@@ -408,7 +417,13 @@ export default function HREmployees() {
                 </div>
               </div>
             </div>
-            <div className="sticky bottom-0 bg-white px-6 pb-5 pt-3 border-t flex gap-2">
+            <div className="sticky bottom-0 bg-white px-6 pb-5 pt-3 border-t">
+              {saveError && (
+                <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+                  ⚠ {saveError}
+                </div>
+              )}
+              <div className="flex gap-2">
               <button onClick={() => setShowForm(false)} className="flex-1 py-2 bg-slate-200 rounded-lg text-sm">ยกเลิก</button>
               <button onClick={handleSave} disabled={!fName.trim() || saving}
                 className="flex-1 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium text-sm disabled:opacity-50">
