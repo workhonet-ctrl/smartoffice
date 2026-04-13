@@ -614,32 +614,38 @@ function AdsData() {
   const [tab, setTab] = useState<DataTab>('pages');
 
   // ── shared data ──
-  const [pages,    setPages]    = useState<any[]>([]);
-  const [accounts, setAccounts] = useState<any[]>([]);
-  const [admins,   setAdmins]   = useState<any[]>([]);
+  const [pages,     setPages]     = useState<any[]>([]);
+  const [accounts,  setAccounts]  = useState<any[]>([]);
+  const [admins,    setAdmins]    = useState<any[]>([]); // จาก employees
+  const [employees, setEmployees] = useState<any[]>([]); // ทั้งหมดสำหรับ dropdown
 
   const loadAll = async () => {
-    const [p, a, ad] = await Promise.all([
+    const [p, a, emp] = await Promise.all([
       supabase.from('ads_pages').select('*').order('created_at'),
       supabase.from('ads_accounts').select('*').order('created_at'),
-      supabase.from('ads_admins').select('*').order('created_at'),
+      supabase.from('employees').select('id,name,nickname,employee_code,department_id,status')
+        .eq('status','active').order('name'),
     ]);
-    if (p.data)  setPages(p.data);
-    if (a.data)  setAccounts(a.data);
-    if (ad.data) setAdmins(ad.data);
+    if (p.data)   setPages(p.data);
+    if (a.data)   setAccounts(a.data);
+    if (emp.data) {
+      setEmployees(emp.data);
+      // ผู้ดูแล = employees ทั้งหมด (แสดงในแท็บผู้ดูแล)
+      setAdmins(emp.data);
+    }
   };
   useEffect(() => { loadAll(); }, []);
 
-  const PAGE_STATUS  = ['ยิงโฆษณา', 'ไม่ได้ยิงโฆษณา', 'ถูกจำกัด', 'ปิดเพจถาวร'];
-  const ACC_STATUS   = ['ว่าง', 'ใช้งาน', 'ค้างเงิน', 'ปิดถาวร'];
+  const PAGE_STATUS = ['ยิงโฆษณา', 'ไม่ได้ยิงโฆษณา', 'ถูกจำกัด', 'ปิดเพจถาวร'];
+  const ACC_STATUS  = ['ว่าง', 'ใช้งาน', 'ค้างเงิน', 'ปิดถาวร'];
 
   // ── Page modal ──
-  const [showPageForm, setShowPageForm]   = useState(false);
-  const [editPage, setEditPage]           = useState<any>(null);
-  const [pName,    setPName]              = useState('');
-  const [pAccount, setPAccount]           = useState('');
-  const [pAdmin,   setPAdmin]             = useState('');
-  const [pStatus,  setPStatus]            = useState('ยิงโฆษณา');
+  const [showPageForm, setShowPageForm] = useState(false);
+  const [editPage, setEditPage]         = useState<any>(null);
+  const [pName,    setPName]            = useState('');
+  const [pAccount, setPAccount]         = useState('');
+  const [pAdmin,   setPAdmin]           = useState('');
+  const [pStatus,  setPStatus]          = useState('ยิงโฆษณา');
 
   const openPageForm = (row?: any) => {
     setEditPage(row || null);
@@ -677,23 +683,6 @@ function AdsData() {
     if (editAcc) await supabase.from('ads_accounts').update(payload).eq('id', editAcc.id);
     else         await supabase.from('ads_accounts').insert([payload]);
     setShowAccForm(false); loadAll();
-  };
-
-  // ── Admin modal ──
-  const [showAdminForm, setShowAdminForm] = useState(false);
-  const [editAdmin, setEditAdmin]         = useState<any>(null);
-  const [adName,    setAdName]            = useState('');
-
-  const openAdminForm = (row?: any) => {
-    setEditAdmin(row || null);
-    setAdName(row?.name || '');
-    setShowAdminForm(true);
-  };
-  const saveAdmin = async () => {
-    if (!adName.trim()) return;
-    if (editAdmin) await supabase.from('ads_admins').update({ name: adName.trim() }).eq('id', editAdmin.id);
-    else           await supabase.from('ads_admins').insert([{ name: adName.trim() }]);
-    setShowAdminForm(false); loadAll();
   };
 
   const STATUS_COLOR: Record<string, string> = {
@@ -735,7 +724,6 @@ function AdsData() {
         </div>
         {tab === 'pages'    && <button onClick={() => openPageForm()}  className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 text-sm font-medium">+ เพิ่มเพจ</button>}
         {tab === 'accounts' && <button onClick={() => openAccForm()}   className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 text-sm font-medium">+ เพิ่มบัญชี</button>}
-        {tab === 'admins'   && <button onClick={() => openAdminForm()} className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 text-sm font-medium">+ เพิ่มผู้ดูแล</button>}
       </div>
 
       {/* ── รายชื่อเพจ ── */}
@@ -810,24 +798,33 @@ function AdsData() {
         </div>
       )}
 
-      {/* ── ผู้ดูแล ── */}
+      {/* ── ผู้ดูแล (ดึงจากพนักงาน) ── */}
       {tab === 'admins' && (
         <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+          <div className="px-4 py-3 bg-purple-50 border-b border-purple-100 text-xs text-purple-700">
+            📌 รายชื่อผู้ดูแลดึงอัตโนมัติจาก <strong>หน้าพนักงาน (HR)</strong> · เพิ่มผู้ดูแลได้ที่ พนักงาน → เพิ่มพนักงาน
+          </div>
           <table className="text-sm w-full">
             <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
               <tr>
-                <th className="p-3 text-left">ชื่อผู้ดูแล</th>
-                <th className="p-3 w-16"/>
+                <th className="p-3 text-left whitespace-nowrap">รหัส</th>
+                <th className="p-3 text-left">ชื่อ - นามสกุล</th>
+                <th className="p-3 text-left whitespace-nowrap">ชื่อเล่น</th>
+                <th className="p-3 text-left whitespace-nowrap">แผนก</th>
               </tr>
             </thead>
             <tbody>
-              {admins.length === 0 && <tr><td colSpan={2} className="p-8 text-center text-slate-400">ยังไม่มีผู้ดูแล</td></tr>}
-              {admins.map(a => (
-                <tr key={a.id} className="border-b hover:bg-purple-50">
-                  <td className="p-3 font-medium text-slate-800">{a.name}</td>
-                  <td className="p-3 text-center">
-                    <button onClick={() => openAdminForm(a)} className="text-slate-400 hover:text-purple-600 text-xs px-2 py-1 rounded hover:bg-purple-50">✏</button>
-                  </td>
+              {admins.length === 0 && (
+                <tr><td colSpan={4} className="p-8 text-center text-slate-400">
+                  ยังไม่มีพนักงาน — ไปเพิ่มที่ ฝ่าย HR → พนักงาน
+                </td></tr>
+              )}
+              {admins.map(e => (
+                <tr key={e.id} className="border-b hover:bg-purple-50">
+                  <td className="p-3 font-mono text-xs text-purple-600">{e.employee_code || '-'}</td>
+                  <td className="p-3 font-medium text-slate-800">{e.name}</td>
+                  <td className="p-3 text-xs text-slate-500">{e.nickname || '-'}</td>
+                  <td className="p-3 text-xs text-slate-500">{e.department_id || '-'}</td>
                 </tr>
               ))}
             </tbody>
@@ -859,7 +856,11 @@ function AdsData() {
                 <select value={pAdmin} onChange={e => setPAdmin(e.target.value)}
                   className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300">
                   <option value="">— ไม่ระบุ —</option>
-                  {admins.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  {employees.map(e => (
+                    <option key={e.id} value={e.id}>
+                      {e.employee_code ? `[${e.employee_code}] ` : ''}{e.name}{e.nickname ? ` (${e.nickname})` : ''}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -912,24 +913,6 @@ function AdsData() {
         </div>
       )}
 
-      {/* ── Admin Modal ── */}
-      {showAdminForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
-            <h3 className="text-lg font-bold text-slate-800 mb-4">{editAdmin ? 'แก้ไขผู้ดูแล' : '+ เพิ่มผู้ดูแล'}</h3>
-            <div>
-              <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อผู้ดูแล *</label>
-              <input value={adName} onChange={e => setAdName(e.target.value)} placeholder="ชื่อผู้ดูแล..."
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
-            </div>
-            <div className="flex gap-2 mt-5">
-              <button onClick={() => setShowAdminForm(false)} className="flex-1 py-2 bg-slate-200 rounded-lg text-sm">ยกเลิก</button>
-              <button onClick={saveAdmin} disabled={!adName.trim()}
-                className="flex-1 py-2.5 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-medium text-sm disabled:opacity-50">บันทึก</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
