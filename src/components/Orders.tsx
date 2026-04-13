@@ -1,8 +1,189 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { Order, TOURIST_ZIPS } from '../lib/types';
-import { Upload, Search, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { Upload, Search, CheckCircle, AlertCircle, RefreshCw, Package, XCircle, RotateCcw } from 'lucide-react';
 import * as XLSX from 'xlsx';
+
+// ── ParcelTracking (inline) ───────────────────────────────────
+const PARCEL_STATUSES = [
+  { v: 'รอรับพัสดุ',         color: 'bg-slate-100 text-slate-600' },
+  { v: 'อยู่ระหว่างจัดส่ง',  color: 'bg-blue-100 text-blue-700' },
+  { v: 'ส่งสำเร็จ',           color: 'bg-green-100 text-green-700' },
+  { v: 'ไม่มีคนรับ',          color: 'bg-orange-100 text-orange-700' },
+  { v: 'ส่งคืน',              color: 'bg-red-100 text-red-700' },
+];
+
+type TrackRow = {
+  tracking_no: string; found: boolean;
+  order_id?: string; order_no?: string; customer_name?: string;
+  raw_prod?: string; route?: string;
+  parcel_status?: string; newStatus?: string;
+};
+
+function ParcelTrackingPanel() {
+  const [input,     setInput]     = useState('');
+  const [results,   setResults]   = useState<TrackRow[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [saving,    setSaving]    = useState(false);
+  const [saveMsg,   setSaveMsg]   = useState('');
+
+  const parseTrackings = (raw: string) =>
+    raw.split(/[\n,;\s]+/).map(s => s.trim()).filter(s => s.length > 4).slice(0, 20);
+
+  const handleSearch = async () => {
+    const trackings = parseTrackings(input);
+    if (!trackings.length) return;
+    setSearching(true); setSaveMsg('');
+    const { data } = await supabase.from('orders')
+      .select('id, order_no, raw_prod, route, tracking_no, parcel_status, customers(name)')
+      .in('tracking_no', trackings);
+    setResults(trackings.map(t => {
+      const o = (data || []).find((x: any) => x.tracking_no === t);
+      if (!o) return { tracking_no: t, found: false };
+      return { tracking_no: t, found: true, order_id: o.id, order_no: o.order_no,
+        customer_name: (o.customers as any)?.name || '-', raw_prod: o.raw_prod || '-',
+        route: o.route, parcel_status: o.parcel_status || 'รอรับพัสดุ',
+        newStatus: o.parcel_status || 'รอรับพัสดุ' };
+    }));
+    setSearching(false);
+  };
+
+  const updateStatus = (t: string, s: string) =>
+    setResults(prev => prev.map(r => r.tracking_no === t ? { ...r, newStatus: s } : r));
+
+  const handleSaveAll = async () => {
+    const toSave = results.filter(r => r.found && r.newStatus !== r.parcel_status);
+    if (!toSave.length) { setSaveMsg('ไม่มีสถานะที่เปลี่ยนแปลง'); return; }
+    setSaving(true);
+    for (const r of toSave)
+      await supabase.from('orders').update({ parcel_status: r.newStatus }).eq('id', r.order_id!);
+    setResults(prev => prev.map(r => {
+      const t = toSave.find(x => x.tracking_no === r.tracking_no);
+      return t ? { ...r, parcel_status: t.newStatus, } : r;
+    }));
+    setSaving(false);
+    setSaveMsg(`✓ บันทึกสำเร็จ ${toSave.length} รายการ`);
+  };
+
+  const cnt = parseTrackings(input).length;
+  const found    = results.filter(r => r.found).length;
+  const notFound = results.filter(r => !r.found).length;
+  const changed  = results.filter(r => r.found && r.newStatus !== r.parcel_status).length;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Input box */}
+      <div className="shrink-0 bg-white rounded-xl border p-4 mb-3">
+        <label className="text-xs font-semibold text-slate-600 block mb-2">
+          วางเลข Tracking (สูงสุด 20 เลข · คั่นด้วย Enter, comma หรือ space)
+        </label>
+        <textarea value={input} onChange={e => setInput(e.target.value)} rows={5}
+          placeholder={'TH001234\nTH005678\nWA120121495TH'}
+          className="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"/>
+        <div className="flex justify-between items-center mt-3 flex-wrap gap-2">
+          <span className="text-xs text-slate-400">
+            {cnt} เลข {cnt >= 20 && <span className="text-orange-500">(ครบ 20 แล้ว)</span>}
+          </span>
+          <button onClick={handleSearch} disabled={searching || !cnt}
+            className="px-5 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 hover:bg-blue-600">
+            <Search size={14}/> {searching ? 'กำลังค้นหา...' : `ค้นหา ${cnt || ''} รายการ`}
+          </button>
+        </div>
+      </div>
+
+      {/* Summary */}
+      {results.length > 0 && (
+        <div className="shrink-0 flex gap-2 mb-3 flex-wrap">
+          <span className="bg-green-50 border border-green-200 rounded-lg px-3 py-1.5 text-xs text-green-700 flex items-center gap-1">
+            <CheckCircle size={12}/> พบ {found}
+          </span>
+          {notFound > 0 && <span className="bg-red-50 border border-red-200 rounded-lg px-3 py-1.5 text-xs text-red-700 flex items-center gap-1">
+            <XCircle size={12}/> ไม่พบ {notFound}
+          </span>}
+          {changed > 0 && <span className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5 text-xs text-orange-700">
+            เปลี่ยนสถานะ {changed} รายการ
+          </span>}
+          {saveMsg && <span className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 text-xs text-blue-700">{saveMsg}</span>}
+        </div>
+      )}
+
+      {/* Table */}
+      {results.length > 0 && (
+        <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+          <table className="text-sm w-full" style={{minWidth:'780px'}}>
+            <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+              <tr>
+                <th className="p-3 text-left whitespace-nowrap">Tracking No.</th>
+                <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
+                <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                <th className="p-3 text-left">สินค้า</th>
+                <th className="p-3 text-center whitespace-nowrap">ขนส่ง</th>
+                <th className="p-3 text-center whitespace-nowrap" style={{minWidth:'200px'}}>สถานะพัสดุ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map(r => (
+                <tr key={r.tracking_no}
+                  className={`border-b ${!r.found ? 'bg-red-50' : r.newStatus !== r.parcel_status ? 'bg-orange-50' : 'hover:bg-blue-50'}`}>
+                  <td className="p-3 font-mono text-xs font-bold text-blue-600 whitespace-nowrap">{r.tracking_no}</td>
+                  {!r.found
+                    ? <td colSpan={4} className="p-3 text-red-500 text-xs"><XCircle size={12} className="inline mr-1"/>ไม่พบในระบบ</td>
+                    : <>
+                        <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{r.order_no}</td>
+                        <td className="p-3 font-medium whitespace-nowrap">{r.customer_name}</td>
+                        <td className="p-3 text-xs text-slate-500 max-w-[160px] truncate">{r.raw_prod}</td>
+                        <td className="p-3 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${r.route === 'B' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700'}`}>
+                            {r.route === 'B' ? 'Flash' : 'ไปรษณีย์'}
+                          </span>
+                        </td>
+                      </>
+                  }
+                  <td className="p-3 text-center">
+                    {r.found && (
+                      <div className="flex items-center gap-1 justify-center">
+                        <select value={r.newStatus} onChange={e => updateStatus(r.tracking_no, e.target.value)}
+                          className={`border rounded-lg px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-300 ${PARCEL_STATUSES.find(s => s.v === r.newStatus)?.color || ''}`}>
+                          {PARCEL_STATUSES.map(s => <option key={s.v}>{s.v}</option>)}
+                        </select>
+                        {r.newStatus !== r.parcel_status && <span className="w-2 h-2 rounded-full bg-orange-400"/>}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Empty */}
+      {results.length === 0 && !searching && (
+        <div className="flex-1 flex flex-col items-center justify-center text-slate-300 gap-3">
+          <Package size={52} strokeWidth={1}/>
+          <p className="text-sm">วางเลข Tracking แล้วกดค้นหา</p>
+          <div className="flex gap-2 flex-wrap justify-center">
+            {PARCEL_STATUSES.map(s => <span key={s.v} className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${s.color}`}>{s.v}</span>)}
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      {results.length > 0 && (
+        <div className="shrink-0 flex justify-end gap-3 mt-3">
+          <button onClick={() => { setResults([]); setInput(''); setSaveMsg(''); }}
+            className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-300 flex items-center gap-2">
+            <RotateCcw size={13}/> ล้าง
+          </button>
+          <button onClick={handleSaveAll} disabled={saving || !changed}
+            className="px-6 py-2 bg-green-500 text-white rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 hover:bg-green-600">
+            <CheckCircle size={14}/> {saving ? 'กำลังบันทึก...' : `บันทึกสถานะ${changed ? ` (${changed})` : ''}`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 type PromoOption = { id: string; name: string; short_name: string | null; price_thb: number };
 
@@ -95,6 +276,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<'orders' | 'parcel'>('orders');
   const today = new Date().toISOString().split('T')[0];
   // ข้อ 2: เริ่มต้นเห็นทั้งหมด (ไม่ filter วันที่)
   const [dateFrom, setDateFrom] = useState('');
@@ -533,14 +715,29 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               )}
             </p>
           </div>
-          <label className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-start">
-            <Upload size={17}/> นำเข้า Excel
-            <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden"/>
-          </label>
+          {/* Tab + Upload */}
+          <div className="flex items-center gap-2">
+            <div className="flex bg-slate-100 p-1 rounded-xl">
+              <button onClick={() => setActiveTab('orders')}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'orders' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+                📋 ออเดอร์
+              </button>
+              <button onClick={() => setActiveTab('parcel')}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1 ${activeTab === 'parcel' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+                <Package size={14}/> ติดตามพัสดุ
+              </button>
+            </div>
+            {activeTab === 'orders' && (
+              <label className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-start">
+                <Upload size={17}/> นำเข้า Excel
+                <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden"/>
+              </label>
+            )}
+          </div>
         </div>
 
-        {/* Filter bar */}
-        <div className="bg-white rounded-xl border px-4 py-3 space-y-2">
+        {/* Filter bar — แสดงเฉพาะ tab ออเดอร์ */}
+        {activeTab === 'orders' && <div className="bg-white rounded-xl border px-4 py-3 space-y-2">
           {/* Row 1: Search + Date */}
           <div className="flex flex-wrap gap-2 items-center">
             <div className="relative flex-1 min-w-[180px]">
@@ -622,8 +819,15 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         </div>
       </div>
 
-      {/* Table — ข้อ 4: flex-1 + overflow scroll ทั้ง X และ Y, sticky header */}
-      <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+      {/* Parcel Tracking Tab */}
+      {activeTab === 'parcel' && (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ParcelTrackingPanel />
+        </div>
+      )}
+
+      {/* Table — แสดงเฉพาะ tab ออเดอร์ */}
+      {activeTab === 'orders' && <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
         <table className="text-sm" style={{ minWidth: '1100px', width: '100%' }}>
           <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
             <tr>
@@ -837,7 +1041,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               })}
             </tbody>
           </table>
-        </div>
+        </div>}
 
       {/* Modal: จับคู่สินค้า */}
       {showMapping && (
