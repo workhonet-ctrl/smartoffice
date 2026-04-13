@@ -737,7 +737,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         </div>
 
         {/* Filter bar — แสดงเฉพาะ tab ออเดอร์ */}
-        {activeTab === 'orders' && <div className="bg-white rounded-xl border px-4 py-3 space-y-2">
+        {activeTab === 'orders' && (
+        <div className="bg-white rounded-xl border px-4 py-3 space-y-2">
           {/* Row 1: Search + Date */}
           <div className="flex flex-wrap gap-2 items-center">
             <div className="relative flex-1 min-w-[180px]">
@@ -816,7 +817,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               </button>
             )}
           </div>
-        </div>}
+        </div>
+        )}
 
       {/* Parcel Tracking Tab */}
       {activeTab === 'parcel' && (
@@ -826,7 +828,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
       )}
 
       {/* Table — แสดงเฉพาะ tab ออเดอร์ */}
-      {activeTab === 'orders' && <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+      {activeTab === 'orders' && (
+      <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
         <table className="text-sm" style={{ minWidth: '1100px', width: '100%' }}>
           <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
             <tr>
@@ -1040,7 +1043,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               })}
             </tbody>
           </table>
-        </div>}
+        </div>
+      )}
 
       {/* Modal: จับคู่สินค้า */}
       {showMapping && (
