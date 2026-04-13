@@ -668,13 +668,15 @@ function AdsData() {
 
   // ── Account modal ──
   const [showAccForm, setShowAccForm] = useState(false);
-  const [editAcc, setEditAcc]         = useState<any>(null);
-  const [aName,   setAName]           = useState('');
-  const [aId,     setAId]             = useState('');
-  const [aStatus, setAStatus]         = useState('ว่าง');
+  const [editAcc,    setEditAcc]      = useState<any>(null);
+  const [aBusiness,  setABusiness]    = useState('');
+  const [aName,      setAName]        = useState('');
+  const [aId,        setAId]          = useState('');
+  const [aStatus,    setAStatus]      = useState('ว่าง');
 
   const openAccForm = (row?: any) => {
     setEditAcc(row || null);
+    setABusiness(row?.business_name || '');
     setAName(row?.name || '');
     setAId(row?.account_id || '');
     setAStatus(row?.status || 'ว่าง');
@@ -682,7 +684,7 @@ function AdsData() {
   };
   const saveAccount = async () => {
     if (!aName.trim()) return;
-    const payload = { name: aName.trim(), account_id: aId.trim() || null, status: aStatus };
+    const payload = { business_name: aBusiness.trim() || null, name: aName.trim(), account_id: aId.trim() || null, status: aStatus };
     if (editAcc) await supabase.from('ads_accounts').update(payload).eq('id', editAcc.id);
     else         await supabase.from('ads_accounts').insert([payload]);
     setShowAccForm(false); loadAll();
@@ -774,16 +776,18 @@ function AdsData() {
           <table className="text-sm w-full">
             <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
               <tr>
-                <th className="p-3 text-left">ชื่อบัญชี</th>
-                <th className="p-3 text-left whitespace-nowrap">ID</th>
-                <th className="p-3 text-center whitespace-nowrap">สถานะบัญชี</th>
+                <th className="p-3 text-left whitespace-nowrap">ชื่อ Business</th>
+                <th className="p-3 text-left whitespace-nowrap">ชื่อบัญชีโฆษณา</th>
+                <th className="p-3 text-left whitespace-nowrap">ID โฆษณา</th>
+                <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
                 <th className="p-3 w-16"/>
               </tr>
             </thead>
             <tbody>
-              {accounts.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-slate-400">ยังไม่มีบัญชีโฆษณา</td></tr>}
+              {accounts.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-400">ยังไม่มีบัญชีโฆษณา</td></tr>}
               {accounts.map(a => (
                 <tr key={a.id} className="border-b hover:bg-purple-50">
+                  <td className="p-3 text-xs text-slate-500">{a.business_name || '-'}</td>
                   <td className="p-3 font-medium text-slate-800">{a.name}</td>
                   <td className="p-3 font-mono text-xs text-slate-400">{a.account_id || '-'}</td>
                   <td className="p-3 text-center">
@@ -892,17 +896,22 @@ function AdsData() {
             <h3 className="text-lg font-bold text-slate-800 mb-4">{editAcc ? 'แก้ไขบัญชี' : '+ เพิ่มบัญชีโฆษณา'}</h3>
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อบัญชี *</label>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อ Business</label>
+                <input value={aBusiness} onChange={e => setABusiness(e.target.value)} placeholder="ชื่อ Business..."
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อบัญชีโฆษณา *</label>
                 <input value={aName} onChange={e => setAName(e.target.value)} placeholder="ชื่อบัญชีโฆษณา..."
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">ID</label>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">ID โฆษณา</label>
                 <input value={aId} onChange={e => setAId(e.target.value)} placeholder="Account ID (ไม่จำเป็น)"
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">สถานะบัญชี</label>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">สถานะ</label>
                 <select value={aStatus} onChange={e => setAStatus(e.target.value)}
                   className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300">
                   {ACC_STATUS.map(s => <option key={s}>{s}</option>)}
