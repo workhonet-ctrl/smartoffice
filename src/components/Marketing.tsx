@@ -661,8 +661,10 @@ function AdsData() {
   const savePage = async () => {
     if (!pName.trim()) return;
     const payload = { name: pName.trim(), account_id: pAccount || null, admin_id: pAdmin || null, status: pStatus };
-    if (editPage) await supabase.from('ads_pages').update(payload).eq('id', editPage.id);
-    else          await supabase.from('ads_pages').insert([payload]);
+    let err;
+    if (editPage) ({ error: err } = await supabase.from('ads_pages').update(payload).eq('id', editPage.id));
+    else          ({ error: err } = await supabase.from('ads_pages').insert([payload]));
+    if (err) { alert('เกิดข้อผิดพลาด: ' + err.message); return; }
     setShowPageForm(false); loadAll();
   };
 
