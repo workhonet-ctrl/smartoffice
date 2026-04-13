@@ -9,6 +9,7 @@ const PARCEL_STATUSES = [
   { v: 'อยู่ระหว่างจัดส่ง',  color: 'bg-blue-100 text-blue-700' },
   { v: 'ส่งสำเร็จ',           color: 'bg-green-100 text-green-700' },
   { v: 'ไม่มีคนรับ',          color: 'bg-orange-100 text-orange-700' },
+  { v: 'ตีกลับ',              color: 'bg-yellow-100 text-yellow-700' },
   { v: 'ส่งคืน',              color: 'bg-red-100 text-red-700' },
 ];
 
@@ -34,10 +35,15 @@ function ParcelTrackingPanel() {
     'in transit':        'อยู่ระหว่างจัดส่ง',
     'out for delivery':  'อยู่ระหว่างจัดส่ง',
     'delivered':         'ส่งสำเร็จ',
+    'ตีกลับ':            'ส่งคืน',
+    'return to sender':  'ส่งคืน',
+    'returning':         'ส่งคืน',,
     'not found':         'รอรับพัสดุ',
     'failed attempt':    'ไม่มีคนรับ',
-    'returned':          'ส่งคืน',
-    'return':            'ส่งคืน',
+    'returned':          'ตีกลับ',
+    'return to sender':  'ตีกลับ',
+    'return':            'ตีกลับ',
+    'ส่งคืน':            'ส่งคืน',
   };
 
   const parseBulkTracking = (raw: string): { tracking: string; status: string }[] => {
@@ -112,10 +118,11 @@ function ParcelTrackingPanel() {
   };
 
   // Summary counts
-  const countFlash = allRows.filter(r => r.route === 'B').length;
-  const countPost  = allRows.filter(r => r.route !== 'B').length;
-  const countDone  = allRows.filter(r => r.parcel_status === 'ส่งสำเร็จ').length;
+  const countFlash   = allRows.filter(r => r.route === 'B').length;
+  const countPost    = allRows.filter(r => r.route !== 'B').length;
+  const countDone    = allRows.filter(r => r.parcel_status === 'ส่งสำเร็จ').length;
   const countPending = allRows.filter(r => r.parcel_status === 'ไม่มีคนรับ').length;
+  const countReturn  = allRows.filter(r => r.parcel_status === 'ตีกลับ' || r.parcel_status === 'ส่งคืน').length;
 
   const routeLabel = (r: string) => r === 'B' ? 'Flash' : 'ไปรษณีย์';
   const routeColor = (r: string) => r === 'B' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700';
@@ -125,12 +132,13 @@ function ParcelTrackingPanel() {
     <div className="flex flex-col h-full gap-3">
 
       {/* Summary bar */}
-      <div className="shrink-0 grid grid-cols-4 gap-2">
+      <div className="shrink-0 grid grid-cols-5 gap-2">
         {[
-          { label: 'Flash', count: countFlash, color: 'bg-orange-50 border-orange-200 text-orange-700' },
-          { label: 'ไปรษณีย์', count: countPost, color: 'bg-purple-50 border-purple-200 text-purple-700' },
-          { label: 'ส่งสำเร็จ', count: countDone, color: 'bg-green-50 border-green-200 text-green-700' },
-          { label: 'ไม่มีคนรับ', count: countPending, color: 'bg-orange-50 border-orange-100 text-orange-600' },
+          { label: 'Flash',     count: countFlash,   color: 'bg-orange-50 border-orange-200 text-orange-700' },
+          { label: 'ไปรษณีย์',  count: countPost,    color: 'bg-purple-50 border-purple-200 text-purple-700' },
+          { label: 'ส่งสำเร็จ', count: countDone,    color: 'bg-green-50 border-green-200 text-green-700' },
+          { label: 'ไม่มีคนรับ',count: countPending, color: 'bg-orange-50 border-orange-100 text-orange-600' },
+          { label: 'ตีกลับ/ส่งคืน', count: countReturn, color: 'bg-yellow-50 border-yellow-200 text-yellow-700' },
         ].map(s => (
           <div key={s.label} className={`border rounded-xl p-3 text-center ${s.color}`}>
             <div className="text-xs font-semibold mb-0.5">{s.label}</div>
@@ -248,10 +256,11 @@ function ParcelTrackingPanel() {
           <div className="bg-slate-50 border rounded-xl p-3 text-xs text-slate-500 space-y-1.5">
             <div className="font-semibold text-slate-600 mb-1">🔄 แปลงสถานะอัตโนมัติ</div>
             {[
-              { from: 'In transit', to: 'อยู่ระหว่างจัดส่ง' },
-              { from: 'Delivered', to: 'ส่งสำเร็จ' },
+              { from: 'In transit',       to: 'อยู่ระหว่างจัดส่ง' },
+              { from: 'Delivered',        to: 'ส่งสำเร็จ' },
               { from: 'Out for delivery', to: 'อยู่ระหว่างจัดส่ง' },
-              { from: 'Not found', to: 'รอรับพัสดุ' },
+              { from: 'Returned',         to: 'ตีกลับ' },
+              { from: 'Not found',        to: 'รอรับพัสดุ' },
             ].map(m => (
               <div key={m.from} className="flex items-center gap-1.5">
                 <span className="font-mono text-slate-400">{m.from}</span>
