@@ -26,9 +26,53 @@ function ParcelTrackingPanel() {
 
   // Bulk update
   const [bulkInput,    setBulkInput]    = useState('');
-  const [bulkStatus,   setBulkStatus]   = useState('อยู่ระหว่างจัดส่ง');
   const [saving,       setSaving]       = useState(false);
   const [saveMsg,      setSaveMsg]      = useState('');
+
+  // แปลงสถานะ EN → TH
+  const STATUS_MAP: Record<string, string> = {
+    'in transit':        'อยู่ระหว่างจัดส่ง',
+    'out for delivery':  'อยู่ระหว่างจัดส่ง',
+    'delivered':         'ส่งสำเร็จ',
+    'not found':         'รอรับพัสดุ',
+    'failed attempt':    'ไม่มีคนรับ',
+    'returned':          'ส่งคืน',
+    'return':            'ส่งคืน',
+  };
+
+  const parseBulkTracking = (raw: string): { tracking: string; status: string }[] => {
+    const results: { tracking: string; status: string }[] = [];
+    const blocks = raw.split(/={3,}|={5,}/);
+    for (const block of blocks) {
+      const trackMatch  = block.match(/Tracking number[:\s]+([A-Z0-9]+)/i);
+      const statusMatch = block.match(/Shipment status[:\s]+(.+)/i);
+      if (!trackMatch) continue;
+      const tracking = trackMatch[1].trim();
+      const rawStatus = (statusMatch?.[1] || '').trim().toLowerCase();
+      const status = STATUS_MAP[rawStatus] || 'อยู่ระหว่างจัดส่ง';
+      if (tracking.length > 4) results.push({ tracking, status });
+    }
+    return results;
+  };
+
+  const handleBulkUpdate = async () => {
+    const parsed = parseBulkTracking(bulkInput);
+    if (!parsed.length) return;
+    setSaving(true); setSaveMsg('');
+    let updated = 0;
+    for (const { tracking, status } of parsed) {
+      const { data } = await supabase.from('orders')
+        .select('id').eq('tracking_no', tracking).maybeSingle();
+      if (data?.id) {
+        await supabase.from('orders').update({ parcel_status: status }).eq('id', data.id);
+        updated++;
+      }
+    }
+    setSaveMsg(`✓ อัพเดต ${updated}/${parsed.length} รายการ`);
+    setBulkInput('');
+    setSaving(false);
+    await load();
+  };
 
   const load = async () => {
     setLoading(true);
@@ -65,26 +109,6 @@ function ParcelTrackingPanel() {
     navigator.clipboard.writeText(rows.map(r => r.tracking_no).join('\n'));
     setSaveMsg(`✓ Copy แล้ว ${rows.length} เลข`);
     setTimeout(() => setSaveMsg(''), 3000);
-  };
-
-  // Bulk update by pasting tracking numbers
-  const handleBulkUpdate = async () => {
-    const trackings = bulkInput.split(/[\n,;\s]+/).map(s => s.trim()).filter(s => s.length > 4);
-    if (!trackings.length) return;
-    setSaving(true); setSaveMsg('');
-    const { data: matched } = await supabase.from('orders')
-      .select('id').in('tracking_no', trackings);
-    if (matched && matched.length > 0) {
-      await supabase.from('orders')
-        .update({ parcel_status: bulkStatus })
-        .in('id', matched.map((o: any) => o.id));
-      setSaveMsg(`✓ อัพเดต ${matched.length} รายการ → "${bulkStatus}"`);
-      setBulkInput('');
-      await load();
-    } else {
-      setSaveMsg('ไม่พบ Tracking ในระบบ');
-    }
-    setSaving(false);
   };
 
   // Summary counts
@@ -183,42 +207,66 @@ function ParcelTrackingPanel() {
           </div>
         </div>
 
-        {/* Right: Bulk update panel */}
+        {/* Right: Smart paste panel */}
         <div className="w-72 shrink-0 flex flex-col gap-3">
           <div className="bg-white rounded-xl shadow p-4 flex flex-col gap-3">
             <div className="font-semibold text-slate-700 text-sm flex items-center gap-2">
-              <RefreshCw size={14}/> อัพเดตสถานะ
+              <RefreshCw size={14}/> วางข้อมูล Tracking
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-500 block mb-1">วางเลข Tracking</label>
-              <textarea value={bulkInput} onChange={e => setBulkInput(e.target.value)} rows={8}
-                placeholder={'TH001234\nTH005678\n...'}
+              <label className="text-xs font-semibold text-slate-500 block mb-1">
+                วาง content จากเว็บเช็ค Tracking
+              </label>
+              <textarea value={bulkInput} onChange={e => setBulkInput(e.target.value)} rows={10}
+                placeholder={'Tracking number: TH001234\nShipment status: In transit\n\nTracking number: TH005678\nShipment status: Delivered\n...'}
                 className="w-full border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"/>
-              <div className="text-[10px] text-slate-400 mt-0.5">
-                {bulkInput.split(/[\n,;\s]+/).filter(s => s.trim().length > 4).length} เลข
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-500 block mb-1">เปลี่ยนเป็นสถานะ</label>
-              <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}
-                className={`w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium ${statusColor(bulkStatus)}`}>
-                {PARCEL_STATUSES.map(s => <option key={s.v} value={s.v}>{s.v}</option>)}
-              </select>
+              {/* Preview parsed */}
+              {bulkInput.trim() && (() => {
+                const parsed = parseBulkTracking(bulkInput);
+                return parsed.length > 0 ? (
+                  <div className="mt-1.5 space-y-1">
+                    {parsed.slice(0, 5).map((p, i) => (
+                      <div key={i} className="flex items-center gap-2 text-[10px]">
+                        <span className="font-mono text-blue-600 truncate">{p.tracking}</span>
+                        <span className={`px-1.5 py-0.5 rounded-full font-bold shrink-0 ${statusColor(p.status)}`}>{p.status}</span>
+                      </div>
+                    ))}
+                    {parsed.length > 5 && <div className="text-[10px] text-slate-400">+{parsed.length-5} รายการ</div>}
+                  </div>
+                ) : null;
+              })()}
             </div>
             <button onClick={handleBulkUpdate}
               disabled={saving || !bulkInput.trim()}
               className="w-full py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-2">
               <CheckCircle size={14}/>
-              {saving ? 'กำลังอัพเดต...' : 'อัพเดตสถานะ'}
+              {saving ? 'กำลังอัพเดต...' : `อัพเดตสถานะ${bulkInput.trim() ? ` (${parseBulkTracking(bulkInput).length})` : ''}`}
             </button>
+          </div>
+
+          {/* Status map */}
+          <div className="bg-slate-50 border rounded-xl p-3 text-xs text-slate-500 space-y-1.5">
+            <div className="font-semibold text-slate-600 mb-1">🔄 แปลงสถานะอัตโนมัติ</div>
+            {[
+              { from: 'In transit', to: 'อยู่ระหว่างจัดส่ง' },
+              { from: 'Delivered', to: 'ส่งสำเร็จ' },
+              { from: 'Out for delivery', to: 'อยู่ระหว่างจัดส่ง' },
+              { from: 'Not found', to: 'รอรับพัสดุ' },
+            ].map(m => (
+              <div key={m.from} className="flex items-center gap-1.5">
+                <span className="font-mono text-slate-400">{m.from}</span>
+                <span className="text-slate-300">→</span>
+                <span className={`px-1.5 py-0.5 rounded-full font-bold ${statusColor(m.to)}`}>{m.to}</span>
+              </div>
+            ))}
           </div>
 
           {/* Copy tip */}
           <div className="bg-slate-50 border rounded-xl p-3 text-xs text-slate-500 space-y-1">
             <div className="font-semibold text-slate-600">💡 วิธีใช้</div>
-            <div>• เลือก ✓ แถว แล้วกด Copy Tracking</div>
-            <div>• Filter ขนส่ง → Copy ทั้งหมด</div>
-            <div>• วาง Tracking ในช่องซ้าย → เลือกสถานะ → อัพเดต</div>
+            <div>• Copy ทั้งหน้าจากเว็บเช็ค Tracking</div>
+            <div>• วางในช่องนี้ → ระบบแยก Tracking + สถานะเอง</div>
+            <div>• กด "อัพเดตสถานะ" → บันทึกทีเดียว</div>
           </div>
         </div>
       </div>
