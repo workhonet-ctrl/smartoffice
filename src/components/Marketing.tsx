@@ -630,8 +630,11 @@ function AdsData() {
     if (a.data)   setAccounts(a.data);
     if (emp.data) {
       setEmployees(emp.data);
-      // ผู้ดูแล = employees ทั้งหมด (แสดงในแท็บผู้ดูแล)
-      setAdmins(emp.data);
+      // ผู้ดูแล = เฉพาะพนักงานที่รหัสขึ้นต้นด้วย IT หรือ GM
+      setAdmins(emp.data.filter((e: any) =>
+        (e.employee_code || '').startsWith('IT') ||
+        (e.employee_code || '').startsWith('GM')
+      ));
     }
   };
   useEffect(() => { loadAll(); }, []);
@@ -856,7 +859,9 @@ function AdsData() {
                 <select value={pAdmin} onChange={e => setPAdmin(e.target.value)}
                   className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300">
                   <option value="">— ไม่ระบุ —</option>
-                  {employees.map(e => (
+                  {employees
+                    .filter(e => (e.employee_code||'').startsWith('IT') || (e.employee_code||'').startsWith('GM'))
+                    .map(e => (
                     <option key={e.id} value={e.id}>
                       {e.employee_code ? `[${e.employee_code}] ` : ''}{e.name}{e.nickname ? ` (${e.nickname})` : ''}
                     </option>
