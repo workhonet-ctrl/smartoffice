@@ -25,6 +25,18 @@ const STATUS_LABEL: Record<string, string> = {
 const GENDERS = ['ชาย', 'หญิง', 'ไม่ระบุ'];
 const ROLES   = ['พนักงาน', 'หัวหน้า', 'ผู้จัดการ', 'HR', 'บัญชี', 'กราฟฟิก', 'คลังสินค้า', 'การตลาด'];
 
+const DEPARTMENTS: { code: string; name: string }[] = [
+  { code: 'GM', name: 'บริหาร' },
+  { code: 'GA', name: 'จัดการสนับสนุน' },
+  { code: 'SL', name: 'การขาย' },
+  { code: 'MK', name: 'การตลาด' },
+  { code: 'AC', name: 'บัญชี' },
+  { code: 'FN', name: 'การเงิน' },
+  { code: 'HR', name: 'บุคคล' },
+  { code: 'OP', name: 'ปฏิบัติการ' },
+  { code: 'IT', name: 'เทคโนโลยีสารสนเทศ' },
+];
+
 export default function HREmployees() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading]     = useState(true);
@@ -40,11 +52,12 @@ export default function HREmployees() {
   const [fName,      setFName]      = useState('');
   const [fNickname,  setFNickname]  = useState('');
   const [fCode,      setFCode]      = useState('');
+  const [fCodeAuto,  setFCodeAuto]  = useState(true); // auto-generate flag
   const [fTel,       setFTel]       = useState('');
   const [fEmail,     setFEmail]     = useState('');
   const [fGender,    setFGender]    = useState('ไม่ระบุ');
   const [fRole,      setFRole]      = useState('พนักงาน');
-  const [fDept,      setFDept]      = useState('');
+  const [fDeptCode,  setFDeptCode]  = useState('');  // dept prefix code e.g. 'GM'
   const [fPos,       setFPos]       = useState('');
   const [fHire,      setFHire]      = useState('');
   const [fBirth,     setFBirth]     = useState('');
@@ -58,6 +71,25 @@ export default function HREmployees() {
   const [fLineId,    setFLineId]    = useState('');
 
   useEffect(() => { load(); }, []);
+
+  // สร้างรหัสพนักงานอัตโนมัติจาก prefix แผนก
+  const generateCode = async (deptCode: string) => {
+    if (!deptCode) return;
+    const prefix = deptCode;
+    const { data } = await supabase.from('employees')
+      .select('employee_code')
+      .like('employee_code', `${prefix}%`)
+      .order('employee_code', { ascending: false })
+      .limit(1);
+    const last = data?.[0]?.employee_code;
+    const num  = last ? parseInt(last.replace(prefix, '')) + 1 : 1;
+    setFCode(`${prefix}${String(num).padStart(4, '0')}`);
+  };
+
+  const handleDeptChange = async (code: string) => {
+    setFDeptCode(code);
+    if (fCodeAuto) await generateCode(code);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -76,17 +108,18 @@ export default function HREmployees() {
     if (emp) {
       setEditing(emp);
       setFName(emp.name); setFNickname(emp.nickname||''); setFCode(emp.employee_code||'');
+      setFCodeAuto(false); // ไม่ auto เมื่อแก้ไข
       setFTel(emp.tel||''); setFEmail(emp.email||''); setFGender(emp.gender||'ไม่ระบุ');
-      setFRole(emp.role||'พนักงาน'); setFDept(emp.department_id||''); setFPos(emp.position_id||'');
+      setFRole(emp.role||'พนักงาน'); setFDeptCode(emp.department_id||''); setFPos(emp.position_id||'');
       setFHire(emp.hire_date||''); setFBirth(emp.birth_date||''); setFStatus(emp.status||'active');
       setFAddress(emp.address_current||''); setFNatId(emp.national_id||'');
       setFBank(emp.bank_name||''); setFBankAcc(emp.bank_account||'');
       setFEmgName(emp.emergency_name||''); setFEmgTel(emp.emergency_tel||'');
       setFLineId(emp.line_id||'');
     } else {
-      setEditing(null);
+      setEditing(null); setFCodeAuto(true);
       setFName(''); setFNickname(''); setFCode(''); setFTel(''); setFEmail('');
-      setFGender('ไม่ระบุ'); setFRole('พนักงาน'); setFDept(''); setFPos('');
+      setFGender('ไม่ระบุ'); setFRole('พนักงาน'); setFDeptCode(''); setFPos('');
       setFHire(''); setFBirth(''); setFStatus('active'); setFAddress('');
       setFNatId(''); setFBank(''); setFBankAcc(''); setFEmgName(''); setFEmgTel(''); setFLineId('');
     }
@@ -99,7 +132,7 @@ export default function HREmployees() {
     const payload: any = {
       name: fName.trim(), nickname: fNickname||null, employee_code: fCode||null,
       tel: fTel||null, email: fEmail||null, gender: fGender, role: fRole,
-      department_id: fDept||null, position_id: fPos||null,
+      department_id: fDeptCode||null, position_id: fPos||null,
       hire_date: fHire||null, birth_date: fBirth||null, status: fStatus,
       address_current: fAddress||null, national_id: fNatId||null,
       bank_name: fBank||null, bank_account: fBankAcc||null,
@@ -247,11 +280,6 @@ export default function HREmployees() {
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"/>
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">รหัสพนักงาน</label>
-                  <input value={fCode} onChange={e => setFCode(e.target.value)} placeholder="EMP001"
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"/>
-                </div>
-                <div>
                   <label className="text-xs font-semibold text-slate-500 block mb-1">เพศ</label>
                   <select value={fGender} onChange={e => setFGender(e.target.value)}
                     className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
@@ -273,18 +301,39 @@ export default function HREmployees() {
               <div className="font-semibold text-slate-600 text-sm border-b pb-1">ตำแหน่งงาน</div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">แผนก</label>
+                  <select value={fDeptCode} onChange={e => handleDeptChange(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+                    <option value="">— ไม่ระบุ —</option>
+                    {DEPARTMENTS.map(d => (
+                      <option key={d.code} value={d.code}>{d.code} — {d.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">
+                    รหัสพนักงาน
+                    {fCodeAuto && <span className="ml-1 text-[10px] text-blue-500 font-normal">อัตโนมัติ</span>}
+                  </label>
+                  <div className="flex gap-1">
+                    <input value={fCode} onChange={e => { setFCode(e.target.value); setFCodeAuto(false); }}
+                      placeholder={fDeptCode ? `${fDeptCode}0001` : 'เลือกแผนกก่อน'}
+                      readOnly={fCodeAuto && !fDeptCode}
+                      className={`flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-mono
+                        ${fCodeAuto ? 'bg-blue-50 text-blue-700' : ''}`}/>
+                    {!fCodeAuto && fDeptCode && (
+                      <button onClick={async () => { setFCodeAuto(true); await generateCode(fDeptCode); }}
+                        className="px-2 py-1 bg-blue-100 text-blue-600 rounded-lg text-xs hover:bg-blue-200" title="สร้างใหม่">
+                        🔄
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div>
                   <label className="text-xs font-semibold text-slate-500 block mb-1">บทบาท</label>
                   <select value={fRole} onChange={e => setFRole(e.target.value)}
                     className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
                     {ROLES.map(r => <option key={r}>{r}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">แผนก</label>
-                  <select value={fDept} onChange={e => setFDept(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
-                    <option value="">— ไม่ระบุ —</option>
-                    {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
                 </div>
                 <div>
