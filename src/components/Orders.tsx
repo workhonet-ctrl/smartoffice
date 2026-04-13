@@ -819,6 +819,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           </div>
         </div>
         )}
+      </div>
 
       {/* Parcel Tracking Tab */}
       {activeTab === 'parcel' && (
