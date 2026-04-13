@@ -429,6 +429,7 @@ export default function HREmployees() {
                 className="flex-1 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium text-sm disabled:opacity-50">
                 {saving ? 'กำลังบันทึก...' : 'บันทึก'}
               </button>
+              </div>
             </div>
           </div>
         </div>
