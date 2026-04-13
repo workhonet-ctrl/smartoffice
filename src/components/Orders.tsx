@@ -6,7 +6,6 @@ import * as XLSX from 'xlsx';
 
 // ── ParcelTracking (inline) ───────────────────────────────────
 const PARCEL_STATUSES = [
-  { v: 'รอรับพัสดุ',         color: 'bg-slate-100 text-slate-600' },
   { v: 'อยู่ระหว่างจัดส่ง',  color: 'bg-blue-100 text-blue-700' },
   { v: 'ส่งสำเร็จ',           color: 'bg-green-100 text-green-700' },
   { v: 'ไม่มีคนรับ',          color: 'bg-orange-100 text-orange-700' },
@@ -14,173 +13,215 @@ const PARCEL_STATUSES = [
 ];
 
 type TrackRow = {
-  tracking_no: string; found: boolean;
-  order_id?: string; order_no?: string; customer_name?: string;
-  raw_prod?: string; route?: string;
-  parcel_status?: string; newStatus?: string;
+  id: string; order_no: string; tracking_no: string; customer_name: string;
+  route: string; parcel_status: string; order_date: string;
 };
 
 function ParcelTrackingPanel() {
-  const [input,     setInput]     = useState('');
-  const [results,   setResults]   = useState<TrackRow[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [saving,    setSaving]    = useState(false);
-  const [saveMsg,   setSaveMsg]   = useState('');
+  const [allRows,      setAllRows]      = useState<TrackRow[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [filterRoute,  setFilterRoute]  = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [selected,     setSelected]     = useState<Set<string>>(new Set());
 
-  const parseTrackings = (raw: string) =>
-    raw.split(/[\n,;\s]+/).map(s => s.trim()).filter(s => s.length > 4).slice(0, 20);
+  // Bulk update
+  const [bulkInput,    setBulkInput]    = useState('');
+  const [bulkStatus,   setBulkStatus]   = useState('อยู่ระหว่างจัดส่ง');
+  const [saving,       setSaving]       = useState(false);
+  const [saveMsg,      setSaveMsg]      = useState('');
 
-  const handleSearch = async () => {
-    const trackings = parseTrackings(input);
-    if (!trackings.length) return;
-    setSearching(true); setSaveMsg('');
+  const load = async () => {
+    setLoading(true);
     const { data } = await supabase.from('orders')
-      .select('id, order_no, raw_prod, route, tracking_no, parcel_status, customers(name)')
-      .in('tracking_no', trackings);
-    setResults(trackings.map(t => {
-      const o = (data || []).find((x: any) => x.tracking_no === t);
-      if (!o) return { tracking_no: t, found: false };
-      return { tracking_no: t, found: true, order_id: o.id, order_no: o.order_no,
-        customer_name: (o.customers as any)?.name || '-', raw_prod: o.raw_prod || '-',
-        route: o.route, parcel_status: o.parcel_status || 'รอรับพัสดุ',
-        newStatus: o.parcel_status || 'รอรับพัสดุ' };
-    }));
-    setSearching(false);
+      .select('id, order_no, tracking_no, route, parcel_status, order_date, customers(name)')
+      .not('tracking_no', 'is', null)
+      .neq('tracking_no', '')
+      .order('order_date', { ascending: false });
+    if (data) setAllRows(data.map((o: any) => ({
+      id: o.id, order_no: o.order_no,
+      tracking_no: o.tracking_no,
+      customer_name: (o.customers as any)?.name || '-',
+      route: o.route || '',
+      parcel_status: o.parcel_status || 'รอรับพัสดุ',
+      order_date: o.order_date || '',
+    })));
+    setLoading(false);
   };
 
-  const updateStatus = (t: string, s: string) =>
-    setResults(prev => prev.map(r => r.tracking_no === t ? { ...r, newStatus: s } : r));
+  useEffect(() => { load(); }, []);
 
-  const handleSaveAll = async () => {
-    const toSave = results.filter(r => r.found && r.newStatus !== r.parcel_status);
-    if (!toSave.length) { setSaveMsg('ไม่มีสถานะที่เปลี่ยนแปลง'); return; }
-    setSaving(true);
-    for (const r of toSave)
-      await supabase.from('orders').update({ parcel_status: r.newStatus }).eq('id', r.order_id!);
-    setResults(prev => prev.map(r => {
-      const t = toSave.find(x => x.tracking_no === r.tracking_no);
-      return t ? { ...r, parcel_status: t.newStatus, } : r;
-    }));
+  const filtered = allRows.filter(r =>
+    (!filterRoute  || r.route === filterRoute) &&
+    (!filterStatus || r.parcel_status === filterStatus)
+  );
+
+  const allSel = filtered.length > 0 && filtered.every(r => selected.has(r.id));
+  const toggleAll = () => setSelected(allSel ? new Set() : new Set(filtered.map(r => r.id)));
+  const toggle = (id: string) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  // Copy selected tracking numbers
+  const copyTracking = () => {
+    const rows = filtered.filter(r => selected.size > 0 ? selected.has(r.id) : true);
+    navigator.clipboard.writeText(rows.map(r => r.tracking_no).join('\n'));
+    setSaveMsg(`✓ Copy แล้ว ${rows.length} เลข`);
+    setTimeout(() => setSaveMsg(''), 3000);
+  };
+
+  // Bulk update by pasting tracking numbers
+  const handleBulkUpdate = async () => {
+    const trackings = bulkInput.split(/[\n,;\s]+/).map(s => s.trim()).filter(s => s.length > 4);
+    if (!trackings.length) return;
+    setSaving(true); setSaveMsg('');
+    const { data: matched } = await supabase.from('orders')
+      .select('id').in('tracking_no', trackings);
+    if (matched && matched.length > 0) {
+      await supabase.from('orders')
+        .update({ parcel_status: bulkStatus })
+        .in('id', matched.map((o: any) => o.id));
+      setSaveMsg(`✓ อัพเดต ${matched.length} รายการ → "${bulkStatus}"`);
+      setBulkInput('');
+      await load();
+    } else {
+      setSaveMsg('ไม่พบ Tracking ในระบบ');
+    }
     setSaving(false);
-    setSaveMsg(`✓ บันทึกสำเร็จ ${toSave.length} รายการ`);
   };
 
-  const cnt = parseTrackings(input).length;
-  const found    = results.filter(r => r.found).length;
-  const notFound = results.filter(r => !r.found).length;
-  const changed  = results.filter(r => r.found && r.newStatus !== r.parcel_status).length;
+  // Summary counts
+  const countFlash = allRows.filter(r => r.route === 'B').length;
+  const countPost  = allRows.filter(r => r.route !== 'B').length;
+  const countDone  = allRows.filter(r => r.parcel_status === 'ส่งสำเร็จ').length;
+  const countPending = allRows.filter(r => r.parcel_status === 'ไม่มีคนรับ').length;
+
+  const routeLabel = (r: string) => r === 'B' ? 'Flash' : 'ไปรษณีย์';
+  const routeColor = (r: string) => r === 'B' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700';
+  const statusColor = (s: string) => PARCEL_STATUSES.find(x => x.v === s)?.color || 'bg-slate-100 text-slate-500';
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Input box */}
-      <div className="shrink-0 bg-white rounded-xl border p-4 mb-3">
-        <label className="text-xs font-semibold text-slate-600 block mb-2">
-          วางเลข Tracking (สูงสุด 20 เลข · คั่นด้วย Enter, comma หรือ space)
-        </label>
-        <textarea value={input} onChange={e => setInput(e.target.value)} rows={5}
-          placeholder={'TH001234\nTH005678\nWA120121495TH'}
-          className="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"/>
-        <div className="flex justify-between items-center mt-3 flex-wrap gap-2">
-          <span className="text-xs text-slate-400">
-            {cnt} เลข {cnt >= 20 && <span className="text-orange-500">(ครบ 20 แล้ว)</span>}
-          </span>
-          <button onClick={handleSearch} disabled={searching || !cnt}
-            className="px-5 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 hover:bg-blue-600">
-            <Search size={14}/> {searching ? 'กำลังค้นหา...' : `ค้นหา ${cnt || ''} รายการ`}
-          </button>
-        </div>
+    <div className="flex flex-col h-full gap-3">
+
+      {/* Summary bar */}
+      <div className="shrink-0 grid grid-cols-4 gap-2">
+        {[
+          { label: 'Flash', count: countFlash, color: 'bg-orange-50 border-orange-200 text-orange-700' },
+          { label: 'ไปรษณีย์', count: countPost, color: 'bg-purple-50 border-purple-200 text-purple-700' },
+          { label: 'ส่งสำเร็จ', count: countDone, color: 'bg-green-50 border-green-200 text-green-700' },
+          { label: 'ไม่มีคนรับ', count: countPending, color: 'bg-orange-50 border-orange-100 text-orange-600' },
+        ].map(s => (
+          <div key={s.label} className={`border rounded-xl p-3 text-center ${s.color}`}>
+            <div className="text-xs font-semibold mb-0.5">{s.label}</div>
+            <div className="text-xl font-bold">{s.count}</div>
+          </div>
+        ))}
       </div>
 
-      {/* Summary */}
-      {results.length > 0 && (
-        <div className="shrink-0 flex gap-2 mb-3 flex-wrap">
-          <span className="bg-green-50 border border-green-200 rounded-lg px-3 py-1.5 text-xs text-green-700 flex items-center gap-1">
-            <CheckCircle size={12}/> พบ {found}
-          </span>
-          {notFound > 0 && <span className="bg-red-50 border border-red-200 rounded-lg px-3 py-1.5 text-xs text-red-700 flex items-center gap-1">
-            <XCircle size={12}/> ไม่พบ {notFound}
-          </span>}
-          {changed > 0 && <span className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5 text-xs text-orange-700">
-            เปลี่ยนสถานะ {changed} รายการ
-          </span>}
-          {saveMsg && <span className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 text-xs text-blue-700">{saveMsg}</span>}
-        </div>
-      )}
+      <div className="flex gap-3 flex-1 min-h-0">
+        {/* Left: Table */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Toolbar */}
+          <div className="shrink-0 flex gap-2 mb-2 flex-wrap items-center">
+            <select value={filterRoute} onChange={e => { setFilterRoute(e.target.value); setSelected(new Set()); }}
+              className="border rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-300">
+              <option value="">ขนส่ง: ทั้งหมด</option>
+              <option value="B">Flash</option>
+              <option value="A">ไปรษณีย์ (A)</option>
+              <option value="C">ไปรษณีย์ (C)</option>
+            </select>
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+              className="border rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-300">
+              <option value="">สถานะ: ทั้งหมด</option>
+              <option value="รอรับพัสดุ">รอรับพัสดุ</option>
+              {PARCEL_STATUSES.map(s => <option key={s.v}>{s.v}</option>)}
+            </select>
+            <span className="text-xs text-slate-400">{filtered.length} รายการ</span>
+            <button onClick={copyTracking}
+              className="ml-auto px-3 py-2 bg-slate-700 text-white rounded-lg text-xs hover:bg-slate-800 flex items-center gap-1.5">
+              📋 Copy Tracking {selected.size > 0 ? `(${selected.size})` : `ทั้งหมด (${filtered.length})`}
+            </button>
+            {saveMsg && <span className="text-xs text-green-600 font-medium">{saveMsg}</span>}
+          </div>
 
-      {/* Table */}
-      {results.length > 0 && (
-        <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-          <table className="text-sm w-full" style={{minWidth:'780px'}}>
-            <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
-              <tr>
-                <th className="p-3 text-left whitespace-nowrap">Tracking No.</th>
-                <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
-                <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
-                <th className="p-3 text-left">สินค้า</th>
-                <th className="p-3 text-center whitespace-nowrap">ขนส่ง</th>
-                <th className="p-3 text-center whitespace-nowrap" style={{minWidth:'200px'}}>สถานะพัสดุ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map(r => (
-                <tr key={r.tracking_no}
-                  className={`border-b ${!r.found ? 'bg-red-50' : r.newStatus !== r.parcel_status ? 'bg-orange-50' : 'hover:bg-blue-50'}`}>
-                  <td className="p-3 font-mono text-xs font-bold text-blue-600 whitespace-nowrap">{r.tracking_no}</td>
-                  {!r.found
-                    ? <td colSpan={4} className="p-3 text-red-500 text-xs"><XCircle size={12} className="inline mr-1"/>ไม่พบในระบบ</td>
-                    : <>
-                        <td className="p-3 font-mono text-xs text-slate-500 whitespace-nowrap">{r.order_no}</td>
-                        <td className="p-3 font-medium whitespace-nowrap">{r.customer_name}</td>
-                        <td className="p-3 text-xs text-slate-500 max-w-[160px] truncate">{r.raw_prod}</td>
-                        <td className="p-3 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${r.route === 'B' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700'}`}>
-                            {r.route === 'B' ? 'Flash' : 'ไปรษณีย์'}
-                          </span>
-                        </td>
-                      </>
-                  }
-                  <td className="p-3 text-center">
-                    {r.found && (
-                      <div className="flex items-center gap-1 justify-center">
-                        <select value={r.newStatus} onChange={e => updateStatus(r.tracking_no, e.target.value)}
-                          className={`border rounded-lg px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-blue-300 ${PARCEL_STATUSES.find(s => s.v === r.newStatus)?.color || ''}`}>
-                          {PARCEL_STATUSES.map(s => <option key={s.v}>{s.v}</option>)}
-                        </select>
-                        {r.newStatus !== r.parcel_status && <span className="w-2 h-2 rounded-full bg-orange-400"/>}
-                      </div>
-                    )}
-                  </td>
+          {/* Table */}
+          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+            <table className="text-sm w-full" style={{minWidth:'600px'}}>
+              <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+                <tr>
+                  <th className="p-3 w-8">
+                    <input type="checkbox" checked={allSel} onChange={toggleAll} className="rounded"/>
+                  </th>
+                  <th className="p-3 text-center whitespace-nowrap">ขนส่ง</th>
+                  <th className="p-3 text-left whitespace-nowrap">Tracking No.</th>
+                  <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                  <th className="p-3 text-center whitespace-nowrap">สถานะออเดอร์</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Empty */}
-      {results.length === 0 && !searching && (
-        <div className="flex-1 flex flex-col items-center justify-center text-slate-300 gap-3">
-          <Package size={52} strokeWidth={1}/>
-          <p className="text-sm">วางเลข Tracking แล้วกดค้นหา</p>
-          <div className="flex gap-2 flex-wrap justify-center">
-            {PARCEL_STATUSES.map(s => <span key={s.v} className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${s.color}`}>{s.v}</span>)}
+              </thead>
+              <tbody>
+                {loading && <tr><td colSpan={5} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
+                {!loading && filtered.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-400">ไม่มีข้อมูล</td></tr>}
+                {filtered.map(r => (
+                  <tr key={r.id} onClick={() => toggle(r.id)}
+                    className={`border-b cursor-pointer ${selected.has(r.id) ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
+                    <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} className="rounded"/>
+                    </td>
+                    <td className="p-3 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${routeColor(r.route)}`}>
+                        {routeLabel(r.route)}
+                      </span>
+                    </td>
+                    <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap font-bold">{r.tracking_no}</td>
+                    <td className="p-3 font-medium whitespace-nowrap">{r.customer_name}</td>
+                    <td className="p-3 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusColor(r.parcel_status)}`}>
+                        {r.parcel_status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-      )}
 
-      {/* Action buttons */}
-      {results.length > 0 && (
-        <div className="shrink-0 flex justify-end gap-3 mt-3">
-          <button onClick={() => { setResults([]); setInput(''); setSaveMsg(''); }}
-            className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-300 flex items-center gap-2">
-            <RotateCcw size={13}/> ล้าง
-          </button>
-          <button onClick={handleSaveAll} disabled={saving || !changed}
-            className="px-6 py-2 bg-green-500 text-white rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 hover:bg-green-600">
-            <CheckCircle size={14}/> {saving ? 'กำลังบันทึก...' : `บันทึกสถานะ${changed ? ` (${changed})` : ''}`}
-          </button>
+        {/* Right: Bulk update panel */}
+        <div className="w-72 shrink-0 flex flex-col gap-3">
+          <div className="bg-white rounded-xl shadow p-4 flex flex-col gap-3">
+            <div className="font-semibold text-slate-700 text-sm flex items-center gap-2">
+              <RefreshCw size={14}/> อัพเดตสถานะ
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 block mb-1">วางเลข Tracking</label>
+              <textarea value={bulkInput} onChange={e => setBulkInput(e.target.value)} rows={8}
+                placeholder={'TH001234\nTH005678\n...'}
+                className="w-full border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"/>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                {bulkInput.split(/[\n,;\s]+/).filter(s => s.trim().length > 4).length} เลข
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 block mb-1">เปลี่ยนเป็นสถานะ</label>
+              <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)}
+                className={`w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium ${statusColor(bulkStatus)}`}>
+                {PARCEL_STATUSES.map(s => <option key={s.v} value={s.v}>{s.v}</option>)}
+              </select>
+            </div>
+            <button onClick={handleBulkUpdate}
+              disabled={saving || !bulkInput.trim()}
+              className="w-full py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-2">
+              <CheckCircle size={14}/>
+              {saving ? 'กำลังอัพเดต...' : 'อัพเดตสถานะ'}
+            </button>
+          </div>
+
+          {/* Copy tip */}
+          <div className="bg-slate-50 border rounded-xl p-3 text-xs text-slate-500 space-y-1">
+            <div className="font-semibold text-slate-600">💡 วิธีใช้</div>
+            <div>• เลือก ✓ แถว แล้วกด Copy Tracking</div>
+            <div>• Filter ขนส่ง → Copy ทั้งหมด</div>
+            <div>• วาง Tracking ในช่องซ้าย → เลือกสถานะ → อัพเดต</div>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
