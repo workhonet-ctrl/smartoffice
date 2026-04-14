@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, ClipboardList, FileText, AlertCircle } from 'lucide-react';
+import { Package, ClipboardList, FileText, AlertCircle, Printer } from 'lucide-react';
 
 type PackOrder = {
   id: string; order_no: string; order_date: string | null; order_time: string | null;
@@ -123,6 +123,82 @@ export default function Packaging({
     }
     return { grouped: Object.values(grouped), multiOrders };
   })();
+
+  const handlePrint = () => {
+    const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+    const rows = [
+      ...summaryGroups.grouped.map(g => ({
+        name: g.short_name || g.promo_name,
+        count: g.count,
+        box: g.box_name,
+        bubble: '',
+        note: `${g.count} ออเดอร์`,
+      })),
+      ...summaryGroups.multiOrders.map(o => ({
+        name: o.promos.map(p => `${p.short_name||p.name} ×${p.qty}`).join(' + '),
+        count: 1,
+        box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '-',
+        bubble: '',
+        note: 'แพ็คพิเศษ',
+      })),
+    ];
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>ใบเบิกสินค้า</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Sarabun', sans-serif; font-size: 13px; color: #1e293b; padding: 24px; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+    .meta { font-size: 12px; color: #64748b; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    th { background: #1e293b; color: white; padding: 8px 10px; text-align: left; font-size: 12px; }
+    td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; font-size: 12px; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    .count { text-align: center; font-weight: 700; font-size: 14px; }
+    .footer { margin-top: 24px; display: flex; gap: 60px; }
+    .sig { border-top: 1px solid #94a3b8; width: 180px; text-align: center; padding-top: 4px; font-size: 11px; color: #64748b; margin-top: 40px; }
+    @media print { body { padding: 12px; } }
+  </style>
+</head>
+<body>
+  <h1>📦 ใบเบิกสินค้า</h1>
+  <div class="meta">วันที่: ${today} &nbsp;|&nbsp; จำนวนออเดอร์: ${orders.length} รายการ &nbsp;|&nbsp; ผู้รับผิดชอบ: ${responsible}</div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>รายการสินค้า</th>
+        <th style="text-align:center">จำนวน (ออเดอร์)</th>
+        <th>กล่อง</th>
+        <th>หมายเหตุ</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows.map((r, i) => `
+        <tr>
+          <td>${i + 1}</td>
+          <td>${r.name}</td>
+          <td class="count">${r.count}</td>
+          <td>${r.box}</td>
+          <td style="color:#64748b">${r.note}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+  <div class="footer">
+    <div class="sig">ผู้เบิก: ${responsible}</div>
+    <div class="sig">ผู้อนุมัติ: ___________________</div>
+  </div>
+  <script>window.onload = () => { window.print(); }</script>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank', 'width=800,height=600');
+    if (win) { win.document.write(html); win.document.close(); }
+  };
 
   const handleCreateRequisition = async () => {
     if (!canCreateRequisition || !onCreateRequisition) return;
@@ -382,10 +458,16 @@ export default function Packaging({
                 className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 ${responsible.trim() ? 'border-green-400 focus:ring-green-300' : 'border-slate-300 focus:ring-cyan-300'}`}/>
             </div>
             {canCreateRequisition && (
-              <button onClick={handleCreateRequisition} disabled={saving}
-                className="px-6 py-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 font-semibold flex items-center gap-2 shadow disabled:opacity-50 shrink-0">
-                <FileText size={16}/> {saving ? 'กำลังบันทึก...' : 'สร้างใบเบิก'}
-              </button>
+              <div className="flex gap-2 shrink-0">
+                <button onClick={handlePrint}
+                  className="px-4 py-2.5 bg-slate-600 text-white rounded-xl hover:bg-slate-700 font-semibold flex items-center gap-2 shadow">
+                  <Printer size={15}/> ปริ้น
+                </button>
+                <button onClick={handleCreateRequisition} disabled={saving}
+                  className="px-6 py-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 font-semibold flex items-center gap-2 shadow disabled:opacity-50">
+                  <FileText size={16}/> {saving ? 'กำลังบันทึก...' : 'สร้างใบเบิก'}
+                </button>
+              </div>
             )}
             {!canCreateRequisition && (
               <div className="text-xs text-slate-400 flex items-center gap-1 shrink-0">
