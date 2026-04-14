@@ -545,7 +545,7 @@ export default function MyOrderExport() {
                   const withTracking = printedOrders.filter(o => (o as any).tracking_no);
                   if (!confirm(`ยืนยันส่งแล้ว ${withTracking.length} ออเดอร์ที่มี Tracking?`)) return;
                   await supabase.from('orders')
-                    .update({ order_status: 'ส่งสินค้าแล้ว' })
+                    .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง' })
                     .in('id', withTracking.map(o => o.id));
                   await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
                 }}
@@ -610,7 +610,7 @@ export default function MyOrderExport() {
                         {hasTracking&&(
                           <button
                             onClick={async()=>{
-                              await supabase.from('orders').update({order_status:'ส่งสินค้าแล้ว'}).eq('id',o.id);
+                              await supabase.from('orders').update({order_status:'ส่งสินค้าแล้ว', parcel_status:'อยู่ระหว่างจัดส่ง'}).eq('id',o.id);
                               await Promise.all([loadPrintedOrders(),loadExportedOrders()]);
                             }}
                             className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold whitespace-nowrap">
