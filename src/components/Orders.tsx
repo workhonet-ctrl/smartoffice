@@ -41,6 +41,7 @@ function ParcelTrackingPanel() {
     'return to sender':  'ตีกลับ',
     'return':            'ตีกลับ',
     'returning':         'ตีกลับ',
+    'exception':         'ตีกลับ',
   };
 
   const parseBulkTracking = (raw: string): { tracking: string; status: string }[] => {
@@ -256,7 +257,7 @@ function ParcelTrackingPanel() {
               { from: 'In transit',       to: 'อยู่ระหว่างจัดส่ง' },
               { from: 'Delivered',        to: 'ส่งสำเร็จ' },
               { from: 'Out for delivery', to: 'อยู่ระหว่างจัดส่ง' },
-              { from: 'Returned',         to: 'ตีกลับ' },
+              { from: 'Returned/Exception', to: 'ตีกลับ' },
               { from: 'Not found',        to: 'รอรับพัสดุ' },
             ].map(m => (
               <div key={m.from} className="flex items-center gap-1.5">
