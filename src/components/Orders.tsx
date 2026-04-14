@@ -35,15 +35,12 @@ function ParcelTrackingPanel() {
     'in transit':        'อยู่ระหว่างจัดส่ง',
     'out for delivery':  'อยู่ระหว่างจัดส่ง',
     'delivered':         'ส่งสำเร็จ',
-    'ตีกลับ':            'ส่งคืน',
-    'return to sender':  'ส่งคืน',
-    'returning':         'ส่งคืน',,
     'not found':         'รอรับพัสดุ',
     'failed attempt':    'ไม่มีคนรับ',
     'returned':          'ตีกลับ',
     'return to sender':  'ตีกลับ',
     'return':            'ตีกลับ',
-    'ส่งคืน':            'ส่งคืน',
+    'returning':         'ตีกลับ',
   };
 
   const parseBulkTracking = (raw: string): { tracking: string; status: string }[] => {
