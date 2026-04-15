@@ -34,6 +34,20 @@ function extractPieces(name: string) {
   return 1;
 }
 
+// แยกชื่อสินค้าและจำนวนจาก raw_prod
+// "ซุปใสรากบัว(1 กระป๋อง)" → { name: "ซุปใสรากบัว", qty: 1 }
+// "ครีม Secret Rose(2 แถม 2)" → { name: "ครีม Secret Rose", qty: 4 }
+function parseProduct(raw: string): { name: string; qty: number } {
+  const qty = extractPieces(raw);
+  // ตัดส่วนจำนวนออก: วงเล็บ หรือ ตัวเลขท้าย
+  let name = raw
+    .replace(/\(\s*\d+\s*(?:แถม\s*\d+|กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน)[^)]*\)/gi, '')
+    .replace(/\s*\d+\s*(?:แถม\s*\d+)/gi, '')
+    .trim();
+  if (!name) name = raw;
+  return { name, qty };
+}
+
 export default function FinanceDaily() {
   const today = new Date().toISOString().split('T')[0];
   const [dateFrom,  setDateFrom]  = useState(() => { const d = new Date(); d.setDate(d.getDate()-6); return d.toISOString().split('T')[0]; });
@@ -241,12 +255,13 @@ export default function FinanceDaily() {
               {/* Expanded table */}
               {isOpen && (
                 <div className="border-t border-slate-100 overflow-x-auto">
-                  <table className="text-xs w-full" style={{minWidth:'1100px'}}>
+                  <table className="text-xs w-full" style={{minWidth:'1200px'}}>
                     <thead>
                       <tr className="bg-slate-50 text-slate-400">
                         <th className="px-4 py-2 text-left text-[10px] font-semibold">เลขออเดอร์</th>
                         <th className="px-3 py-2 text-left text-[10px] font-semibold">ลูกค้า</th>
                         <th className="px-3 py-2 text-left text-[10px] font-semibold">สินค้า</th>
+                        <th className="px-3 py-2 text-center text-[10px] font-semibold">จำนวน</th>
                         <th className={thClass}>รายรับ</th>
                         <th className={thClass}>ต้นทุนสินค้า</th>
                         <th className={thClass}>VAT 5%</th>
@@ -270,7 +285,18 @@ export default function FinanceDaily() {
                           <tr key={o.id} className="border-t border-slate-50 hover:bg-slate-50">
                             <td className="px-4 py-2 font-mono text-blue-600 whitespace-nowrap">{o.order_no}</td>
                             <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{o.customers?.name||'-'}</td>
-                            <td className="px-3 py-2 text-slate-500 max-w-[130px] truncate">{o.raw_prod||'-'}</td>
+                            <td className="px-3 py-2 text-slate-500 max-w-[120px]">
+                              {(o.raw_prod||'').split('|').map((p:string,i:number) => {
+                                const { name } = parseProduct(p.trim());
+                                return <div key={i} className="truncate">{name||'-'}</div>;
+                              })}
+                            </td>
+                            <td className="px-3 py-2 text-center text-slate-600 font-medium whitespace-nowrap">
+                              {(o.raw_prod||'').split('|').map((p:string,i:number) => {
+                                const { qty } = parseProduct(p.trim());
+                                return <div key={i}>{qty}</div>;
+                              })}
+                            </td>
                             <td className={`${colClass} text-emerald-600 font-medium`}>฿{fmt(Number(o.total_thb))}</td>
                             <td className={`${colClass} text-slate-500`}>฿{fmt(o._cost_goods||0)}</td>
                             <td className={`${colClass} text-slate-500`}>฿{fmt(vat)}</td>
@@ -289,7 +315,7 @@ export default function FinanceDaily() {
                       {/* ค่าโฆษณา/อื่นๆ */}
                       {(day.cost_ad > 0 || day.cost_other > 0) && (
                         <tr className="border-t border-slate-100 bg-orange-50 text-[11px]">
-                          <td className="px-4 py-2 text-orange-500 font-medium" colSpan={3}>💸 ค่าใช้จ่ายวัน</td>
+                          <td className="px-4 py-2 text-orange-500 font-medium" colSpan={4}>💸 ค่าใช้จ่ายวัน</td>
                           <td className={colClass}/><td className={colClass}/><td className={colClass}/>
                           <td className={colClass}/><td className={colClass}/>
                           <td className={`${colClass} text-orange-500 font-medium`}>{day.cost_ad>0?`฿${fmt(day.cost_ad)}`:'-'}</td>
@@ -300,7 +326,7 @@ export default function FinanceDaily() {
 
                       {/* สรุปวัน */}
                       <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold text-[11px]">
-                        <td className="px-4 py-2.5 text-slate-600" colSpan={3}>รวม {fmtD(day.date)}</td>
+                        <td className="px-4 py-2.5 text-slate-600" colSpan={4}>รวม {fmtD(day.date)}</td>
                         <td className={`${colClass} text-emerald-600`}>฿{fmt(day.revenue)}</td>
                         <td className={`${colClass} text-slate-600`}>฿{fmt(day.cost_goods)}</td>
                         <td className={`${colClass} text-slate-600`}>฿{fmt(day.vat)}</td>
