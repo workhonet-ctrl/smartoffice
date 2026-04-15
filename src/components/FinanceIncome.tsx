@@ -25,9 +25,9 @@ export default function FinanceIncome() {
       q = q.eq('payment_method', 'COD')
            .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์', 'กำลังแพ็ค', 'แพ็คสินค้า']);
     } else if (tab === 'transfer') {
-      // โอนเงิน: ทุก order ที่ไม่ใช่ COD และชำระแล้ว (read-only)
+      // โอนเงิน: ทุก order ที่ไม่ใช่ COD (read-only ประวัติ)
       q = q.neq('payment_method', 'COD')
-           .eq('payment_status', 'ชำระแล้ว');
+           .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์', 'กำลังแพ็ค', 'แพ็คสินค้า']);
     } else {
       // ทั้งหมด
       q = q.in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์', 'กำลังแพ็ค', 'แพ็คสินค้า']);
@@ -181,8 +181,12 @@ export default function FinanceIncome() {
                   </td>
                   <td className="p-3 text-right font-bold text-slate-800">฿{fmt(o.total_thb || 0)}</td>
                   <td className="p-3 text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${paid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                      {paid ? '✓ รับแล้ว' : 'รอรับเงิน'}
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      isTransfer || paid
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-yellow-100 text-yellow-700'
+                    }`}>
+                      {isTransfer || paid ? '✓ รับเงินแล้ว' : 'รอรับเงิน'}
                     </span>
                   </td>
                 </tr>
