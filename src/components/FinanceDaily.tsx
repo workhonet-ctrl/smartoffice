@@ -49,8 +49,45 @@ export default function FinanceDaily() {
   const [summaries, setSummaries] = useState<DaySummary[]>([]);
   const [loading, setLoading]     = useState(false);
   const [expanded, setExpanded]   = useState<Set<string>>(new Set());
-  // Step 3: filter ลูกค้า
   const [filterCustomer, setFilterCustomer] = useState('');
+  const [activeTab, setActiveTab] = useState<'daily' | 'cod'>('daily');
+
+  // COD state
+  const [codOrders, setCodOrders]   = useState<any[]>([]);
+  const [codLoading, setCodLoading] = useState(false);
+  const [codSelected, setCodSelected] = useState<Set<string>>(new Set());
+  const [codSaving, setCodSaving]   = useState(false);
+  const [codMsg, setCodMsg]         = useState('');
+
+  const loadCodOrders = async () => {
+    setCodLoading(true);
+    const { data } = await supabase.from('orders')
+      .select('id, order_no, order_date, total_thb, payment_status, payment_method, order_status, customers(name, tel), raw_prod')
+      .eq('payment_method', 'COD')
+      .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์'])
+      .order('order_date', { ascending: false });
+    setCodOrders(data || []);
+    setCodLoading(false);
+  };
+
+  const markCodPaid = async () => {
+    if (!codSelected.size) return;
+    setCodSaving(true);
+    await supabase.from('orders')
+      .update({ payment_status: 'ชำระแล้ว' })
+      .in('id', Array.from(codSelected));
+    setCodMsg(`✓ อัพเดต ${codSelected.size} รายการ`);
+    setCodSelected(new Set());
+    await loadCodOrders();
+    setCodSaving(false);
+    setTimeout(() => setCodMsg(''), 3000);
+  };
+
+  const toggleCod = (id: string) => setCodSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allCodSel = codOrders.length > 0 && codOrders.every(o => codSelected.has(o.id));
+  const toggleAllCod = () => setCodSelected(allCodSel ? new Set() : new Set(codOrders.map((o: any) => o.id)));
+
+  useEffect(() => { if (activeTab === 'cod') loadCodOrders(); }, [activeTab]);
 
   const [toast, setToast] = useState<string | null>(null);
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
@@ -183,7 +220,109 @@ export default function FinanceDaily() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Controls */}
+      {/* Tab switcher */}
+      <div className="shrink-0 flex gap-1 bg-slate-100 p-1 rounded-xl w-fit mb-4">
+        <button onClick={() => setActiveTab('daily')}
+          className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'daily' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+          📊 รายรับรายวัน
+        </button>
+        <button onClick={() => setActiveTab('cod')}
+          className={`px-5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 ${activeTab === 'cod' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+          💵 ยอด COD
+          {codOrders.filter(o => o.payment_status !== 'ชำระแล้ว').length > 0 && (
+            <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+              {codOrders.filter(o => o.payment_status !== 'ชำระแล้ว').length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* ── COD Tab ── */}
+      {activeTab === 'cod' && (
+        <div className="flex flex-col flex-1 min-h-0">
+          {/* Summary + actions */}
+          <div className="shrink-0 flex gap-3 mb-3 flex-wrap items-center">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3">
+              <div className="text-xs text-yellow-700 font-semibold mb-0.5">ยอด COD รอรับ</div>
+              <div className="text-xl font-bold text-yellow-800">
+                ฿{fmt(codOrders.filter(o => o.payment_status !== 'ชำระแล้ว').reduce((s: number, o: any) => s + (o.total_thb || 0), 0))}
+              </div>
+              <div className="text-xs text-yellow-600">{codOrders.filter(o => o.payment_status !== 'ชำระแล้ว').length} รายการ</div>
+            </div>
+            <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3">
+              <div className="text-xs text-green-700 font-semibold mb-0.5">รับเงินแล้ว</div>
+              <div className="text-xl font-bold text-green-800">
+                ฿{fmt(codOrders.filter(o => o.payment_status === 'ชำระแล้ว').reduce((s: number, o: any) => s + (o.total_thb || 0), 0))}
+              </div>
+              <div className="text-xs text-green-600">{codOrders.filter(o => o.payment_status === 'ชำระแล้ว').length} รายการ</div>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              {codMsg && <span className="text-xs text-green-600 font-medium">{codMsg}</span>}
+              <button onClick={loadCodOrders} disabled={codLoading}
+                className="px-3 py-2 bg-slate-200 rounded-lg text-xs hover:bg-slate-300 flex items-center gap-1">
+                <RefreshCw size={12} className={codLoading ? 'animate-spin' : ''}/> รีเฟรช
+              </button>
+              {codSelected.size > 0 && (
+                <button onClick={markCodPaid} disabled={codSaving}
+                  className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 disabled:opacity-50">
+                  ✓ รับเงินแล้ว ({codSelected.size})
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+            <table className="text-sm w-full" style={{minWidth:'750px'}}>
+              <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+                <tr>
+                  <th className="p-3 w-8">
+                    <input type="checkbox" checked={allCodSel} onChange={toggleAllCod} className="rounded"/>
+                  </th>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                  <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
+                  <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">เบอร์</th>
+                  <th className="p-3 text-left">สินค้า</th>
+                  <th className="p-3 text-right whitespace-nowrap">ยอด (บาท)</th>
+                  <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {codLoading && <tr><td colSpan={8} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
+                {!codLoading && codOrders.length === 0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">ไม่มีออเดอร์ COD</td></tr>}
+                {codOrders.map((o: any) => {
+                  const paid = o.payment_status === 'ชำระแล้ว';
+                  return (
+                    <tr key={o.id} onClick={() => !paid && toggleCod(o.id)}
+                      className={`border-b ${paid ? 'bg-green-50 opacity-60' : codSelected.has(o.id) ? 'bg-yellow-50' : 'hover:bg-slate-50 cursor-pointer'}`}>
+                      <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
+                        {!paid && <input type="checkbox" checked={codSelected.has(o.id)} onChange={() => toggleCod(o.id)} className="rounded"/>}
+                      </td>
+                      <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                        {o.order_date ? o.order_date.split('-').reverse().join('/') : '-'}
+                      </td>
+                      <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{o.order_no}</td>
+                      <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
+                      <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.customers?.tel || '-'}</td>
+                      <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod || '-'}</td>
+                      <td className="p-3 text-right font-bold text-slate-800">฿{fmt(o.total_thb || 0)}</td>
+                      <td className="p-3 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${paid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                          {paid ? '✓ รับแล้ว' : 'รอรับเงิน'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Daily Tab ── */}
+      {activeTab === 'daily' && (<>
       <div className="shrink-0 flex gap-2 mb-4 flex-wrap items-center">
         <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
           className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
@@ -360,6 +499,7 @@ export default function FinanceDaily() {
           {toast}
         </div>
       )}
+      </>)}
     </div>
   );
 }
