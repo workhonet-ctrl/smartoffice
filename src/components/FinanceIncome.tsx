@@ -357,7 +357,7 @@ export default function FinanceIncome({
   const loadOrders = async () => {
     setLoading(true); setSelected(new Set());
     let q = supabase.from('orders')
-      .select('id, order_no, order_date, total_thb, payment_method, payment_status, order_status, customers(name, tel), raw_prod, tracking_no, slip_image')
+      .select('id, order_no, order_date, total_thb, payment_method, payment_status, order_status, customers(name, tel, facebook_name), raw_prod, tracking_no, slip_image')
       .order('order_date', { ascending: false })
       .limit(200);
 
@@ -540,7 +540,12 @@ export default function FinanceIncome({
                         {o.order_date ? o.order_date.split('-').reverse().join('/') : '-'}
                       </td>
                       <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{o.order_no}</td>
-                      <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
+                      <td className="p-3 font-medium whitespace-nowrap">
+                        <div>{o.customers?.name || '-'}</div>
+                        {o.customers?.facebook_name && (
+                          <div className="text-[11px] text-blue-500 mt-0.5">📘 {o.customers.facebook_name}</div>
+                        )}
+                      </td>
                       <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.customers?.tel || '-'}</td>
                       <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod || '-'}</td>
                       <td className="p-3 text-center">
