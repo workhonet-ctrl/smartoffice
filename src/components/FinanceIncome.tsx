@@ -53,6 +53,15 @@ function CodFilePanel({ state, setState }: {
   const [saveMsg,  setSaveMsg]  = useState('');
   const [manualDate, setManualDate] = useState(new Date().toISOString().split('T')[0]);
   const [showMap,    setShowMap]    = useState(false);
+  const [delSelected, setDelSelected] = useState<Set<number>>(new Set());
+
+  const toggleDel = (i: number) => setDelSelected(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
+  const allDelSel = state.rows.length > 0 && state.rows.every((_, i) => delSelected.has(i));
+  const toggleAllDel = () => setDelSelected(allDelSel ? new Set() : new Set(state.rows.map((_, i) => i)));
+  const deleteSelected = () => {
+    setState({ ...state, rows: state.rows.filter((_, i) => !delSelected.has(i)) });
+    setDelSelected(new Set());
+  };
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -246,6 +255,12 @@ function CodFilePanel({ state, setState }: {
           </>}
           <div className="ml-auto flex gap-2 items-center">
             {saveMsg && <span className="text-xs text-green-600 font-medium">{saveMsg}</span>}
+            {delSelected.size > 0 && (
+              <button onClick={deleteSelected}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 flex items-center gap-1.5">
+                🗑 ลบ ({delSelected.size})
+              </button>
+            )}
             {!state.matched && (
               <button onClick={handleMatch}
                 className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600">
@@ -258,9 +273,9 @@ function CodFilePanel({ state, setState }: {
                 ✓ ยืนยันรับเงิน ({cntPending})
               </button>
             )}
-            <button onClick={() => { setState(EMPTY_COD_STATE); setShowMap(false); setSaveMsg(''); }}
+            <button onClick={() => { setState(EMPTY_COD_STATE); setShowMap(false); setSaveMsg(''); setDelSelected(new Set()); }}
               className="px-3 py-2 bg-slate-200 text-slate-600 rounded-lg text-xs hover:bg-slate-300">
-              ล้าง
+              ล้างทั้งหมด
             </button>
           </div>
         </div>
@@ -272,6 +287,9 @@ function CodFilePanel({ state, setState }: {
           <table className="text-sm w-full" style={{minWidth:'750px'}}>
             <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
               <tr>
+                <th className="p-3 w-8">
+                  <input type="checkbox" checked={allDelSel} onChange={toggleAllDel} className="rounded"/>
+                </th>
                 <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                 <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
                 <th className="p-3 text-left whitespace-nowrap">เบอร์</th>
@@ -282,7 +300,10 @@ function CodFilePanel({ state, setState }: {
             </thead>
             <tbody>
               {state.rows.map((r, i) => (
-                <tr key={i} className={`border-b ${r.status === 'ชำระแล้ว' ? 'bg-green-50' : r.status === 'ไม่พบ' ? 'bg-red-50' : 'hover:bg-slate-50'}`}>
+                <tr key={i} className={`border-b ${delSelected.has(i) ? 'bg-red-50' : r.status === 'ชำระแล้ว' ? 'bg-green-50' : r.status === 'ไม่พบ' ? 'bg-red-50' : 'hover:bg-slate-50'}`}>
+                  <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={delSelected.has(i)} onChange={() => toggleDel(i)} className="rounded"/>
+                  </td>
                   <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{r.date || '-'}</td>
                   <td className="p-3 font-medium whitespace-nowrap">{r.name || '-'}</td>
                   <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{r.tel || '-'}</td>
