@@ -14,6 +14,7 @@ import Orders from './components/Orders';
 import FlashExport from './components/FlashExport';
 import MyOrderExport from './components/MyOrderExport';
 import Finance from './components/Finance';
+import FinanceIncome from './components/FinanceIncome';
 import Marketing from './components/Marketing';
 import HR from './components/HR';
 
@@ -22,6 +23,7 @@ type PageKey =
   | 'requisition' | 'stock' | 'purchase-order' | 'suppliers'
   | 'customers' | 'orders' | 'flash-export' | 'myorder-export'
   | 'finance-daily' | 'finance-monthly' | 'finance-yearly' | 'finance-expenses'
+  | 'finance-income'
   | 'marketing-graphic' | 'marketing-ads' | 'marketing-admin'
   | 'hr';
 
@@ -59,6 +61,7 @@ export default function App() {
       case 'finance-monthly':  return <Finance page="monthly" />;
       case 'finance-yearly':   return <Finance page="yearly" />;
       case 'finance-expenses': return <Finance page="expenses" />;
+      case 'finance-income':   return <FinanceIncome />;
       case 'hr':             return <HR />;
       case 'marketing-graphic': return <Marketing page="graphic" />;
       case 'marketing-ads':     return <Marketing page="ads" />;
@@ -71,31 +74,6 @@ export default function App() {
     <div className="min-h-screen bg-slate-100 flex">
       <Sidebar activePage={activePage} setActivePage={setActivePage} />
       <main className="flex-1 overflow-x-auto">{renderPage()}</main>
-    </div>
-  );
-}
-
-function MarketingPlaceholder({ title }: { title: string }) {
-  return (
-    <div className="flex flex-col h-screen p-6 pb-2">
-      <div className="shrink-0 mb-6 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-pink-500 flex items-center justify-center">
-          <span style={{fontSize:'18px', color:'white'}}>★</span>
-        </div>
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">ฝ่ายการตลาด / {title}</h2>
-          <p className="text-xs text-slate-400">อยู่ระหว่างออกแบบ</p>
-        </div>
-      </div>
-      <div className="flex-1 bg-white rounded-xl border border-slate-100 shadow-sm flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center mx-auto mb-4">
-            <span style={{fontSize:'28px'}}>★</span>
-          </div>
-          <p className="text-slate-500 font-medium text-lg">{title}</p>
-          <p className="text-sm text-slate-400 mt-2">ยังไม่ได้ออกแบบการทำงาน</p>
-        </div>
-      </div>
     </div>
   );
 }
