@@ -11,244 +11,290 @@ type IncomeTab = 'cod' | 'transfer' | 'all' | 'cod-file';
 type ImportRow  = { tracking: string; amount: number; name: string; raw: Record<string, any> };
 type MatchResult = { tracking: string; amount: number; name: string; orderId?: string; orderNo?: string; customer?: string; status: 'matched' | 'not_found' };
 
-function CodFilePanel() {
+
+// ── Types ─────────────────────────────────────────────────────
+type CodRow = {
+  tracking: string;
+  name:     string;
+  tel:      string;
+  date:     string;
+  amount:   number;
+  status:   'รอจับคู่' | 'ชำระแล้ว' | 'ไม่พบ';
+  orderId?: string;
+  orderNo?: string;
+};
+
+type CodFileState = {
+  fileName: string;
+  rows: CodRow[];
+  columns: string[];
+  rawRows: Record<string, any>[];
+  mapTracking: string;
+  mapAmount: string;
+  mapName: string;
+  mapDate: string;
+  imported: boolean;
+  matched: boolean;
+};
+
+const EMPTY_COD_STATE: CodFileState = {
+  fileName: '', rows: [], columns: [], rawRows: [],
+  mapTracking: '', mapAmount: '', mapName: '', mapDate: '',
+  imported: false, matched: false,
+};
+
+// ── COD File Panel (รับ state จาก parent เพื่อ persist) ───────
+function CodFilePanel({ state, setState }: {
+  state: CodFileState;
+  setState: (s: CodFileState) => void;
+}) {
   const fileRef = useRef<HTMLInputElement>(null);
-
-  // raw import state
-  const [columns,    setColumns]    = useState<string[]>([]);
-  const [rawRows,    setRawRows]    = useState<Record<string, any>[]>([]);
-  const [fileName,   setFileName]   = useState('');
-
-  // mapping
-  const [mapTracking, setMapTracking] = useState('');
-  const [mapAmount,   setMapAmount]   = useState('');
-  const [mapName,     setMapName]     = useState('');
-  const [showMapping, setShowMapping] = useState(false);
-
-  // results
-  const [results,   setResults]   = useState<MatchResult[]>([]);
-  const [matching,  setMatching]  = useState(false);
-  const [saving,    setSaving]    = useState(false);
-  const [saveMsg,   setSaveMsg]   = useState('');
+  const [saving,   setSaving]   = useState(false);
+  const [saveMsg,  setSaveMsg]  = useState('');
+  const [showMap,  setShowMap]  = useState(false);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    setResults([]); setSaveMsg('');
-
+    const file = e.target.files?.[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = ev => {
       try {
-        const wb = XLSX.read(ev.target?.result, { type: 'binary' });
-
-        // หา sheet ที่มีข้อมูล tracking — ลอง COD Detail ก่อน แล้ว sheet แรก
-        const sheet = wb.Sheets['COD Detail'] || wb.Sheets['Matching Tracking Number'] || wb.Sheets[wb.SheetNames[0]];
-        const json: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-
-        if (json.length === 0) return;
+        const wb   = XLSX.read(ev.target?.result, { type: 'binary' });
+        const ws   = wb.Sheets['COD Detail'] || wb.Sheets['Matching Tracking Number'] || wb.Sheets[wb.SheetNames[0]];
+        const json: Record<string, any>[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        if (!json.length) return;
         const cols = Object.keys(json[0]);
-        setColumns(cols);
-        setRawRows(json);
-
-        // auto-detect columns
-        const trackCol = cols.find(c => /tracking/i.test(c)) || '';
-        const amtCol   = cols.find(c => /amount|cod/i.test(c) && !/order|sub/i.test(c)) || '';
-        const nameCol  = cols.find(c => /recipient|name/i.test(c)) || '';
-        setMapTracking(trackCol);
-        setMapAmount(amtCol);
-        setMapName(nameCol);
-        setShowMapping(true);
-      } catch (err) {
-        console.error('XLSX parse error:', err);
-      }
+        const auto = (re: RegExp, ex?: RegExp) => cols.find(c => re.test(c) && (!ex || !ex.test(c))) || '';
+        setState({
+          ...state,
+          fileName:    file.name,
+          columns:     cols,
+          rawRows:     json,
+          mapTracking: auto(/tracking/i),
+          mapAmount:   auto(/amount|cod/i, /order|sub/i),
+          mapName:     auto(/recipient|name/i),
+          mapDate:     auto(/destination|date|วันที่/i),
+          rows:        [],
+          imported:    false,
+          matched:     false,
+        });
+        setShowMap(true);
+      } catch(err) { console.error('XLSX error', err); }
     };
     reader.readAsBinaryString(file);
-    // reset input เพื่อให้เลือกไฟล์เดิมซ้ำได้
     e.target.value = '';
   };
 
-  const handleMatch = async () => {
-    if (!mapTracking) return;
-    setMatching(true); setResults([]);
-
-    // parse rows
-    const parsed: ImportRow[] = rawRows
+  const handleImport = () => {
+    const { rawRows, mapTracking, mapAmount, mapName, mapDate } = state;
+    const tIdx = state.columns.indexOf(mapTracking);
+    const aIdx = state.columns.indexOf(mapAmount);
+    const nIdx = state.columns.indexOf(mapName);
+    const dIdx = state.columns.indexOf(mapDate);
+    const rows: CodRow[] = rawRows
       .map(r => ({
         tracking: String(r[mapTracking] || '').trim(),
+        name:     nIdx >= 0 ? String(r[state.columns[nIdx]] || '').trim() : '',
+        tel:      '',
+        date:     dIdx >= 0 ? String(r[state.columns[dIdx]] || '').trim() : '',
         amount:   parseFloat(String(r[mapAmount] || '0').replace(/[^0-9.]/g, '')) || 0,
-        name:     String(r[mapName] || '').trim(),
-        raw:      r,
+        status:   'รอจับคู่' as const,
       }))
       .filter(r => r.tracking.length > 4);
+    setState({ ...state, rows, imported: true, matched: false });
+    setShowMap(false);
+  };
 
-    // query orders by tracking
-    const trackings = parsed.map(p => p.tracking);
-    const { data: orders } = await supabase.from('orders')
-      .select('id, order_no, tracking_no, customers(name)')
+  const handleMatch = async () => {
+    const trackings = state.rows.map(r => r.tracking);
+    const { data } = await supabase.from('orders')
+      .select('id, order_no, tracking_no, payment_status, customers(name, tel)')
       .in('tracking_no', trackings);
-
-    const orderMap: Record<string, any> = {};
-    (orders || []).forEach((o: any) => { orderMap[o.tracking_no] = o; });
-
-    const res: MatchResult[] = parsed.map(p => {
-      const o = orderMap[p.tracking];
+    const oMap: Record<string, any> = {};
+    (data || []).forEach((o: any) => { oMap[o.tracking_no] = o; });
+    const rows = state.rows.map(r => {
+      const o = oMap[r.tracking];
+      if (!o) return { ...r, status: 'ไม่พบ' as const };
       return {
-        tracking: p.tracking, amount: p.amount, name: p.name,
-        orderId:  o?.id,
-        orderNo:  o?.order_no,
-        customer: (o?.customers as any)?.name,
-        status:   o ? 'matched' : 'not_found',
+        ...r,
+        orderId:  o.id,
+        orderNo:  o.order_no,
+        name:     (o.customers as any)?.name || r.name,
+        tel:      (o.customers as any)?.tel  || '',
+        status:   o.payment_status === 'ชำระแล้ว' ? 'ชำระแล้ว' as const : 'รอจับคู่' as const,
       };
     });
-
-    setResults(res);
-    setMatching(false);
+    setState({ ...state, rows, matched: true });
   };
 
   const handleSave = async () => {
-    const matched = results.filter(r => r.status === 'matched');
-    if (!matched.length) return;
+    const toUpdate = state.rows.filter(r => r.status === 'รอจับคู่' && r.orderId);
+    if (!toUpdate.length) return;
     setSaving(true);
-    const ids = matched.map(r => r.orderId!);
-    await supabase.from('orders').update({ payment_status: 'ชำระแล้ว' }).in('id', ids);
-    setSaveMsg(`✓ อัพเดต ${matched.length} รายการ เป็น "ชำระแล้ว"`);
+    await supabase.from('orders').update({ payment_status: 'ชำระแล้ว' })
+      .in('id', toUpdate.map(r => r.orderId!));
+    setState({ ...state, rows: state.rows.map(r =>
+      r.status === 'รอจับคู่' && r.orderId ? { ...r, status: 'ชำระแล้ว' as const } : r
+    )});
+    setSaveMsg(`✓ อัพเดต ${toUpdate.length} รายการ`);
     setSaving(false);
+    setTimeout(() => setSaveMsg(''), 4000);
   };
 
-  const matched   = results.filter(r => r.status === 'matched').length;
-  const notFound  = results.filter(r => r.status === 'not_found').length;
+  const statusColor = (s: string) =>
+    s === 'ชำระแล้ว' ? 'bg-green-100 text-green-700' :
+    s === 'ไม่พบ'    ? 'bg-red-100 text-red-500'     :
+                        'bg-yellow-100 text-yellow-700';
+
+  const cntPaid     = state.rows.filter(r => r.status === 'ชำระแล้ว').length;
+  const cntNotFound = state.rows.filter(r => r.status === 'ไม่พบ').length;
+  const cntPending  = state.rows.filter(r => r.status === 'รอจับคู่').length;
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
 
       {/* Upload zone */}
-      <div className="shrink-0 border-2 border-dashed border-slate-300 rounded-xl p-6 text-center hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer"
+      <div className="shrink-0 border-2 border-dashed border-slate-200 rounded-xl p-5 flex items-center gap-4 hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer"
         onClick={() => fileRef.current?.click()}>
-        <Upload size={28} className="mx-auto text-slate-400 mb-2"/>
-        <p className="font-medium text-slate-600">คลิกเพื่ออัพโหลดไฟล์ COD จาก Flash / ไปรษณีย์</p>
-        <p className="text-xs text-slate-400 mt-1">รองรับ .xlsx, .xls</p>
-        {fileName && <p className="text-xs text-blue-600 mt-2 font-medium">📄 {fileName}</p>}
+        <Upload size={22} className="text-slate-400 shrink-0"/>
+        <div>
+          <p className="font-medium text-slate-600 text-sm">
+            {state.fileName ? `📄 ${state.fileName}` : 'คลิกเพื่ออัพโหลดไฟล์ COD จาก Flash / ไปรษณีย์'}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">รองรับ .xlsx, .xls · Flash: CODRemittance · ไปรษณีย์: Matching Tracking</p>
+        </div>
+        {state.rows.length > 0 && (
+          <span className="ml-auto text-xs text-slate-500 shrink-0">{state.rows.length} รายการ</span>
+        )}
         <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile}/>
       </div>
 
-      {/* Column mapping modal */}
-      {showMapping && columns.length > 0 && (
-        <div className="shrink-0 bg-white rounded-xl shadow border p-4">
-          <div className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-            <AlertCircle size={15} className="text-orange-500"/> เลือก Column ที่ตรงกัน
-            <span className="text-xs text-slate-400 font-normal ml-1">({rawRows.length} แถว)</span>
+      {/* Column mapping */}
+      {showMap && state.columns.length > 0 && (
+        <div className="shrink-0 bg-white rounded-xl shadow border p-4 space-y-3">
+          <div className="font-semibold text-slate-700 text-sm flex items-center gap-2">
+            <AlertCircle size={14} className="text-orange-400"/> เลือก Column ให้ตรงกับข้อมูล
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: 'Tracking No. *', val: mapTracking, set: setMapTracking },
-              { label: 'ยอดเงิน (COD)',  val: mapAmount,   set: setMapAmount },
-              { label: 'ชื่อลูกค้า',      val: mapName,     set: setMapName },
-            ].map(f => (
-              <div key={f.label}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {([
+              { label: 'Tracking *', val: state.mapTracking, key: 'mapTracking' },
+              { label: 'ยอด COD',    val: state.mapAmount,   key: 'mapAmount'   },
+              { label: 'ชื่อลูกค้า', val: state.mapName,     key: 'mapName'     },
+              { label: 'วันที่',      val: state.mapDate,     key: 'mapDate'     },
+            ] as const).map(f => (
+              <div key={f.key}>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">{f.label}</label>
-                <select value={f.val} onChange={e => f.set(e.target.value)}
-                  className="w-full border rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+                <select value={f.val}
+                  onChange={e => setState({ ...state, [f.key]: e.target.value })}
+                  className="w-full border rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
                   <option value="">— ไม่ระบุ —</option>
-                  {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                  {state.columns.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
             ))}
           </div>
-
-          {/* Preview */}
-          {rawRows.length > 0 && mapTracking && (
-            <div className="mt-3 bg-slate-50 rounded-lg p-2 text-xs text-slate-500">
-              ตัวอย่าง: Tracking = <span className="font-mono text-blue-600">{String(rawRows[0][mapTracking] || '-')}</span>
-              {mapAmount && <> · ยอด = <span className="font-semibold text-green-600">{rawRows[0][mapAmount]}</span></>}
-              {mapName   && <> · ชื่อ = <span className="text-slate-700">{rawRows[0][mapName]}</span></>}
-            </div>
-          )}
-
-          <button onClick={handleMatch} disabled={!mapTracking || matching}
-            className="mt-3 px-5 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 flex items-center gap-2">
-            <RefreshCw size={13} className={matching ? 'animate-spin' : ''}/>
-            {matching ? 'กำลังจับคู่...' : `จับคู่ ${rawRows.length} รายการ`}
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setShowMap(false)}
+              className="px-4 py-2 bg-slate-200 rounded-lg text-xs hover:bg-slate-300">ยกเลิก</button>
+            <button onClick={handleImport} disabled={!state.mapTracking}
+              className="px-5 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50">
+              ✓ นำเข้าข้อมูล
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Results */}
-      {results.length > 0 && (
-        <>
-          {/* Summary */}
-          <div className="shrink-0 grid grid-cols-3 gap-3">
-            <div className="bg-slate-50 border rounded-xl p-3 text-center">
-              <div className="text-xs text-slate-500 mb-0.5">ทั้งหมด</div>
-              <div className="text-2xl font-bold text-slate-700">{results.length}</div>
-            </div>
-            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-              <div className="text-xs text-green-600 mb-0.5">จับคู่ได้</div>
-              <div className="text-2xl font-bold text-green-700">{matched}</div>
-            </div>
-            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
-              <div className="text-xs text-red-500 mb-0.5">ไม่พบในระบบ</div>
-              <div className="text-2xl font-bold text-red-600">{notFound}</div>
-            </div>
+      {/* Summary + actions */}
+      {state.imported && (
+        <div className="shrink-0 flex gap-3 items-center flex-wrap">
+          <div className="bg-slate-50 border rounded-xl px-4 py-2.5 text-sm">
+            ทั้งหมด <span className="font-bold">{state.rows.length}</span>
           </div>
-
-          {/* Action */}
-          <div className="shrink-0 flex items-center gap-3">
-            {saveMsg && <span className="text-sm text-green-600 font-medium">{saveMsg}</span>}
-            {matched > 0 && !saveMsg && (
-              <button onClick={handleSave} disabled={saving}
-                className="px-5 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 disabled:opacity-50 flex items-center gap-2">
-                <CheckCircle size={14}/>
-                {saving ? 'กำลังบันทึก...' : `บันทึก "${matched}" รายการ → ชำระแล้ว`}
+          {state.matched && <>
+            <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-2.5 text-sm text-green-700">
+              ✓ จับคู่ได้ <span className="font-bold">{state.rows.length - cntNotFound}</span>
+            </div>
+            {cntNotFound > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-sm text-red-600">
+                ❌ ไม่พบ <span className="font-bold">{cntNotFound}</span>
+              </div>
+            )}
+          </>}
+          <div className="ml-auto flex gap-2 items-center">
+            {saveMsg && <span className="text-xs text-green-600 font-medium">{saveMsg}</span>}
+            {!state.matched && (
+              <button onClick={handleMatch}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600">
+                🔍 จับคู่ Tracking
               </button>
             )}
+            {state.matched && cntPending > 0 && (
+              <button onClick={handleSave} disabled={saving}
+                className="px-5 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 disabled:opacity-50">
+                ✓ ยืนยันรับเงิน ({cntPending})
+              </button>
+            )}
+            <button onClick={() => { setState(EMPTY_COD_STATE); setShowMap(false); setSaveMsg(''); }}
+              className="px-3 py-2 bg-slate-200 text-slate-600 rounded-lg text-xs hover:bg-slate-300">
+              ล้าง
+            </button>
           </div>
+        </div>
+      )}
 
-          {/* Table */}
-          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-            <table className="text-sm w-full" style={{minWidth:'700px'}}>
-              <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
-                <tr>
-                  <th className="p-3 text-center w-8">#</th>
-                  <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
-                  <th className="p-3 text-left whitespace-nowrap">Tracking</th>
-                  <th className="p-3 text-left whitespace-nowrap">ชื่อในไฟล์</th>
-                  <th className="p-3 text-left whitespace-nowrap">ลูกค้าในระบบ</th>
-                  <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
-                  <th className="p-3 text-right whitespace-nowrap">ยอด (บาท)</th>
+      {/* Table */}
+      {state.imported && state.rows.length > 0 && (
+        <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+          <table className="text-sm w-full" style={{minWidth:'750px'}}>
+            <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+              <tr>
+                <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                <th className="p-3 text-left whitespace-nowrap">เบอร์</th>
+                <th className="p-3 text-left whitespace-nowrap">Tracking</th>
+                <th className="p-3 text-right whitespace-nowrap">ยอด (บาท)</th>
+                <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.rows.map((r, i) => (
+                <tr key={i} className={`border-b ${r.status === 'ชำระแล้ว' ? 'bg-green-50' : r.status === 'ไม่พบ' ? 'bg-red-50' : 'hover:bg-slate-50'}`}>
+                  <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{r.date || '-'}</td>
+                  <td className="p-3 font-medium whitespace-nowrap">{r.name || '-'}</td>
+                  <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{r.tel || '-'}</td>
+                  <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{r.tracking}</td>
+                  <td className="p-3 text-right font-bold">฿{fmt(r.amount)}</td>
+                  <td className="p-3 text-center">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusColor(r.status)}`}>
+                      {r.status}
+                    </span>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {results.map((r, i) => (
-                  <tr key={r.tracking} className={`border-b ${r.status === 'matched' ? 'hover:bg-green-50' : 'bg-red-50'}`}>
-                    <td className="p-3 text-center text-xs text-slate-400">{i + 1}</td>
-                    <td className="p-3 text-center">
-                      {r.status === 'matched'
-                        ? <span className="flex items-center justify-center gap-1 text-green-600 text-xs"><CheckCircle size={13}/> พบ</span>
-                        : <span className="flex items-center justify-center gap-1 text-red-500 text-xs"><XCircle size={13}/> ไม่พบ</span>
-                      }
-                    </td>
-                    <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{r.tracking}</td>
-                    <td className="p-3 text-xs text-slate-500">{r.name || '-'}</td>
-                    <td className="p-3 font-medium text-xs">{r.customer || '-'}</td>
-                    <td className="p-3 font-mono text-xs text-slate-500">{r.orderNo || '-'}</td>
-                    <td className="p-3 text-right font-bold text-xs">
-                      {r.amount > 0 ? `฿${fmt(r.amount)}` : '-'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Empty */}
+      {!state.imported && !showMap && (
+        <div className="flex-1 flex flex-col items-center justify-center text-slate-300 gap-3">
+          <Upload size={48} strokeWidth={1}/>
+          <p className="text-sm">อัพโหลดไฟล์ Excel เพื่อเริ่มต้น</p>
+          <div className="flex gap-2 text-xs">
+            <span className="bg-orange-50 border border-orange-100 text-orange-500 px-3 py-1.5 rounded-lg">Flash: CODRemittance.xlsx</span>
+            <span className="bg-purple-50 border border-purple-100 text-purple-500 px-3 py-1.5 rounded-lg">ไปรษณีย์: Matching Tracking.xlsx</span>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
 }
 
+
 // ── Main FinanceIncome ────────────────────────────────────────
 export default function FinanceIncome() {
-  const [tab, setTab]           = useState<IncomeTab>('cod');
+  const [tab, setTab]           = useState<IncomeTab>('cod-file');
+  const [codState, setCodState] = useState<CodFileState>(EMPTY_COD_STATE);
   const [orders, setOrders]     = useState<any[]>([]);
   const [loading, setLoading]   = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -322,7 +368,7 @@ export default function FinanceIncome() {
       </div>
 
       {/* COD File Tab */}
-      {tab === 'cod-file' && <CodFilePanel />}
+      {tab === 'cod-file' && <CodFilePanel state={codState} setState={setCodState} />}
 
       {/* COD / Transfer Tabs */}
       {tab !== 'cod-file' && (
