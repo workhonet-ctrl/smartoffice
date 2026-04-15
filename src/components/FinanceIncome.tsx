@@ -357,7 +357,7 @@ export default function FinanceIncome({
   const loadOrders = async () => {
     setLoading(true); setSelected(new Set());
     let q = supabase.from('orders')
-      .select('id, order_no, order_date, total_thb, payment_method, payment_status, order_status, customers(name, tel), raw_prod, tracking_no')
+      .select('id, order_no, order_date, total_thb, payment_method, payment_status, order_status, customers(name, tel), raw_prod, tracking_no, slip_image')
       .order('order_date', { ascending: false })
       .limit(200);
 
@@ -378,6 +378,35 @@ export default function FinanceIncome({
   };
 
   useEffect(() => { if (tab !== 'cod-file') loadOrders(); }, [tab]);
+
+  // ── Slip image ──────────────────────────────────────────────
+  const [slipModal, setSlipModal] = useState<{ orderId: string; image: string | null } | null>(null);
+  const [slipUploading, setSlipUploading] = useState(false);
+
+  const openSlip = (o: any) => setSlipModal({ orderId: o.id, image: o.slip_image || null });
+
+  const handleSlipUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    if (file.size > 1.5 * 1024 * 1024) { alert('ไฟล์ต้องไม่เกิน 1.5 MB'); return; }
+    setSlipUploading(true);
+    const reader = new FileReader();
+    reader.onload = async ev => {
+      const base64 = ev.target?.result as string;
+      await supabase.from('orders').update({ slip_image: base64 }).eq('id', slipModal!.orderId);
+      setSlipModal(m => m ? { ...m, image: base64 } : m);
+      setOrders(prev => prev.map(o => o.id === slipModal!.orderId ? { ...o, slip_image: base64 } : o));
+      setSlipUploading(false);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const deleteSlip = async () => {
+    await supabase.from('orders').update({ slip_image: null }).eq('id', slipModal!.orderId);
+    setOrders(prev => prev.map(o => o.id === slipModal!.orderId ? { ...o, slip_image: null } : o));
+    setSlipModal(m => m ? { ...m, image: null } : m);
+  };
+  // ──────────────────────────────────────────────────────────────
 
   const toggle    = (id: string) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allSel    = orders.length > 0 && orders.every(o => selected.has(o.id));
@@ -489,11 +518,12 @@ export default function FinanceIncome({
                   <th className="p-3 text-center whitespace-nowrap">วิธีชำระ</th>
                   <th className="p-3 text-right whitespace-nowrap">ยอด (บาท)</th>
                   <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
+                  <th className="p-3 text-center whitespace-nowrap">สลิป</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr><td colSpan={9} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
-                {!loading && orders.length === 0 && <tr><td colSpan={9} className="p-8 text-center text-slate-400">ไม่มีข้อมูล</td></tr>}
+                {loading && <tr><td colSpan={10} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
+                {!loading && orders.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-slate-400">ไม่มีข้อมูล</td></tr>}
                 {orders.map(o => {
                   const paid = o.payment_status === 'ชำระแล้ว';
                   const isTransfer = tab === 'transfer';
@@ -526,6 +556,13 @@ export default function FinanceIncome({
                           {isTransfer || paid ? '✓ รับเงินแล้ว' : 'รอรับเงิน'}
                         </span>
                       </td>
+                      <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => openSlip(o)}
+                          className={`text-lg transition hover:scale-110 ${o.slip_image ? 'opacity-100' : 'opacity-30 hover:opacity-60'}`}
+                          title={o.slip_image ? 'ดูสลิป' : 'อัพโหลดสลิป'}>
+                          🖼
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -533,6 +570,47 @@ export default function FinanceIncome({
             </table>
           </div>
         </>
+      )}
+
+      {/* ── Slip Modal ── */}
+      {slipModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4"
+          onClick={() => setSlipModal(null)}>
+          <div className="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-slate-800">🖼 สลิปการโอนเงิน</h3>
+              <button onClick={() => setSlipModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+            </div>
+
+            {slipModal.image ? (
+              <div className="space-y-3">
+                <img src={slipModal.image} alt="slip" className="w-full rounded-xl border object-contain max-h-80"/>
+                <div className="flex gap-2">
+                  <label className="flex-1 py-2 text-center bg-blue-50 text-blue-600 rounded-lg text-sm cursor-pointer hover:bg-blue-100 font-medium">
+                    🔄 เปลี่ยนรูป
+                    <input type="file" accept="image/*" className="hidden" onChange={handleSlipUpload}/>
+                  </label>
+                  <button onClick={deleteSlip}
+                    className="px-4 py-2 bg-red-50 text-red-500 rounded-lg text-sm hover:bg-red-100">
+                    🗑 ลบ
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center text-slate-400">
+                  <div className="text-4xl mb-2">🖼</div>
+                  <p className="text-sm">ยังไม่มีสลิป</p>
+                </div>
+                <label className="block w-full py-2.5 text-center bg-blue-500 text-white rounded-lg text-sm cursor-pointer hover:bg-blue-600 font-medium">
+                  {slipUploading ? 'กำลังอัพโหลด...' : '📷 อัพโหลดสลิป (ไม่เกิน 1.5 MB)'}
+                  <input type="file" accept="image/*" className="hidden" onChange={handleSlipUpload} disabled={slipUploading}/>
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
