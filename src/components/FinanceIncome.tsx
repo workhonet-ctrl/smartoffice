@@ -18,11 +18,20 @@ export default function FinanceIncome() {
     setLoading(true); setSelected(new Set());
     let q = supabase.from('orders')
       .select('id, order_no, order_date, total_thb, payment_method, payment_status, order_status, customers(name, tel), raw_prod, tracking_no')
-      .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์', 'กำลังแพ็ค', 'แพ็คสินค้า'])
       .order('order_date', { ascending: false });
 
-    if (tab === 'cod')      q = q.eq('payment_method', 'COD');
-    if (tab === 'transfer') q = q.neq('payment_method', 'COD');
+    if (tab === 'cod') {
+      // COD: เฉพาะที่ส่งแล้ว
+      q = q.eq('payment_method', 'COD')
+           .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์', 'กำลังแพ็ค', 'แพ็คสินค้า']);
+    } else if (tab === 'transfer') {
+      // โอนเงิน: ทุก order ที่ไม่ใช่ COD และชำระแล้ว (read-only)
+      q = q.neq('payment_method', 'COD')
+           .eq('payment_status', 'ชำระแล้ว');
+    } else {
+      // ทั้งหมด
+      q = q.in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์', 'กำลังแพ็ค', 'แพ็คสินค้า']);
+    }
 
     const { data } = await q;
     setOrders(data || []);
@@ -76,16 +85,33 @@ export default function FinanceIncome() {
 
       {/* Summary cards */}
       <div className="shrink-0 grid grid-cols-2 gap-3 mb-4">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-          <div className="text-xs text-yellow-700 font-semibold mb-1">รอรับเงิน</div>
-          <div className="text-2xl font-bold text-yellow-800">฿{fmt(totWaiting)}</div>
-          <div className="text-xs text-yellow-600 mt-0.5">{cntWaiting} รายการ</div>
-        </div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-          <div className="text-xs text-green-700 font-semibold mb-1">รับเงินแล้ว</div>
-          <div className="text-2xl font-bold text-green-800">฿{fmt(totPaid)}</div>
-          <div className="text-xs text-green-600 mt-0.5">{cntPaid} รายการ</div>
-        </div>
+        {tab === 'transfer' ? (
+          <>
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <div className="text-xs text-blue-700 font-semibold mb-1">ยอดโอนรวม</div>
+              <div className="text-2xl font-bold text-blue-800">฿{fmt(orders.reduce((s, o) => s + (o.total_thb || 0), 0))}</div>
+              <div className="text-xs text-blue-600 mt-0.5">{orders.length} รายการ</div>
+            </div>
+            <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+              <div className="text-xs text-green-700 font-semibold mb-1">สถานะ</div>
+              <div className="text-lg font-bold text-green-700">✓ ชำระแล้วทั้งหมด</div>
+              <div className="text-xs text-green-500 mt-0.5">read-only · ไม่ต้องดำเนินการ</div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+              <div className="text-xs text-yellow-700 font-semibold mb-1">รอรับเงิน</div>
+              <div className="text-2xl font-bold text-yellow-800">฿{fmt(totWaiting)}</div>
+              <div className="text-xs text-yellow-600 mt-0.5">{cntWaiting} รายการ</div>
+            </div>
+            <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+              <div className="text-xs text-green-700 font-semibold mb-1">รับเงินแล้ว</div>
+              <div className="text-2xl font-bold text-green-800">฿{fmt(totPaid)}</div>
+              <div className="text-xs text-green-600 mt-0.5">{cntPaid} รายการ</div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Toolbar */}
@@ -94,8 +120,11 @@ export default function FinanceIncome() {
           className="px-3 py-2 bg-white border rounded-lg text-xs hover:bg-slate-50 flex items-center gap-1.5 shadow-sm">
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''}/> รีเฟรช
         </button>
+        {tab === 'transfer' && (
+          <span className="text-xs text-slate-400 flex items-center gap-1">📖 ประวัติการโอนเงิน — read only</span>
+        )}
         {msg && <span className="text-xs text-green-600 font-medium">{msg}</span>}
-        {selected.size > 0 && (
+        {selected.size > 0 && tab !== 'transfer' && (
           <button onClick={markPaid} disabled={saving}
             className="ml-auto px-5 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 disabled:opacity-50">
             ✓ รับเงินแล้ว ({selected.size} รายการ)
@@ -108,9 +137,11 @@ export default function FinanceIncome() {
         <table className="text-sm w-full" style={{minWidth:'800px'}}>
           <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
             <tr>
-              <th className="p-3 w-8">
-                <input type="checkbox" checked={allSel} onChange={toggleAll} className="rounded"/>
-              </th>
+              {tab !== 'transfer' && (
+                <th className="p-3 w-8">
+                  <input type="checkbox" checked={allSel} onChange={toggleAll} className="rounded"/>
+                </th>
+              )}
               <th className="p-3 text-left whitespace-nowrap">วันที่</th>
               <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
               <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
@@ -122,16 +153,20 @@ export default function FinanceIncome() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={9} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
-            {!loading && orders.length === 0 && <tr><td colSpan={9} className="p-8 text-center text-slate-400">ไม่มีข้อมูล</td></tr>}
+            {loading && <tr><td colSpan={tab !== 'transfer' ? 9 : 8} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
+            {!loading && orders.length === 0 && <tr><td colSpan={tab !== 'transfer' ? 9 : 8} className="p-8 text-center text-slate-400">ไม่มีข้อมูล</td></tr>}
             {orders.map(o => {
               const paid = o.payment_status === 'ชำระแล้ว';
+              const isTransfer = tab === 'transfer';
               return (
-                <tr key={o.id} onClick={() => !paid && toggle(o.id)}
-                  className={`border-b ${paid ? 'bg-green-50 opacity-70' : selected.has(o.id) ? 'bg-yellow-50' : 'hover:bg-slate-50 cursor-pointer'}`}>
-                  <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
-                    {!paid && <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggle(o.id)} className="rounded"/>}
-                  </td>
+                <tr key={o.id}
+                  onClick={() => !paid && !isTransfer && toggle(o.id)}
+                  className={`border-b ${isTransfer ? 'hover:bg-blue-50' : paid ? 'bg-green-50 opacity-70' : selected.has(o.id) ? 'bg-yellow-50' : 'hover:bg-slate-50 cursor-pointer'}`}>
+                  {!isTransfer && (
+                    <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
+                      {!paid && <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggle(o.id)} className="rounded"/>}
+                    </td>
+                  )}
                   <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
                     {o.order_date ? o.order_date.split('-').reverse().join('/') : '-'}
                   </td>
