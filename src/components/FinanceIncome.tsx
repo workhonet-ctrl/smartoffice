@@ -3,6 +3,9 @@ import { supabase } from '../lib/supabase';
 import { RefreshCw, Upload, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
+export type { CodFileState };
+export { EMPTY_COD_STATE };
+
 const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 type IncomeTab = 'cod' | 'transfer' | 'all' | 'cod-file';
@@ -338,9 +341,13 @@ function CodFilePanel({ state, setState }: {
 
 
 // ── Main FinanceIncome ────────────────────────────────────────
-export default function FinanceIncome() {
-  const [tab, setTab]           = useState<IncomeTab>('cod-file');
-  const [codState, setCodState] = useState<CodFileState>(EMPTY_COD_STATE);
+export default function FinanceIncome({
+  codState, setCodState,
+}: {
+  codState: CodFileState;
+  setCodState: (s: CodFileState) => void;
+}) {
+  const [tab, setTab] = useState<IncomeTab>('cod-file');
   const [orders, setOrders]     = useState<any[]>([]);
   const [loading, setLoading]   = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
