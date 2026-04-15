@@ -31,32 +31,41 @@ function CodFilePanel() {
   const [saving,    setSaving]    = useState(false);
   const [saveMsg,   setSaveMsg]   = useState('');
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
     setResults([]); setSaveMsg('');
 
-    const buf  = await file.arrayBuffer();
-    const wb   = XLSX.read(buf);
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const wb = XLSX.read(ev.target?.result, { type: 'binary' });
 
-    // หา sheet ที่มีข้อมูล tracking — ลอง COD Detail ก่อน แล้ว sheet แรก
-    let sheet = wb.Sheets['COD Detail'] || wb.Sheets['Matching Tracking Number'] || wb.Sheets[wb.SheetNames[0]];
-    const json: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+        // หา sheet ที่มีข้อมูล tracking — ลอง COD Detail ก่อน แล้ว sheet แรก
+        const sheet = wb.Sheets['COD Detail'] || wb.Sheets['Matching Tracking Number'] || wb.Sheets[wb.SheetNames[0]];
+        const json: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
-    if (json.length === 0) return;
-    const cols = Object.keys(json[0]);
-    setColumns(cols);
-    setRawRows(json);
+        if (json.length === 0) return;
+        const cols = Object.keys(json[0]);
+        setColumns(cols);
+        setRawRows(json);
 
-    // auto-detect columns
-    const trackCol = cols.find(c => /tracking/i.test(c)) || '';
-    const amtCol   = cols.find(c => /amount|cod/i.test(c) && !/order|sub/i.test(c)) || '';
-    const nameCol  = cols.find(c => /recipient|name/i.test(c)) || '';
-    setMapTracking(trackCol);
-    setMapAmount(amtCol);
-    setMapName(nameCol);
-    setShowMapping(true);
+        // auto-detect columns
+        const trackCol = cols.find(c => /tracking/i.test(c)) || '';
+        const amtCol   = cols.find(c => /amount|cod/i.test(c) && !/order|sub/i.test(c)) || '';
+        const nameCol  = cols.find(c => /recipient|name/i.test(c)) || '';
+        setMapTracking(trackCol);
+        setMapAmount(amtCol);
+        setMapName(nameCol);
+        setShowMapping(true);
+      } catch (err) {
+        console.error('XLSX parse error:', err);
+      }
+    };
+    reader.readAsBinaryString(file);
+    // reset input เพื่อให้เลือกไฟล์เดิมซ้ำได้
+    e.target.value = '';
   };
 
   const handleMatch = async () => {
