@@ -258,21 +258,35 @@ export default function Packaging({
         <p className="text-sm text-slate-500 mt-0.5">วันที่ {packDate} · {orders.length} ออเดอร์</p>
       </div>
 
-      {/* Tabs — ปุ่มใบสรุป disabled ถ้ากล่องยังไม่ครบ */}
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit mb-4 shrink-0">
-        <button onClick={() => setTab('prep')}
-          className={`px-5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 ${tab==='prep'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
-          <ClipboardList size={15}/> จัดเตรียมสินค้า
-        </button>
+      {/* Tabs + Refresh button */}
+      <div className="flex items-center gap-3 mb-4 shrink-0 flex-wrap">
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+          <button onClick={() => setTab('prep')}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 ${tab==='prep'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
+            <ClipboardList size={15}/> จัดเตรียมสินค้า
+          </button>
+          <button
+            onClick={() => canGoToSummary && setTab('summary')}
+            disabled={!canGoToSummary}
+            title={!canGoToSummary ? `ยังเลือกกล่องไม่ครบ ${multiIncomplete.length} รายการ` : ''}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2
+              ${tab==='summary'?'bg-white shadow text-slate-800':''}
+              ${!canGoToSummary?'opacity-40 cursor-not-allowed text-slate-400':'text-slate-500 hover:text-slate-700'}`}>
+            <Package size={15}/> ใบสรุป
+            {!canGoToSummary && <AlertCircle size={13} className="text-orange-400"/>}
+          </button>
+        </div>
         <button
-          onClick={() => canGoToSummary && setTab('summary')}
-          disabled={!canGoToSummary}
-          title={!canGoToSummary ? `ยังเลือกกล่องไม่ครบ ${multiIncomplete.length} รายการ` : ''}
-          className={`px-5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2
-            ${tab==='summary'?'bg-white shadow text-slate-800':''}
-            ${!canGoToSummary?'opacity-40 cursor-not-allowed text-slate-400':'text-slate-500 hover:text-slate-700'}`}>
-          <Package size={15}/> ใบสรุป
-          {!canGoToSummary && <AlertCircle size={13} className="text-orange-400"/>}
+          onClick={() => loadData()}
+          disabled={loading}
+          className="px-3 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-50 hover:border-slate-300 flex items-center gap-2 shadow-sm disabled:opacity-50 transition">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={loading ? 'animate-spin' : ''}>
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+            <path d="M21 3v5h-5"/>
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+            <path d="M8 16H3v5"/>
+          </svg>
+          {loading ? 'กำลังโหลด...' : 'รีเฟรชสินค้า'}
         </button>
       </div>
 
