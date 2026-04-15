@@ -175,22 +175,38 @@ function CodFilePanel({ state, setState }: {
             <AlertCircle size={14} className="text-orange-400"/> เลือก Column ให้ตรงกับข้อมูล
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {([
-              { label: 'Tracking *', val: state.mapTracking, key: 'mapTracking' },
-              { label: 'ยอด COD',    val: state.mapAmount,   key: 'mapAmount'   },
-              { label: 'ชื่อลูกค้า', val: state.mapName,     key: 'mapName'     },
-              { label: 'วันที่',      val: state.mapDate,     key: 'mapDate'     },
-            ] as const).map(f => (
-              <div key={f.key}>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">{f.label}</label>
-                <select value={f.val}
-                  onChange={e => setState({ ...state, [f.key]: e.target.value })}
-                  className="w-full border rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
-                  <option value="">— ไม่ระบุ —</option>
-                  {state.columns.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-            ))}
+            <div>
+              <label className="text-xs font-semibold text-slate-500 block mb-1">Tracking *</label>
+              <select value={state.mapTracking} onChange={e => setState({ ...state, mapTracking: e.target.value })}
+                className="w-full border rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+                <option value="">— ไม่ระบุ —</option>
+                {state.columns.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 block mb-1">ยอด COD</label>
+              <select value={state.mapAmount} onChange={e => setState({ ...state, mapAmount: e.target.value })}
+                className="w-full border rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+                <option value="">— ไม่ระบุ —</option>
+                {state.columns.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อลูกค้า</label>
+              <select value={state.mapName} onChange={e => setState({ ...state, mapName: e.target.value })}
+                className="w-full border rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+                <option value="">— ไม่ระบุ —</option>
+                {state.columns.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 block mb-1">วันที่ (จากไฟล์)</label>
+              <select value={state.mapDate} onChange={e => setState({ ...state, mapDate: e.target.value })}
+                className="w-full border rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+                <option value="">— กรอกเอง —</option>
+                {state.columns.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
             {/* กรอกวันที่เองถ้าไม่มีใน column */}
             {!state.mapDate && (
               <div>
