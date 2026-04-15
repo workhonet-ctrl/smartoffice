@@ -51,7 +51,7 @@ function CodFilePanel({ state, setState }: {
   const fileRef = useRef<HTMLInputElement>(null);
   const [saving,   setSaving]   = useState(false);
   const [saveMsg,  setSaveMsg]  = useState('');
-  const [showMap,  setShowMap]  = useState(false);
+  const [manualDate, setManualDate] = useState(new Date().toISOString().split('T')[0]);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -95,7 +95,7 @@ function CodFilePanel({ state, setState }: {
         tracking: String(r[mapTracking] || '').trim(),
         name:     nIdx >= 0 ? String(r[state.columns[nIdx]] || '').trim() : '',
         tel:      '',
-        date:     dIdx >= 0 ? String(r[state.columns[dIdx]] || '').trim() : '',
+        date:     dIdx >= 0 ? String(r[state.columns[dIdx]] || '').trim() : manualDate,
         amount:   parseFloat(String(r[mapAmount] || '0').replace(/[^0-9.]/g, '')) || 0,
         status:   'รอจับคู่' as const,
       }))
@@ -191,6 +191,14 @@ function CodFilePanel({ state, setState }: {
                 </select>
               </div>
             ))}
+            {/* กรอกวันที่เองถ้าไม่มีใน column */}
+            {!state.mapDate && (
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">กรอกวันที่เอง</label>
+                <input type="date" value={manualDate} onChange={e => setManualDate(e.target.value)}
+                  className="w-full border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+              </div>
+            )}
           </div>
           <div className="flex gap-2">
             <button onClick={() => setShowMap(false)}
