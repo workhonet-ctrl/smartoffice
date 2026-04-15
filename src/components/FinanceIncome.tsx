@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx';
 
 const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-type IncomeTab = 'cod' | 'transfer' | 'cod-file';
+type IncomeTab = 'cod' | 'transfer' | 'all' | 'cod-file';
 
 // ── COD File Import ───────────────────────────────────────────
 type ImportRow  = { tracking: string; amount: number; name: string; raw: Record<string, any> };
@@ -289,9 +289,10 @@ export default function FinanceIncome() {
   const cntPaid    = orders.filter(o => o.payment_status === 'ชำระแล้ว').length;
 
   const TABS = [
+    { key: 'cod-file' as IncomeTab, label: '📂 ไฟล์ COD' },
     { key: 'cod'      as IncomeTab, label: '💵 COD' },
     { key: 'transfer' as IncomeTab, label: '🏦 โอนเงิน' },
-    { key: 'cod-file' as IncomeTab, label: '📂 ไฟล์ COD' },
+    { key: 'all'      as IncomeTab, label: '📋 ทั้งหมด' },
   ];
 
   return (
