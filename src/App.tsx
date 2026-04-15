@@ -15,6 +15,8 @@ import FlashExport from './components/FlashExport';
 import MyOrderExport from './components/MyOrderExport';
 import Finance from './components/Finance';
 import FinanceIncome from './components/FinanceIncome';
+import type { CodFileState } from './components/FinanceIncome';
+import { EMPTY_COD_STATE } from './components/FinanceIncome';
 import Marketing from './components/Marketing';
 import HR from './components/HR';
 
@@ -31,6 +33,7 @@ export default function App() {
   const [activePage, setActivePage] = useState<PageKey>('products');
   const [packagingOrderIds, setPackagingOrderIds] = useState<string[]>([]);
   const [packHistoryId, setPackHistoryId]         = useState<string>('');
+  const [codState, setCodState]                   = useState<CodFileState>(EMPTY_COD_STATE);
 
   const goToPackaging = (ids: string[]) => {
     setPackagingOrderIds(ids);
@@ -61,7 +64,7 @@ export default function App() {
       case 'finance-monthly':  return <Finance page="monthly" />;
       case 'finance-yearly':   return <Finance page="yearly" />;
       case 'finance-expenses': return <Finance page="expenses" />;
-      case 'finance-income':   return <FinanceIncome />;
+      case 'finance-income':   return <FinanceIncome codState={codState} setCodState={setCodState} />;
       case 'hr':             return <HR />;
       case 'marketing-graphic': return <Marketing page="graphic" />;
       case 'marketing-ads':     return <Marketing page="ads" />;
