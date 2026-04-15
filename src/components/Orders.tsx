@@ -1026,7 +1026,12 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                     {/* เลขออเดอร์ */}
                     <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{o.order_no}</td>
                     {/* ลูกค้า */}
-                    <td className="p-3 whitespace-nowrap">{o.customers?.name || '-'}</td>
+                    <td className="p-3 whitespace-nowrap">
+                      <div className="font-medium">{o.customers?.name || '-'}</div>
+                      {o.customers?.facebook_name && (
+                        <div className="text-[11px] text-blue-500 mt-0.5">📘 {o.customers.facebook_name}</div>
+                      )}
+                    </td>
                     {/* เบอร์โทร */}
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
                     {/* ที่อยู่ — scrollable แทน truncate */}
