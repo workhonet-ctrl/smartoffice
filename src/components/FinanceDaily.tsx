@@ -10,16 +10,14 @@ type DailyOrder = {
   total_thb: number; shipping_thb: number | null; raw_prod: string | null;
   promo_ids: string[] | null; quantities: string | null; quantity: number | null;
   customers: { name: string } | null;
-  _cost_goods?: number;
-  _vat?: number;
-  _com?: number;
-  _ship?: number;
+  _cost_goods?: number; _cost_box?: number; _cost_bubble?: number;
+  _vat?: number; _com?: number; _ship?: number;
 };
 
 type DaySummary = {
   date: string; orders: DailyOrder[];
   revenue: number;
-  cost_goods: number;
+  cost_goods: number; cost_box: number; cost_bubble: number;
   vat: number; com: number; ship: number;
   cost_ad: number; cost_other: number;
   profit: number;
@@ -75,22 +73,18 @@ export default function FinanceDaily() {
       const result: DaySummary[] = dates.map(date => {
         const dayOrders = (orders||[]).filter((o:any) => String(o.order_date||'').split('T')[0] === date) as DailyOrder[];
 
-        let sumCostGoods = 0, sumVat = 0, sumCom = 0, sumShip = 0;
+        let sumCostGoods = 0, sumCostBox = 0, sumCostBubble = 0, sumVat = 0, sumCom = 0, sumShip = 0;
         for (const o of dayOrders) {
           const rev = Number(o.total_thb) || 0;
           const vat = rev * VAT_RATE;
           const com = rev * COM_RATE;
           const ship = Number(o.shipping_thb) || 0;
-          o._vat  = vat;
-          o._com  = com;
-          o._ship = ship;
-          sumVat  += vat;
-          sumCom  += com;
-          sumShip += ship;
+          o._vat  = vat; o._com  = com; o._ship = ship;
+          sumVat  += vat; sumCom  += com; sumShip += ship;
 
           if (o.promo_ids?.length) {
             const qtys = String(o.quantities||o.quantity||'1').split('|');
-            let oGoods = 0;
+            let oGoods = 0, oBox = 0, oBubble = 0;
             for (let i = 0; i < o.promo_ids.length; i++) {
               const promo = promoMap[o.promo_ids[i]]; if (!promo) continue;
               const qty = Number(qtys[i]?.trim())||1;
@@ -98,34 +92,36 @@ export default function FinanceDaily() {
               const master = promo.products_master;
               const box = promo.boxes; const bub = promo.bubbles;
               oGoods += master?.cost_thb ? Number(master.cost_thb)*pieces : 0;
-              if (i===0 && box?.price_thb) oGoods += Number(box.price_thb);
-              if (i===0 && bub?.price_thb && bub?.length_cm>0) oGoods += Number(bub.price_thb);
+              if (i===0 && box?.price_thb)  oBox    += Number(box.price_thb);
+              if (i===0 && bub?.price_thb && bub?.length_cm>0) oBubble += Number(bub.price_thb);
             }
-            o._cost_goods = oGoods;
-            sumCostGoods += oGoods;
+            o._cost_goods = oGoods; o._cost_box = oBox; o._cost_bubble = oBubble;
+            sumCostGoods += oGoods; sumCostBox += oBox; sumCostBubble += oBubble;
           }
         }
 
-        const revenue   = dayOrders.reduce((s,o) => s+Number(o.total_thb), 0);
-        const cost_ad   = (adCosts||[]).filter((a:any) => String(a.expense_date).split('T')[0]===date).reduce((s:number,a:any)=>s+Number(a.amount_thb),0);
-        const cost_other= (otherExp||[]).filter((e:any) => String(e.expense_date).split('T')[0]===date).reduce((s:number,e:any)=>s+Number(e.amount_thb),0);
-        const totalCost = sumCostGoods + sumVat + sumCom + sumShip + cost_ad + cost_other;
-        return { date, orders: dayOrders, revenue, cost_goods: sumCostGoods, vat: sumVat, com: sumCom, ship: sumShip, cost_ad, cost_other, profit: revenue - totalCost };
+        const revenue    = dayOrders.reduce((s,o) => s+Number(o.total_thb), 0);
+        const cost_ad    = (adCosts||[]).filter((a:any) => String(a.expense_date).split('T')[0]===date).reduce((s:number,a:any)=>s+Number(a.amount_thb),0);
+        const cost_other = (otherExp||[]).filter((e:any) => String(e.expense_date).split('T')[0]===date).reduce((s:number,e:any)=>s+Number(e.amount_thb),0);
+        const totalCost  = sumCostGoods + sumCostBox + sumCostBubble + sumVat + sumCom + sumShip + cost_ad + cost_other;
+        return { date, orders: dayOrders, revenue, cost_goods: sumCostGoods, cost_box: sumCostBox, cost_bubble: sumCostBubble, vat: sumVat, com: sumCom, ship: sumShip, cost_ad, cost_other, profit: revenue - totalCost };
       }).filter(d => d.orders.length > 0 || d.cost_ad > 0 || d.cost_other > 0);
 
       setSummaries(result);
     } finally { setLoading(false); }
   };
 
-  const totRevenue    = summaries.reduce((s,d) => s+d.revenue, 0);
-  const totCostGoods  = summaries.reduce((s,d) => s+d.cost_goods, 0);
-  const totVat        = summaries.reduce((s,d) => s+d.vat, 0);
-  const totCom        = summaries.reduce((s,d) => s+d.com, 0);
-  const totShip       = summaries.reduce((s,d) => s+d.ship, 0);
-  const totAd         = summaries.reduce((s,d) => s+d.cost_ad, 0);
-  const totOther      = summaries.reduce((s,d) => s+d.cost_other, 0);
-  const totProfit     = summaries.reduce((s,d) => s+d.profit, 0);
-  const totOrders     = summaries.reduce((s,d) => s+d.orders.length, 0);
+  const totRevenue   = summaries.reduce((s,d) => s+d.revenue, 0);
+  const totCostGoods = summaries.reduce((s,d) => s+d.cost_goods, 0);
+  const totCostBox   = summaries.reduce((s,d) => s+d.cost_box, 0);
+  const totCostBubble= summaries.reduce((s,d) => s+d.cost_bubble, 0);
+  const totVat       = summaries.reduce((s,d) => s+d.vat, 0);
+  const totCom       = summaries.reduce((s,d) => s+d.com, 0);
+  const totShip      = summaries.reduce((s,d) => s+d.ship, 0);
+  const totAd        = summaries.reduce((s,d) => s+d.cost_ad, 0);
+  const totOther     = summaries.reduce((s,d) => s+d.cost_other, 0);
+  const totProfit    = summaries.reduce((s,d) => s+d.profit, 0);
+  const totOrders    = summaries.reduce((s,d) => s+d.orders.length, 0);
 
   const toggleExpand = (date: string) =>
     setExpanded(s => { const n = new Set(s); n.has(date) ? n.delete(date) : n.add(date); return n; });
@@ -245,7 +241,7 @@ export default function FinanceDaily() {
               {/* Expanded table */}
               {isOpen && (
                 <div className="border-t border-slate-100 overflow-x-auto">
-                  <table className="text-xs w-full" style={{minWidth:'900px'}}>
+                  <table className="text-xs w-full" style={{minWidth:'1100px'}}>
                     <thead>
                       <tr className="bg-slate-50 text-slate-400">
                         <th className="px-4 py-2 text-left text-[10px] font-semibold">เลขออเดอร์</th>
@@ -256,29 +252,33 @@ export default function FinanceDaily() {
                         <th className={thClass}>VAT 5%</th>
                         <th className={thClass}>COM 1.5%</th>
                         <th className={thClass}>ขนส่ง</th>
-                        <th className={thClass}>โฆษณา</th>
-                        <th className={thClass}>อื่นๆ</th>
+                        <th className={thClass}>ค่าโฆษณา</th>
+                        <th className={thClass}>ค่ากล่อง</th>
+                        <th className={thClass}>ค่าบั้บเบิ้ล</th>
                         <th className={thClass}>กำไร</th>
                       </tr>
                     </thead>
                     <tbody>
                       {day.orders.map(o => {
-                        const vat  = o._vat  || 0;
-                        const com  = o._com  || 0;
-                        const ship = o._ship || 0;
-                        const oProfit = Number(o.total_thb) - (o._cost_goods||0) - vat - com - ship;
+                        const vat    = o._vat         || 0;
+                        const com    = o._com         || 0;
+                        const ship   = o._ship        || 0;
+                        const box    = o._cost_box    || 0;
+                        const bubble = o._cost_bubble || 0;
+                        const oProfit = Number(o.total_thb) - (o._cost_goods||0) - vat - com - ship - box - bubble;
                         return (
                           <tr key={o.id} className="border-t border-slate-50 hover:bg-slate-50">
                             <td className="px-4 py-2 font-mono text-blue-600 whitespace-nowrap">{o.order_no}</td>
                             <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{o.customers?.name||'-'}</td>
-                            <td className="px-3 py-2 text-slate-500 max-w-[160px] truncate">{o.raw_prod||'-'}</td>
+                            <td className="px-3 py-2 text-slate-500 max-w-[130px] truncate">{o.raw_prod||'-'}</td>
                             <td className={`${colClass} text-emerald-600 font-medium`}>฿{fmt(Number(o.total_thb))}</td>
                             <td className={`${colClass} text-slate-500`}>฿{fmt(o._cost_goods||0)}</td>
                             <td className={`${colClass} text-slate-500`}>฿{fmt(vat)}</td>
                             <td className={`${colClass} text-slate-500`}>฿{fmt(com)}</td>
                             <td className={`${colClass} text-slate-500`}>฿{fmt(ship)}</td>
                             <td className={`${colClass} text-slate-400`}>-</td>
-                            <td className={`${colClass} text-slate-400`}>-</td>
+                            <td className={`${colClass} text-slate-500`}>{box>0?`฿${fmt(box)}`:'-'}</td>
+                            <td className={`${colClass} text-slate-500`}>{bubble>0?`฿${fmt(bubble)}`:'-'}</td>
                             <td className={`${colClass} font-bold ${oProfit>=0?'text-teal-600':'text-red-500'}`}>
                               {oProfit<0?'-':''}฿{fmt(Math.abs(oProfit))}
                             </td>
@@ -286,18 +286,15 @@ export default function FinanceDaily() {
                         );
                       })}
 
-                      {/* แถวค่าโฆษณา/อื่นๆ ถ้ามี */}
+                      {/* ค่าโฆษณา/อื่นๆ */}
                       {(day.cost_ad > 0 || day.cost_other > 0) && (
                         <tr className="border-t border-slate-100 bg-orange-50 text-[11px]">
                           <td className="px-4 py-2 text-orange-500 font-medium" colSpan={3}>💸 ค่าใช้จ่ายวัน</td>
-                          <td className={colClass}/>
-                          <td className={colClass}/>
-                          <td className={colClass}/>
-                          <td className={colClass}/>
-                          <td className={colClass}/>
+                          <td className={colClass}/><td className={colClass}/><td className={colClass}/>
+                          <td className={colClass}/><td className={colClass}/>
                           <td className={`${colClass} text-orange-500 font-medium`}>{day.cost_ad>0?`฿${fmt(day.cost_ad)}`:'-'}</td>
-                          <td className={`${colClass} text-orange-500 font-medium`}>{day.cost_other>0?`฿${fmt(day.cost_other)}`:'-'}</td>
-                          <td className={colClass}/>
+                          <td className={colClass}/><td className={colClass}/>
+                          <td className={`${colClass} text-orange-400 text-[10px]`}>{day.cost_other>0?`อื่นๆ ฿${fmt(day.cost_other)}`:''}</td>
                         </tr>
                       )}
 
@@ -310,7 +307,8 @@ export default function FinanceDaily() {
                         <td className={`${colClass} text-slate-600`}>฿{fmt(day.com)}</td>
                         <td className={`${colClass} text-slate-600`}>฿{fmt(day.ship)}</td>
                         <td className={`${colClass} text-orange-500`}>{day.cost_ad>0?`฿${fmt(day.cost_ad)}`:'-'}</td>
-                        <td className={`${colClass} text-orange-500`}>{day.cost_other>0?`฿${fmt(day.cost_other)}`:'-'}</td>
+                        <td className={`${colClass} text-slate-600`}>{day.cost_box>0?`฿${fmt(day.cost_box)}`:'-'}</td>
+                        <td className={`${colClass} text-slate-600`}>{day.cost_bubble>0?`฿${fmt(day.cost_bubble)}`:'-'}</td>
                         <td className={`${colClass} ${day.profit>=0?'text-teal-600':'text-red-500'}`}>
                           {day.profit<0?'-':''}฿{fmt(Math.abs(day.profit))}
                         </td>
