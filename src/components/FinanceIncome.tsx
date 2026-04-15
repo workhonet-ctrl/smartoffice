@@ -353,6 +353,9 @@ export default function FinanceIncome({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [saving, setSaving]     = useState(false);
   const [msg, setMsg]           = useState('');
+  const [search, setSearch]     = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterMethod, setFilterMethod] = useState('');
 
   const loadOrders = async () => {
     setLoading(true); setSelected(new Set());
@@ -422,6 +425,19 @@ export default function FinanceIncome({
     setSaving(false);
   };
 
+  const filtered = orders.filter(o => {
+    const q = search.toLowerCase();
+    if (q && !(
+      (o.customers?.name || '').toLowerCase().includes(q) ||
+      (o.customers?.facebook_name || '').toLowerCase().includes(q) ||
+      (o.raw_prod || '').toLowerCase().includes(q) ||
+      (o.order_no || '').toLowerCase().includes(q)
+    )) return false;
+    if (filterStatus && o.payment_status !== filterStatus) return false;
+    if (filterMethod && o.payment_method !== filterMethod) return false;
+    return true;
+  });
+
   const totWaiting = orders.filter(o => o.payment_status !== 'ชำระแล้ว').reduce((s, o) => s + (o.total_thb || 0), 0);
   const totPaid    = orders.filter(o => o.payment_status === 'ชำระแล้ว').reduce((s, o) => s + (o.total_thb || 0), 0);
   const cntWaiting = orders.filter(o => o.payment_status !== 'ชำระแล้ว').length;
@@ -490,6 +506,33 @@ export default function FinanceIncome({
 
           {/* Toolbar */}
           <div className="shrink-0 flex items-center gap-2 mb-3 flex-wrap">
+            {/* Search */}
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+              <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="ค้นหาลูกค้า / เฟสบุ๊ก / สินค้า..."
+                className="pl-8 pr-3 py-2 border rounded-lg text-xs w-56 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+            </div>
+            {/* Filter สถานะ */}
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+              className="border rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+              <option value="">สถานะ: ทั้งหมด</option>
+              <option value="ชำระแล้ว">✓ รับเงินแล้ว</option>
+              <option value="รอชำระเงิน">รอรับเงิน</option>
+            </select>
+            {/* Filter วิธีชำระ */}
+            <select value={filterMethod} onChange={e => setFilterMethod(e.target.value)}
+              className="border rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+              <option value="">วิธีชำระ: ทั้งหมด</option>
+              <option value="COD">COD</option>
+              <option value="BANK">โอนเงิน</option>
+            </select>
+            {/* ล้าง filter */}
+            {(search || filterStatus || filterMethod) && (
+              <button onClick={() => { setSearch(''); setFilterStatus(''); setFilterMethod(''); }}
+                className="px-2 py-2 bg-slate-100 text-slate-500 rounded-lg text-xs hover:bg-slate-200">✕ ล้าง</button>
+            )}
+            <span className="text-xs text-slate-400">{filtered.length} รายการ</span>
             <button onClick={loadOrders} disabled={loading}
               className="px-3 py-2 bg-white border rounded-lg text-xs hover:bg-slate-50 flex items-center gap-1.5 shadow-sm">
               <RefreshCw size={12} className={loading ? 'animate-spin' : ''}/> รีเฟรช
@@ -523,8 +566,8 @@ export default function FinanceIncome({
               </thead>
               <tbody>
                 {loading && <tr><td colSpan={10} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
-                {!loading && orders.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-slate-400">ไม่มีข้อมูล</td></tr>}
-                {orders.map(o => {
+                {!loading && filtered.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-slate-400">ไม่พบข้อมูล</td></tr>}
+                {filtered.map(o => {
                   const paid = o.payment_status === 'ชำระแล้ว';
                   const isTransfer = tab === 'transfer';
                   return (
