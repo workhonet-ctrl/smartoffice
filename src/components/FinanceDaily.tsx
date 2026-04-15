@@ -1,505 +1,328 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { RefreshCw, ChevronDown, ChevronRight, X } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 
 type DailyOrder = {
   id: string; order_no: string; channel: string | null;
-  total_thb: number; shipping_thb: number | null;
-  raw_prod: string | null; promo_ids: string[] | null;
-  quantities: string | null; quantity: number | null;
+  total_thb: number; raw_prod: string | null;
+  promo_ids: string[] | null; quantities: string | null; quantity: number | null;
   customers: { name: string } | null;
-  // ต้นทุนต่อออเดอร์ (คำนวณแล้ว)
-  _cost_goods?: number; _cost_ship?: number;
-  _cost_box?: number; _cost_bubble?: number;
+  _cost?: number;
   _items?: { name: string; qty: number; cost: number }[];
 };
 
 type DaySummary = {
   date: string;
   orders: DailyOrder[];
-  revenue: number;
-  cost_goods: number;
-  cost_ship: number;
-  cost_box: number;
-  cost_bubble: number;
-  cost_ad: number;
-  cost_other: number;
-  profit: number;
+  revenue: number; cost: number; profit: number;
+  cost_ad: number; cost_other: number;
 };
 
-type AdCost = { id: string; expense_date: string; channel: string | null; amount_thb: number; description: string };
+const fmt  = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtD = (d: string) => {
+  const dt = new Date(d);
+  return dt.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit' });
+};
 
-const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-// แยกจำนวนชิ้นจริงจากชื่อ promo เช่น "1 แถม 1" → 2, "2 แถม 2" → 4
-function extractPieces(promoName: string): number {
-  const t = promoName.match(/(\d+)\s*แถม\s*(\d+)/);
+function extractPieces(name: string) {
+  const t = name.match(/(\d+)\s*แถม\s*(\d+)/);
   if (t) return parseInt(t[1]) + parseInt(t[2]);
-  const u = promoName.match(/\(?\s*(\d+)\s*(?:กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน)/i);
+  const u = name.match(/\(?\s*(\d+)\s*(?:กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน)/i);
   if (u) return parseInt(u[1]);
   return 1;
 }
 
 export default function FinanceDaily() {
+  const today = new Date().toISOString().split('T')[0];
   const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 6);
-    return d.toISOString().split('T')[0];
+    const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().split('T')[0];
   });
-  const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
+  const [dateTo,   setDateTo]   = useState(today);
   const [summaries, setSummaries] = useState<DaySummary[]>([]);
-  const [loading, setLoading]     = useState(false);
-  const [expanded, setExpanded]   = useState<Set<string>>(new Set());
-  const [filterCustomer, setFilterCustomer] = useState('');
-  const [activeTab, setActiveTab] = useState<'daily' | 'cod'>('daily');
-
-  // COD state
-  const [codOrders, setCodOrders]   = useState<any[]>([]);
-  const [codLoading, setCodLoading] = useState(false);
-  const [codSelected, setCodSelected] = useState<Set<string>>(new Set());
-  const [codSaving, setCodSaving]   = useState(false);
-  const [codMsg, setCodMsg]         = useState('');
-
-  const loadCodOrders = async () => {
-    setCodLoading(true);
-    const { data } = await supabase.from('orders')
-      .select('id, order_no, order_date, total_thb, payment_status, payment_method, order_status, customers(name, tel), raw_prod')
-      .eq('payment_method', 'COD')
-      .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์'])
-      .order('order_date', { ascending: false });
-    setCodOrders(data || []);
-    setCodLoading(false);
-  };
-
-  const markCodPaid = async () => {
-    if (!codSelected.size) return;
-    setCodSaving(true);
-    await supabase.from('orders')
-      .update({ payment_status: 'ชำระแล้ว' })
-      .in('id', Array.from(codSelected));
-    setCodMsg(`✓ อัพเดต ${codSelected.size} รายการ`);
-    setCodSelected(new Set());
-    await loadCodOrders();
-    setCodSaving(false);
-    setTimeout(() => setCodMsg(''), 3000);
-  };
-
-  const toggleCod = (id: string) => setCodSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const allCodSel = codOrders.length > 0 && codOrders.every(o => codSelected.has(o.id));
-  const toggleAllCod = () => setCodSelected(allCodSel ? new Set() : new Set(codOrders.map((o: any) => o.id)));
-
-  useEffect(() => { if (activeTab === 'cod') loadCodOrders(); }, [activeTab]);
-
-  const [toast, setToast] = useState<string | null>(null);
-  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
+  const [loading,   setLoading]   = useState(false);
+  const [expanded,  setExpanded]  = useState<Set<string>>(new Set());
 
   useEffect(() => { loadData(); }, [dateFrom, dateTo]);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const { data: orders } = await supabase.from('orders')
-        .select('id, order_no, order_date, channel, total_thb, shipping_thb, raw_prod, promo_ids, quantities, quantity, customers(name)')
-        .gte('order_date', dateFrom).lte('order_date', dateTo)
-        .order('order_date');
+      const [{ data: orders }, { data: adCosts }, { data: otherExp }] = await Promise.all([
+        supabase.from('orders')
+          .select('id, order_no, order_date, channel, total_thb, raw_prod, promo_ids, quantities, quantity, customers(name)')
+          .gte('order_date', dateFrom).lte('order_date', dateTo).order('order_date'),
+        supabase.from('finance_expense')
+          .select('expense_date, amount_thb')
+          .eq('category', 'ค่าโฆษณา')
+          .gte('expense_date', dateFrom).lte('expense_date', dateTo),
+        supabase.from('finance_expense')
+          .select('expense_date, amount_thb')
+          .neq('category', 'ค่าโฆษณา')
+          .gte('expense_date', dateFrom).lte('expense_date', dateTo),
+      ]);
 
-      const { data: adCosts } = await supabase.from('finance_expense')
-        .select('id, expense_date, channel, amount_thb, description')
-        .eq('category', 'ค่าโฆษณา')
-        .gte('expense_date', dateFrom).lte('expense_date', dateTo);
-
-      const { data: otherExp } = await supabase.from('finance_expense')
-        .select('id, expense_date, amount_thb')
-        .neq('category', 'ค่าโฆษณา')
-        .gte('expense_date', dateFrom).lte('expense_date', dateTo);
-
-      // ── Batch load promos ครั้งเดียว ──
-      const allPromoIds = [...new Set(
-        (orders || []).flatMap((o: any) => o.promo_ids || []).filter(Boolean)
-      )];
+      // load promos
+      const allIds = [...new Set((orders||[]).flatMap((o:any) => o.promo_ids||[]).filter(Boolean))];
       const promoMap: Record<string, any> = {};
-      if (allPromoIds.length > 0) {
+      if (allIds.length > 0) {
         const { data: promos } = await supabase.from('products_promo')
-          .select('id, name, ship_thb, box_id, bubble_id, boxes(price_thb), bubbles(price_thb, length_cm), products_master(cost_thb, name)')
-          .in('id', allPromoIds);
-        (promos || []).forEach((p: any) => { promoMap[p.id] = p; });
+          .select('id, name, boxes(price_thb), bubbles(price_thb, length_cm), products_master(cost_thb, name)')
+          .in('id', allIds);
+        (promos||[]).forEach((p:any) => { promoMap[p.id] = p; });
       }
 
-      // สร้าง range วันที่
+      // build date range
       const dates: string[] = [];
-      let cur = new Date(dateFrom);
-      const end = new Date(dateTo);
-      while (cur <= end) {
-        dates.push(cur.toISOString().split('T')[0]);
-        cur.setDate(cur.getDate() + 1);
-      }
+      let cur = new Date(dateFrom), end = new Date(dateTo);
+      while (cur <= end) { dates.push(cur.toISOString().split('T')[0]); cur.setDate(cur.getDate()+1); }
 
-      const result: DaySummary[] = [];
-      for (const date of dates) {
-        const dayOrders = (orders || []).filter((o: any) =>
-          String(o.order_date || '').split('T')[0] === date
-        ) as DailyOrder[];
-
-        let costGoods = 0, costShip = 0, costBox = 0, costBubble = 0;
+      const result: DaySummary[] = dates.map(date => {
+        const dayOrders = (orders||[]).filter((o:any) => String(o.order_date||'').split('T')[0] === date) as DailyOrder[];
+        let totalCost = 0;
         for (const o of dayOrders) {
           if (!o.promo_ids?.length) continue;
-          const qtys = String(o.quantities || o.quantity || '1').split('|');
-          let oGoods = 0, oShip = 0, oBox = 0, oBub = 0;
-          const items: { name: string; qty: number; cost: number }[] = [];
+          const qtys = String(o.quantities||o.quantity||'1').split('|');
+          let oCost = 0;
+          const items: {name:string;qty:number;cost:number}[] = [];
           for (let i = 0; i < o.promo_ids.length; i++) {
-            const promo = promoMap[o.promo_ids[i]];
-            if (!promo) continue;
-            const qty    = Number(qtys[i]?.trim()) || 1;   // จำนวน promo packs
-            const pieces = extractPieces(promo.name) * qty; // ชิ้นจริง
+            const promo = promoMap[o.promo_ids[i]]; if (!promo) continue;
+            const qty = Number(qtys[i]?.trim())||1;
+            const pieces = extractPieces(promo.name) * qty;
             const master = promo.products_master;
-            const box    = promo.boxes;
-            const bub    = promo.bubbles;
-            const goodsCost = master?.cost_thb ? Number(master.cost_thb) * pieces : 0;
-            const shipCost  = promo.ship_thb ? Number(promo.ship_thb) * qty : 0;
-            if (goodsCost) oGoods += goodsCost;
-            if (shipCost)  oShip  += shipCost;
-            if (i === 0 && box?.price_thb) oBox += Number(box.price_thb);
-            if (i === 0 && bub?.price_thb && bub?.length_cm > 0) oBub += Number(bub.price_thb);
-            const promoName  = master?.name || (o.raw_prod||'').split('|')[i]?.trim() || '-';
-            const unitCost   = master?.cost_thb ? Number(master.cost_thb) : 0;
-            items.push({ name: promoName, qty: pieces, cost: unitCost * pieces });
+            const box = promo.boxes; const bub = promo.bubbles;
+            const goodsCost = master?.cost_thb ? Number(master.cost_thb)*pieces : 0;
+            const boxCost   = i===0 && box?.price_thb ? Number(box.price_thb) : 0;
+            const bubCost   = i===0 && bub?.price_thb && bub?.length_cm>0 ? Number(bub.price_thb) : 0;
+            oCost += goodsCost + boxCost + bubCost;
+            items.push({ name: master?.name||'-', qty: pieces, cost: goodsCost });
           }
-          o._cost_goods  = oGoods;
-          o._cost_ship   = oShip;
-          o._cost_box    = oBox;
-          o._cost_bubble = oBub;
-          o._items       = items;
-          costGoods  += oGoods;
-          costShip   += oShip;
-          costBox    += oBox;
-          costBubble += oBub;
+          o._cost = oCost; o._items = items;
+          totalCost += oCost;
         }
+        const revenue    = dayOrders.reduce((s,o) => s+Number(o.total_thb), 0);
+        const cost_ad    = (adCosts||[]).filter((a:any) => String(a.expense_date).split('T')[0]===date).reduce((s:number,a:any)=>s+Number(a.amount_thb),0);
+        const cost_other = (otherExp||[]).filter((e:any) => String(e.expense_date).split('T')[0]===date).reduce((s:number,e:any)=>s+Number(e.amount_thb),0);
+        const cost = totalCost + cost_ad + cost_other;
+        return { date, orders: dayOrders, revenue, cost, profit: revenue-cost, cost_ad, cost_other };
+      }).filter(d => d.orders.length > 0 || d.cost_ad > 0 || d.cost_other > 0);
 
-        const revenue   = dayOrders.reduce((s, o) => s + Number(o.total_thb), 0);
-        const costAd    = (adCosts || []).filter((a: any) => String(a.expense_date).split('T')[0] === date)
-          .reduce((s: number, a: any) => s + Number(a.amount_thb), 0);
-        const costOther = (otherExp || []).filter((e: any) => String(e.expense_date).split('T')[0] === date)
-          .reduce((s: number, e: any) => s + Number(e.amount_thb), 0);
-
-        result.push({
-          date, orders: dayOrders, revenue,
-          cost_goods: costGoods, cost_ship: costShip,
-          cost_box: costBox, cost_bubble: costBubble,
-          cost_ad: costAd, cost_other: costOther,
-          profit: revenue - costGoods - costShip - costBox - costBubble - costAd - costOther,
-        });
-      }
       setSummaries(result);
     } finally { setLoading(false); }
   };
 
-  const toggle = (date: string) => setExpanded(p => { const n = new Set(p); n.has(date)?n.delete(date):n.add(date); return n; });
+  const totRevenue = summaries.reduce((s,d) => s+d.revenue, 0);
+  const totCost    = summaries.reduce((s,d) => s+d.cost, 0);
+  const totProfit  = summaries.reduce((s,d) => s+d.profit, 0);
+  const totOrders  = summaries.reduce((s,d) => s+d.orders.length, 0);
 
-  // Step 3: กรองตามลูกค้า
-  const filteredSummaries = filterCustomer.trim()
-    ? summaries.map(day => ({
-        ...day,
-        orders: day.orders.filter(o =>
-          (o.customers?.name || '').toLowerCase().includes(filterCustomer.toLowerCase())
-        ),
-      })).map(day => ({
-        ...day,
-        revenue:    day.orders.reduce((s, o) => s + Number(o.total_thb), 0),
-        cost_goods: day.orders.reduce((s, o) => s + (o._cost_goods || 0), 0),
-        cost_ship:  day.orders.reduce((s, o) => s + (o._cost_ship  || 0), 0),
-        cost_box:   day.orders.reduce((s, o) => s + (o._cost_box   || 0), 0),
-        cost_bubble:day.orders.reduce((s, o) => s + (o._cost_bubble|| 0), 0),
-        profit: day.orders.reduce((s, o) => s + Number(o.total_thb), 0)
-               - day.orders.reduce((s, o) => s + (o._cost_goods||0) + (o._cost_ship||0) + (o._cost_box||0) + (o._cost_bubble||0), 0)
-               - day.cost_ad - day.cost_other,
-      })).filter(day => day.orders.length > 0)
-    : summaries;
+  const toggleExpand = (date: string) =>
+    setExpanded(s => { const n = new Set(s); n.has(date) ? n.delete(date) : n.add(date); return n; });
 
-  const totRevenue = filteredSummaries.reduce((s,d) => s+d.revenue, 0);
-  const totProfit  = filteredSummaries.reduce((s,d) => s+d.profit, 0);
-  const totOrders  = filteredSummaries.reduce((s,d) => s+d.orders.length, 0);
+  // shortcut buttons
+  const setRange = (days: number) => {
+    const d = new Date(); d.setDate(d.getDate() - (days-1));
+    setDateFrom(d.toISOString().split('T')[0]); setDateTo(today);
+  };
+  const setMonth = (offset: number) => {
+    const d = new Date(); d.setMonth(d.getMonth()+offset);
+    const y = d.getFullYear(), m = d.getMonth();
+    setDateFrom(`${y}-${String(m+1).padStart(2,'0')}-01`);
+    setDateTo(`${y}-${String(m+1).padStart(2,'0')}-${new Date(y,m+1,0).getDate()}`);
+  };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Tab switcher */}
-      <div className="shrink-0 flex gap-1 bg-slate-100 p-1 rounded-xl w-fit mb-4">
-        <button onClick={() => setActiveTab('daily')}
-          className={`px-5 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'daily' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
-          📊 รายรับรายวัน
-        </button>
-        <button onClick={() => setActiveTab('cod')}
-          className={`px-5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 ${activeTab === 'cod' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
-          💵 ยอด COD
-          {codOrders.filter(o => o.payment_status !== 'ชำระแล้ว').length > 0 && (
-            <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
-              {codOrders.filter(o => o.payment_status !== 'ชำระแล้ว').length}
-            </span>
-          )}
-        </button>
+    <div className="flex flex-col h-screen p-6 pb-2 gap-4">
+
+      {/* ── Header ── */}
+      <div className="shrink-0">
+        <h2 className="text-2xl font-bold text-slate-800 mb-3">📊 บัญชีรายวัน</h2>
+
+        {/* Date controls */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
+          <span className="text-slate-400">–</span>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
+          <div className="flex gap-1 ml-1">
+            {[
+              { label: 'วันนี้', action: () => { setDateFrom(today); setDateTo(today); } },
+              { label: '7 วัน',  action: () => setRange(7) },
+              { label: '30 วัน', action: () => setRange(30) },
+              { label: 'เดือนนี้',action: () => setMonth(0) },
+              { label: 'เดือนที่แล้ว', action: () => setMonth(-1) },
+            ].map(b => (
+              <button key={b.label} onClick={b.action}
+                className="px-3 py-2 bg-slate-100 text-slate-600 rounded-lg text-xs hover:bg-slate-200 whitespace-nowrap">
+                {b.label}
+              </button>
+            ))}
+          </div>
+          <button onClick={loadData} disabled={loading}
+            className="px-3 py-2 bg-white border rounded-lg text-xs flex items-center gap-1.5 hover:bg-slate-50">
+            <RefreshCw size={12} className={loading?'animate-spin':''}/> โหลด
+          </button>
+        </div>
       </div>
 
-      {/* ── COD Tab ── */}
-      {activeTab === 'cod' && (
-        <div className="flex flex-col flex-1 min-h-0">
-          {/* Summary + actions */}
-          <div className="shrink-0 flex gap-3 mb-3 flex-wrap items-center">
-            <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3">
-              <div className="text-xs text-yellow-700 font-semibold mb-0.5">ยอด COD รอรับ</div>
-              <div className="text-xl font-bold text-yellow-800">
-                ฿{fmt(codOrders.filter(o => o.payment_status !== 'ชำระแล้ว').reduce((s: number, o: any) => s + (o.total_thb || 0), 0))}
-              </div>
-              <div className="text-xs text-yellow-600">{codOrders.filter(o => o.payment_status !== 'ชำระแล้ว').length} รายการ</div>
+      {/* ── KPI Summary ── */}
+      {summaries.length > 0 && (
+        <div className="shrink-0 grid grid-cols-4 gap-3">
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+            <div className="text-xs text-emerald-600 font-semibold mb-1">รายรับรวม</div>
+            <div className="text-2xl font-bold text-emerald-700">฿{fmt(totRevenue)}</div>
+            <div className="text-xs text-emerald-500 mt-0.5">{totOrders} ออเดอร์</div>
+          </div>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <div className="text-xs text-slate-500 font-semibold mb-1">ต้นทุนรวม</div>
+            <div className="text-2xl font-bold text-slate-700">฿{fmt(totCost)}</div>
+          </div>
+          <div className={`rounded-xl p-4 border ${totProfit>=0?'bg-teal-50 border-teal-200':'bg-red-50 border-red-200'}`}>
+            <div className={`text-xs font-semibold mb-1 ${totProfit>=0?'text-teal-600':'text-red-500'}`}>
+              {totProfit>=0?'กำไรสุทธิ':'ขาดทุน'}
             </div>
-            <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3">
-              <div className="text-xs text-green-700 font-semibold mb-0.5">รับเงินแล้ว</div>
-              <div className="text-xl font-bold text-green-800">
-                ฿{fmt(codOrders.filter(o => o.payment_status === 'ชำระแล้ว').reduce((s: number, o: any) => s + (o.total_thb || 0), 0))}
-              </div>
-              <div className="text-xs text-green-600">{codOrders.filter(o => o.payment_status === 'ชำระแล้ว').length} รายการ</div>
+            <div className={`text-2xl font-bold ${totProfit>=0?'text-teal-700':'text-red-600'}`}>
+              {totProfit<0?'-':''}฿{fmt(Math.abs(totProfit))}
             </div>
-            <div className="ml-auto flex items-center gap-2">
-              {codMsg && <span className="text-xs text-green-600 font-medium">{codMsg}</span>}
-              <button onClick={loadCodOrders} disabled={codLoading}
-                className="px-3 py-2 bg-slate-200 rounded-lg text-xs hover:bg-slate-300 flex items-center gap-1">
-                <RefreshCw size={12} className={codLoading ? 'animate-spin' : ''}/> รีเฟรช
+            <div className={`text-xs mt-0.5 ${totProfit>=0?'text-teal-500':'text-red-400'}`}>
+              {totRevenue>0?((totProfit/totRevenue)*100).toFixed(1):0}% margin
+            </div>
+          </div>
+          <div className="bg-white border rounded-xl p-4">
+            <div className="text-xs text-slate-500 font-semibold mb-1">เฉลี่ย / วัน</div>
+            <div className="text-2xl font-bold text-slate-700">
+              ฿{fmt(summaries.length > 0 ? totRevenue/summaries.length : 0)}
+            </div>
+            <div className="text-xs text-slate-400 mt-0.5">{summaries.length} วัน</div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Timeline ── */}
+      <div className="flex-1 overflow-auto min-h-0 space-y-3">
+        {loading && (
+          <div className="flex items-center justify-center h-40 text-slate-400">
+            <RefreshCw size={18} className="animate-spin mr-2"/> กำลังโหลด...
+          </div>
+        )}
+        {!loading && summaries.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-40 text-slate-300 gap-2">
+            <span className="text-4xl">📭</span>
+            <p className="text-sm">ไม่มีข้อมูลในช่วงวันที่นี้</p>
+          </div>
+        )}
+
+        {summaries.map(day => {
+          const isOpen = expanded.has(day.date);
+          const margin = day.revenue > 0 ? (day.profit/day.revenue*100) : 0;
+          const profitColor = day.profit >= 0 ? 'text-teal-600' : 'text-red-500';
+          return (
+            <div key={day.date} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+
+              {/* Day header — คลิกขยาย */}
+              <button className="w-full px-5 py-4 flex items-center gap-4 hover:bg-slate-50 transition text-left"
+                onClick={() => toggleExpand(day.date)}>
+
+                {/* วันที่ */}
+                <div className="shrink-0 w-28">
+                  <div className="font-bold text-slate-800 text-sm">{fmtD(day.date)}</div>
+                  <div className="text-xs text-slate-400">{day.orders.length} ออเดอร์</div>
+                </div>
+
+                {/* เมตริก */}
+                <div className="flex-1 grid grid-cols-3 gap-4">
+                  <div>
+                    <div className="text-[10px] text-slate-400 mb-0.5">รายรับ</div>
+                    <div className="font-bold text-emerald-600 text-sm">฿{fmt(day.revenue)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-400 mb-0.5">ต้นทุน</div>
+                    <div className="font-medium text-slate-600 text-sm">฿{fmt(day.cost)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-400 mb-0.5">กำไร</div>
+                    <div className={`font-bold text-sm ${profitColor}`}>
+                      {day.profit < 0 ? '-' : ''}฿{fmt(Math.abs(day.profit))}
+                      <span className="text-[10px] font-normal ml-1 opacity-70">({margin.toFixed(0)}%)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Profit bar */}
+                <div className="shrink-0 w-24 hidden sm:block">
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${day.profit>=0?'bg-teal-400':'bg-red-400'}`}
+                      style={{width:`${Math.min(Math.abs(margin),100)}%`}}/>
+                  </div>
+                </div>
+
+                {/* chevron */}
+                <div className="shrink-0 text-slate-400">
+                  {isOpen ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}
+                </div>
               </button>
-              {codSelected.size > 0 && (
-                <button onClick={markCodPaid} disabled={codSaving}
-                  className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 disabled:opacity-50">
-                  ✓ รับเงินแล้ว ({codSelected.size})
-                </button>
+
+              {/* Expanded: order list */}
+              {isOpen && (
+                <div className="border-t border-slate-100">
+                  <table className="text-xs w-full">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-400 text-[10px]">
+                        <th className="px-5 py-2 text-left font-semibold">เลขออเดอร์</th>
+                        <th className="px-3 py-2 text-left font-semibold">ลูกค้า</th>
+                        <th className="px-3 py-2 text-left font-semibold">สินค้า</th>
+                        <th className="px-3 py-2 text-right font-semibold">รายรับ</th>
+                        <th className="px-3 py-2 text-right font-semibold">ต้นทุน</th>
+                        <th className="px-5 py-2 text-right font-semibold">กำไร</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {day.orders.map(o => {
+                        const oProfit = Number(o.total_thb) - (o._cost||0);
+                        return (
+                          <tr key={o.id} className="border-t border-slate-50 hover:bg-slate-50">
+                            <td className="px-5 py-2.5 font-mono text-blue-600 whitespace-nowrap">{o.order_no}</td>
+                            <td className="px-3 py-2.5 whitespace-nowrap text-slate-700">{o.customers?.name||'-'}</td>
+                            <td className="px-3 py-2.5 text-slate-500 max-w-[200px] truncate">{o.raw_prod||'-'}</td>
+                            <td className="px-3 py-2.5 text-right text-emerald-600 font-medium">฿{fmt(Number(o.total_thb))}</td>
+                            <td className="px-3 py-2.5 text-right text-slate-500">฿{fmt(o._cost||0)}</td>
+                            <td className={`px-5 py-2.5 text-right font-bold ${oProfit>=0?'text-teal-600':'text-red-500'}`}>
+                              {oProfit<0?'-':''}฿{fmt(Math.abs(oProfit))}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {/* ค่าใช้จ่ายวันนั้น */}
+                      {(day.cost_ad > 0 || day.cost_other > 0) && (
+                        <tr className="border-t border-slate-100 bg-orange-50">
+                          <td className="px-5 py-2 text-orange-500 font-medium" colSpan={2}>💸 ค่าใช้จ่าย</td>
+                          <td className="px-3 py-2 text-orange-400 text-[10px]">
+                            {day.cost_ad>0 && `โฆษณา ฿${fmt(day.cost_ad)}`}
+                            {day.cost_ad>0 && day.cost_other>0 && ' · '}
+                            {day.cost_other>0 && `อื่นๆ ฿${fmt(day.cost_other)}`}
+                          </td>
+                          <td className="px-3 py-2"/>
+                          <td className="px-3 py-2 text-right text-orange-500 font-medium">-฿{fmt(day.cost_ad+day.cost_other)}</td>
+                          <td className="px-5 py-2"/>
+                        </tr>
+                      )}
+                      {/* สรุปวัน */}
+                      <tr className="border-t border-slate-200 bg-slate-50 font-semibold text-xs">
+                        <td className="px-5 py-2.5 text-slate-500" colSpan={3}>รวมวันที่ {fmtD(day.date)}</td>
+                        <td className="px-3 py-2.5 text-right text-emerald-600">฿{fmt(day.revenue)}</td>
+                        <td className="px-3 py-2.5 text-right text-slate-500">฿{fmt(day.cost)}</td>
+                        <td className={`px-5 py-2.5 text-right ${day.profit>=0?'text-teal-600':'text-red-500'}`}>
+                          {day.profit<0?'-':''}฿{fmt(Math.abs(day.profit))}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
-          </div>
-
-          {/* Table */}
-          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-            <table className="text-sm w-full" style={{minWidth:'750px'}}>
-              <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
-                <tr>
-                  <th className="p-3 w-8">
-                    <input type="checkbox" checked={allCodSel} onChange={toggleAllCod} className="rounded"/>
-                  </th>
-                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
-                  <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
-                  <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
-                  <th className="p-3 text-left whitespace-nowrap">เบอร์</th>
-                  <th className="p-3 text-left">สินค้า</th>
-                  <th className="p-3 text-right whitespace-nowrap">ยอด (บาท)</th>
-                  <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {codLoading && <tr><td colSpan={8} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
-                {!codLoading && codOrders.length === 0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">ไม่มีออเดอร์ COD</td></tr>}
-                {codOrders.map((o: any) => {
-                  const paid = o.payment_status === 'ชำระแล้ว';
-                  return (
-                    <tr key={o.id} onClick={() => !paid && toggleCod(o.id)}
-                      className={`border-b ${paid ? 'bg-green-50 opacity-60' : codSelected.has(o.id) ? 'bg-yellow-50' : 'hover:bg-slate-50 cursor-pointer'}`}>
-                      <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
-                        {!paid && <input type="checkbox" checked={codSelected.has(o.id)} onChange={() => toggleCod(o.id)} className="rounded"/>}
-                      </td>
-                      <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
-                        {o.order_date ? o.order_date.split('-').reverse().join('/') : '-'}
-                      </td>
-                      <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{o.order_no}</td>
-                      <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
-                      <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.customers?.tel || '-'}</td>
-                      <td className="p-3 text-xs text-slate-500 max-w-[200px] truncate">{o.raw_prod || '-'}</td>
-                      <td className="p-3 text-right font-bold text-slate-800">฿{fmt(o.total_thb || 0)}</td>
-                      <td className="p-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${paid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                          {paid ? '✓ รับแล้ว' : 'รอรับเงิน'}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ── Daily Tab ── */}
-      {activeTab === 'daily' && (<>
-      <div className="shrink-0 flex gap-2 mb-4 flex-wrap items-center">
-        <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
-          className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
-        <span className="text-slate-400">–</span>
-        <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
-          className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
-        {/* Step 3: filter ลูกค้า */}
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">👤</span>
-          <input type="text" value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)}
-            placeholder="กรองตามลูกค้า (Step 3)..."
-            className="pl-8 pr-4 py-2 border rounded-lg text-sm w-52 focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
-        </div>
-        {filterCustomer && (
-          <button onClick={() => setFilterCustomer('')}
-            className="px-2 py-2 bg-slate-100 text-slate-500 rounded-lg text-xs hover:bg-slate-200">✕ ล้าง</button>
-        )}
-        <button onClick={loadData} disabled={loading}
-          className="px-3 py-2 bg-slate-200 rounded-lg hover:bg-slate-300 flex items-center gap-2 text-sm">
-          <RefreshCw size={13} className={loading?'animate-spin':''}/> โหลด
-        </button>
+          );
+        })}
       </div>
-
-      {/* KPI */}
-      <div className="shrink-0 grid grid-cols-3 gap-3 mb-4">
-        <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
-          <div className="text-xs text-emerald-600 font-semibold mb-1">รายรับรวม</div>
-          <div className="text-xl font-bold text-emerald-700">฿{fmt(totRevenue)}</div>
-          <div className="text-xs text-emerald-500">{totOrders} ออเดอร์</div>
-        </div>
-        <div className={`rounded-xl p-4 border ${totProfit>=0?'bg-teal-50 border-teal-200':'bg-red-50 border-red-200'}`}>
-          <div className={`text-xs font-semibold mb-1 ${totProfit>=0?'text-teal-600':'text-red-600'}`}>
-            {totProfit>=0?'กำไรสุทธิ':'ขาดทุน'}
-          </div>
-          <div className={`text-xl font-bold ${totProfit>=0?'text-teal-700':'text-red-700'}`}>
-            {totProfit<0?'-':''}฿{fmt(Math.abs(totProfit))}
-          </div>
-          <div className={`text-xs ${totProfit>=0?'text-teal-500':'text-red-400'}`}>
-            {totRevenue>0?((totProfit/totRevenue)*100).toFixed(1):0}% margin
-          </div>
-        </div>
-        <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-          <div className="text-xs text-slate-500 font-semibold mb-1">ต้นทุนรวม</div>
-          <div className="text-xl font-bold text-slate-700">฿{fmt(totRevenue - totProfit)}</div>
-          <div className="text-xs text-slate-400">{summaries.length} วัน</div>
-        </div>
-      </div>
-
-      {/* ตารางรายวัน */}
-      <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-        <table className="text-sm w-full" style={{minWidth:'900px'}}>
-          <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
-            <tr>
-              <th className="p-3 w-8"></th>
-              <th className="p-3 text-left whitespace-nowrap">วันที่</th>
-              <th className="p-3 text-center whitespace-nowrap">ออเดอร์</th>
-              <th className="p-3 text-right whitespace-nowrap">รายรับ</th>
-              <th className="p-3 text-right whitespace-nowrap">ต้นทุนสินค้า</th>
-              <th className="p-3 text-right whitespace-nowrap">ขนส่ง</th>
-              <th className="p-3 text-right whitespace-nowrap">กล่อง+บั้บ</th>
-              <th className="p-3 text-right whitespace-nowrap">โฆษณา</th>
-              <th className="p-3 text-right whitespace-nowrap">อื่นๆ</th>
-              <th className="p-3 text-right whitespace-nowrap">กำไร</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && <tr><td colSpan={10} className="p-8 text-center text-slate-400"><RefreshCw size={16} className="animate-spin inline mr-2"/>คำนวณ...</td></tr>}
-            {!loading && filteredSummaries.map(day => (
-              <>
-                <tr key={day.date}
-                  onClick={() => day.orders.length > 0 && toggle(day.date)}
-                  className={`border-b cursor-pointer hover:bg-slate-50 ${day.orders.length===0?'opacity-40':''}`}>
-                  <td className="p-3 text-center text-slate-400">
-                    {day.orders.length>0 ? (expanded.has(day.date)?<ChevronDown size={14}/>:<ChevronRight size={14}/>) : null}
-                  </td>
-                  <td className="p-3 text-sm font-medium whitespace-nowrap">
-                    {new Date(day.date).toLocaleDateString('th-TH',{weekday:'short',day:'2-digit',month:'2-digit'})}
-                  </td>
-                  <td className="p-3 text-center">
-                    <span className="px-2 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-xs font-bold">{day.orders.length}</span>
-                  </td>
-                  <td className="p-3 text-right font-bold text-emerald-600">฿{fmt(day.revenue)}</td>
-                  <td className="p-3 text-right text-slate-600">฿{fmt(day.cost_goods)}</td>
-                  <td className="p-3 text-right text-slate-600">฿{fmt(day.cost_ship)}</td>
-                  <td className="p-3 text-right text-slate-600">฿{fmt(day.cost_box+day.cost_bubble)}</td>
-                  <td className="p-3 text-right text-orange-600">฿{fmt(day.cost_ad)}</td>
-                  <td className="p-3 text-right text-slate-600">฿{fmt(day.cost_other)}</td>
-                  <td className={`p-3 text-right font-bold ${day.profit>=0?'text-teal-600':'text-red-600'}`}>
-                    {day.profit<0?'-':''}฿{fmt(Math.abs(day.profit))}
-                  </td>
-                </tr>
-                {expanded.has(day.date) && (
-                  <>
-                    {/* sub-header */}
-                    <tr className="bg-slate-700 text-slate-300 text-[10px]">
-                      <td className="py-1.5 pl-8 pr-2 whitespace-nowrap">เลขออเดอร์</td>
-                      <td className="py-1.5 px-2 whitespace-nowrap">ลูกค้า</td>
-                      <td className="py-1.5 px-2 whitespace-nowrap">ช่องทาง</td>
-                      <td className="py-1.5 px-2 text-right whitespace-nowrap">รายรับ</td>
-                      <td className="py-1.5 px-2">รายการสินค้า · จำนวน · ต้นทุน</td>
-                      <td className="py-1.5 px-2 text-right whitespace-nowrap">ต้นทุนรวม</td>
-                      <td className="py-1.5 px-2 text-right whitespace-nowrap">กล่อง+บั้บ</td>
-                      <td className="py-1.5 px-2 text-right whitespace-nowrap">โฆษณา</td>
-                      <td className="py-1.5 px-2 text-right whitespace-nowrap">อื่นๆ</td>
-                      <td className="py-1.5 px-2 text-right whitespace-nowrap">กำไร</td>
-                    </tr>
-                    {day.orders.map(o => {
-                      const itemsCost = (o._items||[]).reduce((s,it)=>s+it.cost,0);
-                      const boxBub    = (o._cost_box||0)+(o._cost_bubble||0);
-                      const oProfit   = Number(o.total_thb) - itemsCost - boxBub;
-                      return (
-                        <tr key={o.id} className="border-b bg-slate-50 hover:bg-cyan-50 text-xs">
-                          <td className="py-2 pl-8 pr-2 font-mono text-cyan-700 whitespace-nowrap">{o.order_no}</td>
-                          <td className="py-2 px-2 font-medium text-slate-700 whitespace-nowrap max-w-[120px] truncate">{o.customers?.name || '-'}</td>
-                          <td className="py-2 px-2">
-                            {o.channel
-                              ? <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-[10px] whitespace-nowrap">{o.channel}</span>
-                              : <span className="text-slate-300">-</span>}
-                          </td>
-                          <td className="py-2 px-2 text-right font-bold text-emerald-600 whitespace-nowrap">฿{fmt(Number(o.total_thb))}</td>
-                          <td className="py-2 px-2 text-slate-600">
-                            <div className="flex flex-col gap-0.5">
-                              {(o._items && o._items.length > 0) ? o._items.map((item, i) => (
-                                <div key={i} className="flex items-center gap-1 whitespace-nowrap">
-                                  <span className="text-slate-700">{item.name}</span>
-                                  <span className="text-slate-400">×{item.qty}</span>
-                                  {item.cost > 0 && <span className="text-red-500 font-medium">฿{fmt(item.cost)}</span>}
-                                </div>
-                              )) : (
-                                <span className="text-slate-400 text-[10px]">{(o.raw_prod||'').split('|').map(p=>p.trim()).filter(Boolean).join(', ')}</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-2 px-2 text-right text-slate-500 whitespace-nowrap">฿{fmt((o._items||[]).reduce((s,it)=>s+it.cost,0))}</td>
-                          <td className="py-2 px-2 text-right text-slate-500 whitespace-nowrap">฿{fmt((o._cost_box||0)+(o._cost_bubble||0))}</td>
-                          <td className="py-2 px-2 text-right text-orange-400 whitespace-nowrap">-</td>
-                          <td className="py-2 px-2 text-right text-slate-400 whitespace-nowrap">-</td>
-                          <td className={`py-2 px-2 text-right font-bold whitespace-nowrap ${oProfit>=0?'text-teal-600':'text-red-500'}`}>
-                            {oProfit<0?'-':''}฿{fmt(Math.abs(oProfit))}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </>
-                )}
-              </>
-            ))}
-          </tbody>
-          {!loading && filteredSummaries.length > 0 && (
-            <tfoot className="bg-slate-50 border-t-2 border-slate-300 sticky bottom-0">
-              <tr>
-                <td colSpan={2} className="p-3 font-semibold text-slate-600 text-sm">
-                  รวม {filteredSummaries.length} วัน
-                  {filterCustomer && <span className="ml-2 text-emerald-600">· ลูกค้า: {filterCustomer}</span>}
-                </td>
-                <td className="p-3 text-center font-bold">{totOrders}</td>
-                <td className="p-3 text-right font-bold text-emerald-600">฿{fmt(totRevenue)}</td>
-                <td className="p-3 text-right font-bold">฿{fmt(filteredSummaries.reduce((s,d)=>s+d.cost_goods,0))}</td>
-                <td className="p-3 text-right font-bold">฿{fmt(filteredSummaries.reduce((s,d)=>s+d.cost_ship,0))}</td>
-                <td className="p-3 text-right font-bold">฿{fmt(filteredSummaries.reduce((s,d)=>s+d.cost_box+d.cost_bubble,0))}</td>
-                <td className="p-3 text-right font-bold text-orange-600">฿{fmt(filteredSummaries.reduce((s,d)=>s+d.cost_ad,0))}</td>
-                <td className="p-3 text-right font-bold">฿{fmt(filteredSummaries.reduce((s,d)=>s+d.cost_other,0))}</td>
-                <td className={`p-3 text-right font-bold text-lg ${totProfit>=0?'text-teal-600':'text-red-600'}`}>
-                  {totProfit<0?'-':''}฿{fmt(Math.abs(totProfit))}
-                </td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-[100] px-5 py-4 rounded-xl shadow-2xl bg-emerald-500 text-white text-sm font-medium">
-          {toast}
-        </div>
-      )}
-      </>)}
     </div>
   );
 }
