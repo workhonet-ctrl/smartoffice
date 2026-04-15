@@ -52,6 +52,7 @@ function CodFilePanel({ state, setState }: {
   const [saving,   setSaving]   = useState(false);
   const [saveMsg,  setSaveMsg]  = useState('');
   const [manualDate, setManualDate] = useState(new Date().toISOString().split('T')[0]);
+  const [showMap,    setShowMap]    = useState(false);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
