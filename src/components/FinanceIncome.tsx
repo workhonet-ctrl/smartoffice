@@ -358,7 +358,8 @@ export default function FinanceIncome({
     setLoading(true); setSelected(new Set());
     let q = supabase.from('orders')
       .select('id, order_no, order_date, total_thb, payment_method, payment_status, order_status, customers(name, tel), raw_prod, tracking_no')
-      .order('order_date', { ascending: false });
+      .order('order_date', { ascending: false })
+      .limit(200);
 
     if (tab === 'cod') {
       q = q.eq('payment_method', 'COD')
@@ -367,7 +368,8 @@ export default function FinanceIncome({
       q = q.neq('payment_method', 'COD')
            .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์', 'กำลังแพ็ค', 'แพ็คสินค้า']);
     } else {
-      return;
+      // ทั้งหมด — เฉพาะที่ส่งแล้ว 200 รายการล่าสุด
+      q = q.in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์']);
     }
 
     const { data } = await q;
