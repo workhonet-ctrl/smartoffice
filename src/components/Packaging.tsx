@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { Package, ClipboardList, FileText, AlertCircle, Printer } from 'lucide-react';
 
@@ -34,9 +34,21 @@ export default function Packaging({
   const [override, setOverride] = useState<Override>({});
   const [boxes, setBoxes]       = useState<{ id: string; name: string }[]>([]);
   const [bubbles, setBubbles]   = useState<{ id: string; name: string; length_cm: number }[]>([]);
-  const [responsible, setResponsible] = useState(''); // ช่องเดียวท้ายใบสรุป
+  const [responsible, setResponsible] = useState('');
   const [saving, setSaving]     = useState(false);
   const [packDate]              = useState(new Date().toLocaleDateString('th-TH', { day:'2-digit', month:'2-digit', year:'numeric' }));
+  const incompleteRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+
+  const scrollToFirstIncomplete = () => {
+    const first = multiIncomplete[0];
+    if (!first) return;
+    const el = incompleteRefs.current[first.id];
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-orange-400');
+      setTimeout(() => el.classList.remove('ring-2', 'ring-orange-400'), 2000);
+    }
+  };
 
   useEffect(() => { loadData(); }, []);
 
@@ -292,8 +304,13 @@ export default function Packaging({
 
       {/* hint เมื่อ disabled */}
       {tab === 'prep' && !canGoToSummary && (
-        <div className="shrink-0 mb-3 flex items-center gap-2 text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
-          <AlertCircle size={14}/> กรุณาเลือกกล่องให้ครบก่อน — ยังขาดอีก {multiIncomplete.length} รายการ (แพ็คพิเศษ)
+        <div className="shrink-0 mb-3 flex items-center gap-3 text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+          <AlertCircle size={14} className="shrink-0"/>
+          <span>กรุณาเลือกกล่องให้ครบก่อน — ยังขาดอีก {multiIncomplete.length} รายการ (แพ็คพิเศษ)</span>
+          <button onClick={scrollToFirstIncomplete}
+            className="ml-auto shrink-0 px-3 py-1 bg-orange-500 text-white rounded-lg text-xs font-medium hover:bg-orange-600 whitespace-nowrap">
+            ไปเลย →
+          </button>
         </div>
       )}
 
@@ -320,7 +337,9 @@ export default function Packaging({
                 const totalQty = o.promos.reduce((s, p) => s + p.qty, 0);
                 const missingBox = multi && !override[o.id]?.box_id;
                 return (
-                  <tr key={o.id} className={`border-b align-top hover:bg-cyan-50 ${missingBox ? 'bg-orange-50' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                  <tr key={o.id}
+                    ref={el => { if (missingBox) incompleteRefs.current[o.id] = el; }}
+                    className={`border-b align-top hover:bg-cyan-50 ${missingBox ? 'bg-orange-50' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
                     <td className="p-3 text-center font-bold text-slate-500 whitespace-nowrap">{idx + 1}</td>
                     <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{packDate}{o.order_time && <div className="text-slate-400">{o.order_time}</div>}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
