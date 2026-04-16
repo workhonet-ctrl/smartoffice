@@ -1029,11 +1029,11 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                         </div>
                       ) : <span className="text-slate-300">-</span>}
                     </td>
-                    {/* วันที่นำเข้า */}
+                    {/* วันที่จัดส่ง */}
                     <td className="p-3 whitespace-nowrap">
-                      {(o as any).imported_at
-                        ? <div className="text-xs text-indigo-600 font-medium">
-                            {String((o as any).imported_at).split('-').reverse().join('-')}
+                      {(o as any).ship_date
+                        ? <div className="text-xs text-blue-600 font-medium">
+                            {String((o as any).ship_date).split('-').reverse().join('-')}
                           </div>
                         : <span className="text-slate-300 text-xs">-</span>}
                     </td>
