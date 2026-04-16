@@ -8,6 +8,17 @@ import * as XLSX from 'xlsx';
 const SUPABASE_IN_LIMIT = 500;                    // safe batch size for .in() queries
 const STORAGE_KEY       = 'flash_import_state';   // sessionStorage key
 
+/** อ่าน sessionStorage แบบ safe — คืน null ถ้า parse ไม่ได้ */
+function readStorage(key: string) {
+  try {
+    const s = sessionStorage.getItem(key);
+    return s ? JSON.parse(s) : null;
+  } catch {
+    sessionStorage.removeItem(key);
+    return null;
+  }
+}
+
 // ── Types ─────────────────────────────────────────────────────
 
 type TrackingRow = {
@@ -150,42 +161,35 @@ function mergeResults(
 export default function FlashShippingImport() {
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>({});
-  const [topups, setTopups]           = useState<TopupRow[]>([]);
-  const [fileInfos, setFileInfos]     = useState<FileInfo[]>([]);
-  const [matching, setMatching]       = useState(false);
-  const [matched, setMatched]         = useState(false);
-  const [search, setSearch]           = useState('');
-  const [error, setError]             = useState<string | null>(null);
-
   // ── Session persistence ─────────────────────────────────────
-  // โหลดข้อมูลจาก sessionStorage เมื่อ component mount
-  // (ข้อมูลยังอยู่แม้เปลี่ยนหน้า แต่จะหายเมื่อปิด browser tab)
-  useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(STORAGE_KEY);
-      if (!saved) return;
-      const { trackingMap: tm, topups: tp, fileInfos: fi, matched: m } = JSON.parse(saved);
-      if (tm) setTrackingMap(tm);
-      if (tp) setTopups(tp);
-      if (fi) setFileInfos(fi);
-      if (m  !== undefined) setMatched(m);
-    } catch {
-      // ถ้า parse ไม่ได้ (corrupt data) ล้างทิ้ง
-      sessionStorage.removeItem(STORAGE_KEY);
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // อ่านจาก sessionStorage ตั้งแต่ตอน init state (lazy initializer)
+  // วิธีนี้รันก่อน useEffect ทุกตัว ไม่มี race condition
+  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>(
+    () => readStorage(STORAGE_KEY)?.trackingMap ?? {}
+  );
+  const [topups, setTopups] = useState<TopupRow[]>(
+    () => readStorage(STORAGE_KEY)?.topups ?? []
+  );
+  const [fileInfos, setFileInfos] = useState<FileInfo[]>(
+    () => readStorage(STORAGE_KEY)?.fileInfos ?? []
+  );
+  const [matched, setMatched] = useState<boolean>(
+    () => readStorage(STORAGE_KEY)?.matched ?? false
+  );
+  const [matching, setMatching] = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [isSaved, setIsSaved]   = useState(false);
+  const [search, setSearch]     = useState('');
+  const [error, setError]       = useState<string | null>(null);
 
-  // บันทึกทุกครั้งที่ state เปลี่ยน
+  // บันทึกทุกครั้งที่ state เปลี่ยน (ไม่ต้องมี restore effect แล้ว)
   useEffect(() => {
     try {
       sessionStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({ trackingMap, topups, fileInfos, matched }),
       );
-    } catch {
-      // sessionStorage เต็ม (ข้อมูลมากเกินไป) — ไม่ crash แต่ไม่บันทึก
-    }
+    } catch {}
   }, [trackingMap, topups, fileInfos, matched]);
 
   // ── File handling ───────────────────────────────────────────
@@ -210,6 +214,7 @@ export default function FlashShippingImport() {
         setTopups(prev => [...prev, ...results.flatMap(r => r.topups)]);
         setFileInfos(prev => [...prev, ...results.map(r => r.fileInfo)]);
         setMatched(false);
+        setIsSaved(false);
       }
     };
 
@@ -241,6 +246,94 @@ export default function FlashShippingImport() {
     }
 
     e.target.value = '';
+  };
+
+  // ── Save to Supabase ───────────────────────────────────────
+
+  const handleSave = async () => {
+    const rows = Object.values(trackingMap);
+    if (!rows.length) return;
+    setSaving(true);
+    setError(null);
+
+    try {
+      // upsert tracking rows (on conflict tracking → update)
+      const flashRows = rows.map(r => ({
+        tracking:  r.tracking,
+        ship_date: r.date || null,
+        base_thb:  r.base,
+        extra_thb: r.extra,
+        total_thb: r.total,
+        order_no:  r.order_no  ?? null,
+        customer:  r.customer  ?? null,
+        raw_prod:  r.raw_prod  ?? null,
+        matched:   r.matched,
+      }));
+
+      const { error: e1 } = await supabase
+        .from('shipping_flash')
+        .upsert(flashRows, { onConflict: 'tracking' });
+      if (e1) throw e1;
+
+      // upsert topups (ไม่มี unique key → insert ใหม่ทุกครั้งถ้า amount+date ไม่ซ้ำ)
+      if (topups.length > 0) {
+        const topupRows = topups.map(t => ({
+          topup_date: t.date || null,
+          amount_thb: t.amount,
+        }));
+        const { error: e2 } = await supabase
+          .from('shipping_flash_topup')
+          .insert(topupRows);
+        if (e2) throw e2;
+      }
+
+      setIsSaved(true);
+    } catch (err: any) {
+      setError(`บันทึกไม่สำเร็จ: ${err?.message ?? String(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Load from Supabase ──────────────────────────────────────
+
+  const handleLoad = async () => {
+    setError(null);
+    try {
+      const { data, error: e } = await supabase
+        .from('shipping_flash')
+        .select('*')
+        .order('imported_at', { ascending: false });
+      if (e) throw e;
+
+      const loaded: Record<string, TrackingRow> = {};
+      for (const r of data ?? []) {
+        loaded[r.tracking] = {
+          tracking:  r.tracking,
+          date:      r.ship_date ?? '',
+          base:      Number(r.base_thb),
+          extra:     Number(r.extra_thb),
+          total:     Number(r.total_thb),
+          order_no:  r.order_no  ?? undefined,
+          customer:  r.customer  ?? undefined,
+          raw_prod:  r.raw_prod  ?? undefined,
+          matched:   r.matched   ?? false,
+        };
+      }
+
+      const { data: td } = await supabase
+        .from('shipping_flash_topup')
+        .select('*')
+        .order('topup_date', { ascending: false });
+
+      setTrackingMap(loaded);
+      setTopups((td ?? []).map(t => ({ date: t.topup_date ?? '', amount: Number(t.amount_thb) })));
+      setFileInfos([{ name: '📂 โหลดจาก Supabase', type: 'ค่าพัสดุ', rows: Object.keys(loaded).length }]);
+      setMatched(Object.values(loaded).some(r => r.matched));
+      setIsSaved(true);
+    } catch (err: any) {
+      setError(`โหลดไม่สำเร็จ: ${err?.message ?? String(err)}`);
+    }
   };
 
   // ── Match with Supabase ─────────────────────────────────────
@@ -311,11 +404,12 @@ export default function FlashShippingImport() {
   };
 
   const clearAll = () => {
-    sessionStorage.removeItem(STORAGE_KEY); // ล้าง storage ด้วย
+    sessionStorage.removeItem(STORAGE_KEY);
     setTrackingMap({});
     setTopups([]);
     setFileInfos([]);
     setMatched(false);
+    setIsSaved(false);
     setSearch('');
     setError(null);
   };
@@ -482,6 +576,21 @@ export default function FlashShippingImport() {
               รีเซ็ตจับคู่
             </button>
           )}
+
+          {/* ปุ่มบันทึกลง Supabase */}
+          {rows.length > 0 && (
+            <button
+              onClick={handleSave}
+              disabled={saving || isSaved}
+              className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 ${
+                isSaved
+                  ? 'bg-emerald-100 text-emerald-700 cursor-default'
+                  : 'bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50'
+              }`}
+            >
+              {saving ? '⏳ กำลังบันทึก...' : isSaved ? '✓ บันทึกแล้ว' : '💾 บันทึกลง Supabase'}
+            </button>
+          )}
         </div>
       )}
 
@@ -595,6 +704,13 @@ export default function FlashShippingImport() {
               💳 โอนเงิน Flash Pay
             </span>
           </div>
+          <button
+            onClick={handleLoad}
+            className="mt-2 px-5 py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium
+                       hover:bg-blue-600 flex items-center gap-2"
+          >
+            📂 โหลดข้อมูลที่บันทึกไว้
+          </button>
         </div>
       )}
 
