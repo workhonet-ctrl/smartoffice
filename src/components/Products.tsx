@@ -456,10 +456,21 @@ export default function Products() {
         if (error) throw error;
       }
 
+      // upsert product_mappings ด้วยชื่อ promo
+      // → trigger trg_remap_order_promos จะ auto-update orders.promo_ids
+      const { error: mapErr } = await supabase
+        .from('product_mappings')
+        .upsert(
+          [{ raw_name: payload.name.trim(), promo_id: payload.id }],
+          { onConflict: 'raw_name' }
+        );
+      if (mapErr) console.warn('mapping upsert warning:', mapErr.message);
+
       setShowPromoForm(false);
       setEditingPromo(null);
       setPromoForm(emptyPromoForm);
       await loadData();
+      showToast('✓ บันทึกสินค้าและ sync ออเดอร์แล้ว');
     } catch (error) {
       console.error('Error saving promo:', error);
       alert('เกิดข้อผิดพลาดในการบันทึก Promo');
@@ -493,9 +504,20 @@ export default function Products() {
           color: 'ไม่มี',
           item_type: row.item_type || 'พัสดุ',
         }]);
-        if (error) { console.error('insert error:', error); } else { insertCount++; }
+        if (error) {
+          console.error('insert error:', error);
+        } else {
+          insertCount++;
+          // upsert mapping → trigger remap orders
+          await supabase
+            .from('product_mappings')
+            .upsert(
+              [{ raw_name: row.name.trim(), promo_id: freshId }],
+              { onConflict: 'raw_name' }
+            );
+        }
       }
-      showToast(`✓ บันทึกสำเร็จ ${insertCount} โปร`);
+      showToast(`✓ บันทึกสำเร็จ ${insertCount} โปร และ sync ออเดอร์แล้ว`);
       setShowBulkForm(false);
       setBulkMasterId('');
       setBulkRows([{ ...emptyBulkRow }]);
