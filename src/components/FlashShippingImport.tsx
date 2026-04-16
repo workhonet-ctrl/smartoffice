@@ -1,11 +1,12 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Upload, RefreshCw, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 // ── Constants ─────────────────────────────────────────────────
 
-const SUPABASE_IN_LIMIT = 500; // safe batch size for .in() queries
+const SUPABASE_IN_LIMIT = 500;                    // safe batch size for .in() queries
+const STORAGE_KEY       = 'flash_import_state';   // sessionStorage key
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -157,6 +158,36 @@ export default function FlashShippingImport() {
   const [search, setSearch]           = useState('');
   const [error, setError]             = useState<string | null>(null);
 
+  // ── Session persistence ─────────────────────────────────────
+  // โหลดข้อมูลจาก sessionStorage เมื่อ component mount
+  // (ข้อมูลยังอยู่แม้เปลี่ยนหน้า แต่จะหายเมื่อปิด browser tab)
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(STORAGE_KEY);
+      if (!saved) return;
+      const { trackingMap: tm, topups: tp, fileInfos: fi, matched: m } = JSON.parse(saved);
+      if (tm) setTrackingMap(tm);
+      if (tp) setTopups(tp);
+      if (fi) setFileInfos(fi);
+      if (m  !== undefined) setMatched(m);
+    } catch {
+      // ถ้า parse ไม่ได้ (corrupt data) ล้างทิ้ง
+      sessionStorage.removeItem(STORAGE_KEY);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // บันทึกทุกครั้งที่ state เปลี่ยน
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ trackingMap, topups, fileInfos, matched }),
+      );
+    } catch {
+      // sessionStorage เต็ม (ข้อมูลมากเกินไป) — ไม่ crash แต่ไม่บันทึก
+    }
+  }, [trackingMap, topups, fileInfos, matched]);
+
   // ── File handling ───────────────────────────────────────────
 
   const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -280,6 +311,7 @@ export default function FlashShippingImport() {
   };
 
   const clearAll = () => {
+    sessionStorage.removeItem(STORAGE_KEY); // ล้าง storage ด้วย
     setTrackingMap({});
     setTopups([]);
     setFileInfos([]);
