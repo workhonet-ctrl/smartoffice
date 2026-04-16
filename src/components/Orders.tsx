@@ -384,8 +384,11 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [activeTab, setActiveTab] = useState<'orders' | 'parcel'>('orders');
   const today = new Date().toISOString().split('T')[0];
   // ข้อ 2: เริ่มต้นเห็นทั้งหมด (ไม่ filter วันที่)
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo,   setDateTo]   = useState('');
+  const [dateFrom,    setDateFrom]    = useState('');
+  const [dateTo,      setDateTo]      = useState('');
+  const [importDate,  setImportDate]  = useState(
+    () => new Date().toISOString().split('T')[0]
+  );
   // ข้อ 1: filter เพิ่มเติม
   const [filterRoute,  setFilterRoute]  = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -691,7 +694,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           courier: order.courier || null,
           total_thb: order.total_thb, payment_method: order.payment_method,
           payment_status: order.payment_status, order_status: orderStatus, route,
-          imported_at: new Date().toISOString().split('T')[0], // วันที่นำเข้า
+          imported_at: importDate, // วันที่นำเข้า (user เลือกได้)
         }]);
 
         if (oe) {
@@ -833,10 +836,21 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               </button>
             </div>
             {activeTab === 'orders' && (
-              <label className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-start">
-                <Upload size={17}/> นำเข้า Excel
-                <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden"/>
-              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex flex-col">
+                  <label className="text-[10px] text-slate-400 mb-0.5 font-medium">วันที่นำเข้า</label>
+                  <input
+                    type="date"
+                    value={importDate}
+                    onChange={e => setImportDate(e.target.value)}
+                    className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 text-slate-700"
+                  />
+                </div>
+                <label className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-end">
+                  <Upload size={17}/> นำเข้า Excel
+                  <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden"/>
+                </label>
+              </div>
             )}
           </div>
         </div>
