@@ -14,7 +14,7 @@ type Customer = {
 };
 type Order = {
   id: string; order_no: string; order_date: string; raw_prod: string | null;
-  total_thb: number; order_status: string; tracking_no: string | null;
+  total_thb: number; order_status: string; tracking_no: string | null; ship_date?: string | null;
 };
 
 const TAG_COLORS: Record<string, string> = {
@@ -68,7 +68,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   const loadOrders = async (customerId: string) => {
     setLoadingOrders(true);
     const { data } = await supabase.from('orders')
-      .select('id, order_no, order_date, raw_prod, total_thb, order_status, tracking_no')
+      .select('id, order_no, order_date, raw_prod, total_thb, order_status, tracking_no, ship_date')
       .eq('customer_id', customerId)
       .order('order_date', { ascending: false });
     if (data) setCustOrders(data);
@@ -493,6 +493,11 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                             <div key={o.id} className="flex items-center gap-3 text-xs bg-white rounded-lg px-3 py-2">
                               <span className="font-mono text-cyan-600 w-32 shrink-0">{o.order_no}</span>
                               <span className="text-slate-400 w-20 shrink-0">{o.order_date}</span>
+                              {o.ship_date && (
+                                <span className="text-blue-600 text-xs font-medium w-24 shrink-0">
+                                  🚚 {o.ship_date.split('-').reverse().join('-')}
+                                </span>
+                              )}
                               <span className="text-slate-600 flex-1 truncate">{o.raw_prod || '-'}</span>
                               <span className="font-bold text-emerald-600 shrink-0">฿{fmt2(Number(o.total_thb))}</span>
                               <span className={`px-2 py-0.5 rounded-full font-medium shrink-0 ${
