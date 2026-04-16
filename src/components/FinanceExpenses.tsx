@@ -2,7 +2,7 @@ import { useState, useEffect, type ChangeEvent } from 'react';
 import { supabase } from '../lib/supabase';
 import { Plus, Search, Trash2, X, Upload, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import FlashShippingImport from './FlashShippingImport';
+import ShippingPage from './ShippingPage';   // ← เปลี่ยนจาก FlashShippingImport
 
 type ExpRecord = {
   id: string; doc_no: string | null; expense_date: string;
@@ -56,7 +56,6 @@ export default function FinanceExpenses() {
   const handleAdd = async () => {
     if (!form.amount_thb || !form.description) return;
     setSaving(true);
-    // สร้าง doc_no อัตโนมัติ
     const dateStr = new Date().toISOString().split('T')[0].replace(/-/g,'');
     const { count } = await supabase.from('expense_records').select('*',{count:'exact',head:true}).like('doc_no',`EXP-${dateStr}%`);
     const docNo = form.doc_no || `EXP-${dateStr}-${String((count||0)+1).padStart(3,'0')}`;
@@ -67,7 +66,6 @@ export default function FinanceExpenses() {
     loadRecords();
   };
 
-  // นำเข้าจาก PO
   const importFromPO = async (po: PO) => {
     const dateStr = po.po_date.replace(/-/g,'');
     const { count } = await supabase.from('expense_records').select('*',{count:'exact',head:true}).like('doc_no',`EXP-${dateStr}%`);
@@ -84,7 +82,6 @@ export default function FinanceExpenses() {
     loadRecords();
   };
 
-  // Upload จากไฟล์ Excel: col A=เลขที่(ถ้ามี), B=วันที่, C=รายการ, D=หมวด, E=ยอด
   const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     setUploading(true);
@@ -160,14 +157,16 @@ export default function FinanceExpenses() {
         </button>
       </div>
 
-      {/* Date filter */}
-      <div className="shrink-0 flex gap-2 mb-3 flex-wrap items-center">
-        <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
-          className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"/>
-        <span className="text-slate-400">–</span>
-        <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
-          className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"/>
-      </div>
+      {/* Date filter — ซ่อนเมื่ออยู่ใน tab ค่าขนส่ง (ShippingPage มี state ของตัวเอง) */}
+      {subTab !== 'shipping' && (
+        <div className="shrink-0 flex gap-2 mb-3 flex-wrap items-center">
+          <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
+            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"/>
+          <span className="text-slate-400">–</span>
+          <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
+            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"/>
+        </div>
+      )}
 
       {/* ── Tab: ใบบันทึกรายจ่าย ── */}
       {subTab === 'records' && (
@@ -282,7 +281,7 @@ export default function FinanceExpenses() {
         </>
       )}
 
-      {/* ── Tab: ค่าโฆษณา ── */}
+      {/* ── Tab: ค่าโฆษณา / ทั้งหมด ── */}
       {(subTab === 'ads' || subTab === 'all') && (() => {
         const tabRows = records.filter(r => {
           if (subTab === 'ads' && r.category !== 'ค่าโฆษณา') return false;
@@ -334,7 +333,7 @@ export default function FinanceExpenses() {
                       <td className="p-3 text-right font-bold text-red-600">฿{fmt(Number(r.amount_thb))}</td>
                       <td className="p-3 text-xs text-slate-400">{r.note||'-'}</td>
                       <td className="p-3 text-center">
-                        <button onClick={()=>handleDelete(r.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
+                        <button onClick={()=>deleteRecord(r.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
                       </td>
                     </tr>
                   ))}
@@ -352,8 +351,12 @@ export default function FinanceExpenses() {
         );
       })()}
 
-      {/* ── Tab: ค่าขนส่ง Flash ── */}
-      {subTab === 'shipping' && <FlashShippingImport />}
+      {/* ── Tab: ค่าขนส่ง → ShippingPage (Flash + MYORDER) ── */}
+      {subTab === 'shipping' && (
+        <div className="flex-1 min-h-0 flex flex-col -mx-4 -mb-4">
+          <ShippingPage />                         {/* ← เปลี่ยนจาก <FlashShippingImport /> */}
+        </div>
+      )}
 
       {/* Modal เพิ่มรายจ่าย */}
       {showModal && (
