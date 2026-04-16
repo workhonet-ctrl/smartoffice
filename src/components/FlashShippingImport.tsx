@@ -163,28 +163,38 @@ export default function FlashShippingImport() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Session persistence ─────────────────────────────────────
-  // อ่าน sessionStorage ครั้งเดียว แล้วแชร์ค่าทุก useState
-  const _s = readStorage(STORAGE_KEY);
-  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>(() => _s?.trackingMap ?? {});
-  const [topups, setTopups]           = useState<TopupRow[]>(() => _s?.topups ?? []);
-  const [fileInfos, setFileInfos]     = useState<FileInfo[]>(() => _s?.fileInfos ?? []);
-  const [matched, setMatched]         = useState<boolean>(() => _s?.matched ?? false);
-  const [matching, setMatching]       = useState(false);
-  const [saving, setSaving]           = useState(false);
-  const [loadingDB, setLoadingDB]     = useState(false);
-  const [isSaved, setIsSaved]         = useState(false);
-  const [search, setSearch]           = useState('');
-  const [error, setError]             = useState<string | null>(null);
+  // lazy initializer รันครั้งเดียวตอน mount ไม่มี race condition
+  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>(
+    () => readStorage(STORAGE_KEY)?.trackingMap ?? {}
+  );
+  const [topups, setTopups]   = useState<TopupRow[]>(
+    () => readStorage(STORAGE_KEY)?.topups ?? []
+  );
+  const [fileInfos, setFileInfos] = useState<FileInfo[]>(
+    () => readStorage(STORAGE_KEY)?.fileInfos ?? []
+  );
+  const [matched, setMatched] = useState<boolean>(
+    () => readStorage(STORAGE_KEY)?.matched ?? false
+  );
+  const [matching, setMatching]   = useState(false);
+  const [saving, setSaving]       = useState(false);
+  const [loadingDB, setLoadingDB] = useState(false);
+  const [search, setSearch]       = useState('');
+  const [error, setError]         = useState<string | null>(null);
 
-  // บันทึกทุกครั้งที่ state เปลี่ยน (ไม่ต้องมี restore effect แล้ว)
+  // บันทึกทุกครั้งที่ state เปลี่ยน
   useEffect(() => {
     try {
-      sessionStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ trackingMap, topups, fileInfos, matched }),
-      );
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ trackingMap, topups, fileInfos, matched }));
     } catch {}
   }, [trackingMap, topups, fileInfos, matched]);
+
+  // auto-load จาก Supabase เมื่อเปิดหน้า (ถ้าไม่มีข้อมูลใน session)
+  useEffect(() => {
+    if (Object.keys(trackingMap).length === 0) {
+      handleLoad();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── File handling ───────────────────────────────────────────
 
@@ -208,8 +218,7 @@ export default function FlashShippingImport() {
         setTopups(prev => [...prev, ...results.flatMap(r => r.topups)]);
         setFileInfos(prev => [...prev, ...results.map(r => r.fileInfo)]);
         setMatched(false);
-        setIsSaved(false);
-      }
+          }
     };
 
     for (const file of files) {
@@ -242,97 +251,74 @@ export default function FlashShippingImport() {
     e.target.value = '';
   };
 
-  // ── Save to Supabase ───────────────────────────────────────
-
-  const handleSave = async () => {
-    const rows = Object.values(trackingMap);
-    if (!rows.length) return;
-    setSaving(true);
-    setError(null);
-
-    try {
-      // upsert tracking rows (on conflict tracking → update)
-      const flashRows = rows.map(r => ({
-        tracking:  r.tracking,
-        ship_date: r.date || null,
-        base_thb:  r.base,
-        extra_thb: r.extra,
-        total_thb: r.total,
-        order_no:  r.order_no  ?? null,
-        customer:  r.customer  ?? null,
-        raw_prod:  r.raw_prod  ?? null,
-        matched:   r.matched,
-      }));
-
-      const { error: e1 } = await supabase
-        .from('shipping_flash')
-        .upsert(flashRows, { onConflict: 'tracking' });
-      if (e1) throw e1;
-
-      // insert เฉพาะ topups ที่ยังไม่เคย save (saved !== true)
-      const newTopups = topups.filter(t => !t.saved);
-      if (newTopups.length > 0) {
-        const topupRows = newTopups.map(t => ({
-          topup_date: t.date || null,
-          amount_thb: t.amount,
-        }));
-        const { error: e2 } = await supabase
-          .from('shipping_flash_topup')
-          .insert(topupRows);
-        if (e2) throw e2;
-        // mark ว่า save แล้ว
-        setTopups(prev => prev.map(t => ({ ...t, saved: true })));
-      }
-
-      setIsSaved(true);
-    } catch (err: any) {
-      setError(`บันทึกไม่สำเร็จ: ${err?.message ?? String(err)}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   // ── Load from Supabase ──────────────────────────────────────
 
   const handleLoad = async () => {
     setLoadingDB(true);
     setError(null);
     try {
-      const { data, error: e } = await supabase
-        .from('shipping_flash')
-        .select('*')
-        .order('imported_at', { ascending: false });
+      // ดึงพร้อมกัน (parallel) ลดเวลารอ
+      const [{ data, error: e }, { data: td }] = await Promise.all([
+        supabase.from('shipping_flash').select('*').order('imported_at', { ascending: false }),
+        supabase.from('shipping_flash_topup').select('*').order('topup_date', { ascending: false }),
+      ]);
       if (e) throw e;
 
       const loaded: Record<string, TrackingRow> = {};
       for (const r of data ?? []) {
         loaded[r.tracking] = {
-          tracking:  r.tracking,
-          date:      r.ship_date ?? '',
-          base:      Number(r.base_thb),
-          extra:     Number(r.extra_thb),
-          total:     Number(r.total_thb),
-          order_no:  r.order_no  ?? undefined,
-          customer:  r.customer  ?? undefined,
-          raw_prod:  r.raw_prod  ?? undefined,
-          matched:   r.matched   ?? false,
+          tracking: r.tracking,
+          date:     r.ship_date ?? '',
+          base:     Number(r.base_thb),
+          extra:    Number(r.extra_thb),
+          total:    Number(r.total_thb),
+          order_no: r.order_no ?? undefined,
+          customer: r.customer ?? undefined,
+          raw_prod: r.raw_prod ?? undefined,
+          matched:  r.matched  ?? false,
         };
       }
 
-      const { data: td } = await supabase
-        .from('shipping_flash_topup')
-        .select('*')
-        .order('topup_date', { ascending: false });
-
       setTrackingMap(loaded);
-      setTopups((td ?? []).map(t => ({ date: t.topup_date ?? '', amount: Number(t.amount_thb) })));
+      setTopups((td ?? []).map(t => ({ date: t.topup_date ?? '', amount: Number(t.amount_thb), saved: true })));
       setFileInfos([{ name: '📂 โหลดจาก Supabase', type: 'ค่าพัสดุ', rows: Object.keys(loaded).length }]);
       setMatched(Object.values(loaded).some(r => r.matched));
-      setIsSaved(true);
     } catch (err: any) {
       setError(`โหลดไม่สำเร็จ: ${err?.message ?? String(err)}`);
     } finally {
       setLoadingDB(false);
+    }
+  };
+
+  // ── Auto-save (เรียกหลัง match สำเร็จ) ────────────────────
+
+  const autoSave = async (map: Record<string, TrackingRow>) => {
+    setSaving(true);
+    try {
+      const flashRows = Object.values(map).map(r => ({
+        tracking:  r.tracking,
+        ship_date: r.date || null,
+        base_thb:  r.base,
+        extra_thb: r.extra,
+        total_thb: r.total,
+        order_no:  r.order_no ?? null,
+        customer:  r.customer ?? null,
+        raw_prod:  r.raw_prod ?? null,
+        matched:   r.matched,
+      }));
+      await supabase.from('shipping_flash').upsert(flashRows, { onConflict: 'tracking' });
+
+      const newTopups = topups.filter(t => !t.saved);
+      if (newTopups.length > 0) {
+        await supabase.from('shipping_flash_topup').insert(
+          newTopups.map(t => ({ topup_date: t.date || null, amount_thb: t.amount }))
+        );
+        setTopups(prev => prev.map(t => ({ ...t, saved: true })));
+      }
+    } catch (err) {
+      console.error('auto-save failed:', err);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -362,24 +348,23 @@ export default function FlashShippingImport() {
         allData.push(...(data ?? []));
       }
 
-      setTrackingMap(prev => {
-        const updated = { ...prev };
-        for (const o of allData) {
-          if (updated[o.tracking_no]) {
-            updated[o.tracking_no] = {
-              ...updated[o.tracking_no],
-              order_no: o.order_no,
-              customer:  o.customers?.name,
-              raw_prod:  o.raw_prod,
-              matched:   true,
-            };
-          }
+      const updatedMap = { ...trackingMap };
+      for (const o of allData) {
+        if (updatedMap[o.tracking_no]) {
+          updatedMap[o.tracking_no] = {
+            ...updatedMap[o.tracking_no],
+            order_no: o.order_no,
+            customer: o.customers?.name,
+            raw_prod: o.raw_prod,
+            matched:  true,
+          };
         }
-        return updated;
-      });
-
+      }
+      setTrackingMap(updatedMap);
       setMatched(true);
-      setIsSaved(false); // ข้อมูลเปลี่ยน ต้อง save ใหม่
+
+      // auto-save หลังจับคู่สำเร็จ
+      await autoSave(updatedMap);
     } catch (err: any) {
       setError(`จับคู่ไม่สำเร็จ: ${err?.message ?? String(err)}`);
     } finally {
@@ -389,7 +374,6 @@ export default function FlashShippingImport() {
 
   const resetMatch = () => {
     setMatched(false);
-    setIsSaved(false); // unmatched → DB ไม่ sync
     setTrackingMap(prev => {
       const reset = { ...prev };
       for (const k of Object.keys(reset)) {
@@ -411,7 +395,6 @@ export default function FlashShippingImport() {
     setTopups([]);
     setFileInfos([]);
     setMatched(false);
-    setIsSaved(false);
     setSearch('');
     setError(null);
   };
@@ -579,18 +562,12 @@ export default function FlashShippingImport() {
             </button>
           )}
 
-          {/* ปุ่มบันทึกลง Supabase */}
-          <button
-            onClick={handleSave}
-            disabled={saving || isSaved}
-            className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 ${
-              isSaved
-                ? 'bg-emerald-100 text-emerald-700 cursor-default'
-                : 'bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50'
-            }`}
-          >
-            {saving ? '⏳ กำลังบันทึก...' : isSaved ? '✓ บันทึกแล้ว' : '💾 บันทึกลง Supabase'}
-          </button>
+          {/* saving indicator */}
+          {saving && (
+            <span className="text-xs text-emerald-600 flex items-center gap-1.5 px-3 py-2 bg-emerald-50 rounded-lg">
+              <RefreshCw size={12} className="animate-spin"/> กำลังบันทึก...
+            </span>
+          )}
         </div>
       )}
 
@@ -704,14 +681,9 @@ export default function FlashShippingImport() {
               💳 โอนเงิน Flash Pay
             </span>
           </div>
-          <button
-            onClick={handleLoad}
-            disabled={loadingDB}
-            className="mt-2 px-5 py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium
-                       hover:bg-blue-600 disabled:opacity-60 flex items-center gap-2"
-          >
-            {loadingDB ? '⏳ กำลังโหลด...' : '📂 โหลดข้อมูลที่บันทึกไว้'}
-          </button>
+          <span className="text-xs text-slate-400">
+            {loadingDB ? '⏳ กำลังโหลดข้อมูล...' : 'ไม่มีข้อมูล — อัพโหลดไฟล์ใหม่ได้เลย'}
+          </span>
         </div>
       )}
 
