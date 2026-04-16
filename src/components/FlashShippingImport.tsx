@@ -36,6 +36,7 @@ type TrackingRow = {
 type TopupRow = {
   date: string;
   amount: number;
+  saved?: boolean;  // true = บันทึกลง DB แล้ว ไม่ต้อง insert ซ้ำ
 };
 
 type FileType = 'ค่าพัสดุ' | 'ค่าพัสดุเพิ่มเติม' | 'โอนเงิน Flash Pay' | 'ไม่รู้จัก';
@@ -162,25 +163,18 @@ export default function FlashShippingImport() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Session persistence ─────────────────────────────────────
-  // อ่านจาก sessionStorage ตั้งแต่ตอน init state (lazy initializer)
-  // วิธีนี้รันก่อน useEffect ทุกตัว ไม่มี race condition
-  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>(
-    () => readStorage(STORAGE_KEY)?.trackingMap ?? {}
-  );
-  const [topups, setTopups] = useState<TopupRow[]>(
-    () => readStorage(STORAGE_KEY)?.topups ?? []
-  );
-  const [fileInfos, setFileInfos] = useState<FileInfo[]>(
-    () => readStorage(STORAGE_KEY)?.fileInfos ?? []
-  );
-  const [matched, setMatched] = useState<boolean>(
-    () => readStorage(STORAGE_KEY)?.matched ?? false
-  );
-  const [matching, setMatching] = useState(false);
-  const [saving, setSaving]     = useState(false);
-  const [isSaved, setIsSaved]   = useState(false);
-  const [search, setSearch]     = useState('');
-  const [error, setError]       = useState<string | null>(null);
+  // อ่าน sessionStorage ครั้งเดียว แล้วแชร์ค่าทุก useState
+  const _s = readStorage(STORAGE_KEY);
+  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>(() => _s?.trackingMap ?? {});
+  const [topups, setTopups]           = useState<TopupRow[]>(() => _s?.topups ?? []);
+  const [fileInfos, setFileInfos]     = useState<FileInfo[]>(() => _s?.fileInfos ?? []);
+  const [matched, setMatched]         = useState<boolean>(() => _s?.matched ?? false);
+  const [matching, setMatching]       = useState(false);
+  const [saving, setSaving]           = useState(false);
+  const [loadingDB, setLoadingDB]     = useState(false);
+  const [isSaved, setIsSaved]         = useState(false);
+  const [search, setSearch]           = useState('');
+  const [error, setError]             = useState<string | null>(null);
 
   // บันทึกทุกครั้งที่ state เปลี่ยน (ไม่ต้องมี restore effect แล้ว)
   useEffect(() => {
@@ -275,9 +269,10 @@ export default function FlashShippingImport() {
         .upsert(flashRows, { onConflict: 'tracking' });
       if (e1) throw e1;
 
-      // upsert topups (ไม่มี unique key → insert ใหม่ทุกครั้งถ้า amount+date ไม่ซ้ำ)
-      if (topups.length > 0) {
-        const topupRows = topups.map(t => ({
+      // insert เฉพาะ topups ที่ยังไม่เคย save (saved !== true)
+      const newTopups = topups.filter(t => !t.saved);
+      if (newTopups.length > 0) {
+        const topupRows = newTopups.map(t => ({
           topup_date: t.date || null,
           amount_thb: t.amount,
         }));
@@ -285,6 +280,8 @@ export default function FlashShippingImport() {
           .from('shipping_flash_topup')
           .insert(topupRows);
         if (e2) throw e2;
+        // mark ว่า save แล้ว
+        setTopups(prev => prev.map(t => ({ ...t, saved: true })));
       }
 
       setIsSaved(true);
@@ -298,6 +295,7 @@ export default function FlashShippingImport() {
   // ── Load from Supabase ──────────────────────────────────────
 
   const handleLoad = async () => {
+    setLoadingDB(true);
     setError(null);
     try {
       const { data, error: e } = await supabase
@@ -333,6 +331,8 @@ export default function FlashShippingImport() {
       setIsSaved(true);
     } catch (err: any) {
       setError(`โหลดไม่สำเร็จ: ${err?.message ?? String(err)}`);
+    } finally {
+      setLoadingDB(false);
     }
   };
 
@@ -379,6 +379,7 @@ export default function FlashShippingImport() {
       });
 
       setMatched(true);
+      setIsSaved(false); // ข้อมูลเปลี่ยน ต้อง save ใหม่
     } catch (err: any) {
       setError(`จับคู่ไม่สำเร็จ: ${err?.message ?? String(err)}`);
     } finally {
@@ -388,6 +389,7 @@ export default function FlashShippingImport() {
 
   const resetMatch = () => {
     setMatched(false);
+    setIsSaved(false); // unmatched → DB ไม่ sync
     setTrackingMap(prev => {
       const reset = { ...prev };
       for (const k of Object.keys(reset)) {
@@ -578,19 +580,17 @@ export default function FlashShippingImport() {
           )}
 
           {/* ปุ่มบันทึกลง Supabase */}
-          {rows.length > 0 && (
-            <button
-              onClick={handleSave}
-              disabled={saving || isSaved}
-              className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 ${
-                isSaved
-                  ? 'bg-emerald-100 text-emerald-700 cursor-default'
-                  : 'bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50'
-              }`}
-            >
-              {saving ? '⏳ กำลังบันทึก...' : isSaved ? '✓ บันทึกแล้ว' : '💾 บันทึกลง Supabase'}
-            </button>
-          )}
+          <button
+            onClick={handleSave}
+            disabled={saving || isSaved}
+            className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 ${
+              isSaved
+                ? 'bg-emerald-100 text-emerald-700 cursor-default'
+                : 'bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50'
+            }`}
+          >
+            {saving ? '⏳ กำลังบันทึก...' : isSaved ? '✓ บันทึกแล้ว' : '💾 บันทึกลง Supabase'}
+          </button>
         </div>
       )}
 
@@ -706,10 +706,11 @@ export default function FlashShippingImport() {
           </div>
           <button
             onClick={handleLoad}
+            disabled={loadingDB}
             className="mt-2 px-5 py-2.5 bg-blue-500 text-white rounded-lg text-sm font-medium
-                       hover:bg-blue-600 flex items-center gap-2"
+                       hover:bg-blue-600 disabled:opacity-60 flex items-center gap-2"
           >
-            📂 โหลดข้อมูลที่บันทึกไว้
+            {loadingDB ? '⏳ กำลังโหลด...' : '📂 โหลดข้อมูลที่บันทึกไว้'}
           </button>
         </div>
       )}
