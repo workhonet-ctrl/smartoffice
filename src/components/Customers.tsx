@@ -37,7 +37,10 @@ export default function Customers() {
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [editTag, setEditTag]       = useState<{id: string; tag: string} | null>(null);
   const [importing, setImporting]   = useState(false);
-  const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number } | null>(null);
+  const [importResult, setImportResult] = useState<{
+    added: number; updated: number; skipped: number;
+    unmapped: string[];
+  } | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: 'success'|'error' } | null>(null);
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 5000);
@@ -95,9 +98,16 @@ export default function Customers() {
           .flatMap(r => String(r[14] || '').split('|').map(s => s.trim()).filter(Boolean))
       )];
       const autoPromoMap: Record<string, string> = {};
+      const unmappedProds: string[] = [];  // เก็บชื่อที่ไม่มีในระบบ
+
       for (const rp of rawProdsAll) {
-        const { data: mp } = await supabase.from('product_mappings').select('promo_id').eq('raw_name', rp).maybeSingle();
-        if (mp?.promo_id) autoPromoMap[rp] = mp.promo_id;
+        const { data: mp } = await supabase
+          .from('product_mappings').select('promo_id').eq('raw_name', rp).maybeSingle();
+        if (mp?.promo_id) {
+          autoPromoMap[rp] = mp.promo_id;
+        } else {
+          unmappedProds.push(rp);  // ไม่พบ mapping → เก็บไว้แจ้งเตือน
+        }
       }
 
       // ── 2. บันทึกทีละแถว ─────────────────────────────────────────────────
@@ -206,8 +216,21 @@ export default function Customers() {
         else orderSkipped++;
       }
 
-      setImportResult({ added: custAdded, updated: custUpdated, skipped: orderSkipped });
-      showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded} ข้าม ${orderSkipped}`);
+      setImportResult({
+        added: custAdded,
+        updated: custUpdated,
+        skipped: orderSkipped,
+        unmapped: unmappedProds,
+      });
+
+      if (unmappedProds.length > 0) {
+        showToast(
+          `⚠ นำเข้าสำเร็จ แต่สินค้า ${unmappedProds.length} รายการยังไม่มีในระบบ — กรุณาเพิ่มสินค้าที่หน้า "เพิ่มสินค้า"`,
+          'warning'
+        );
+      } else {
+        showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded} ข้าม ${orderSkipped}`);
+      }
       loadCustomers();
     } catch (err) {
       console.error(err);
@@ -271,6 +294,15 @@ export default function Customers() {
             <div className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 space-y-0.5">
               <div>👥 ลูกค้า: เพิ่ม <strong>{importResult.added}</strong> · อัพเดต <strong>{importResult.updated}</strong></div>
               <div>📋 ออเดอร์: บันทึก <strong>{importResult.added + importResult.updated}</strong> · ข้าม {importResult.skipped} ซ้ำ</div>
+              {importResult.unmapped.length > 0 && (
+                <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg text-orange-700">
+                  <div className="font-semibold mb-1">⚠ สินค้ายังไม่มีในระบบ ({importResult.unmapped.length} รายการ)</div>
+                  {importResult.unmapped.map((name, i) => (
+                    <div key={i} className="ml-2">· {name}</div>
+                  ))}
+                  <div className="mt-1 text-orange-600">→ ไปเพิ่มที่หน้า "เพิ่มสินค้า" แล้ว ออเดอร์จะ sync อัตโนมัติ</div>
+                </div>
+              )}
             </div>
           )}
           <label className={`px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-semibold cursor-pointer shadow-sm transition
@@ -474,7 +506,7 @@ export default function Customers() {
       {/* Toast */}
       {toast && (
         <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-4 rounded-xl shadow-2xl text-white text-sm font-medium
-          ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500'}`}
+          ${toast.type === 'success' ? 'bg-emerald-500' : type === 'warning' ? 'bg-orange-500' : 'bg-red-500'}`}
           style={{minWidth:'260px'}}>
           <span>{toast.msg}</span>
           <button onClick={() => setToast(null)} className="ml-auto opacity-70 hover:opacity-100 text-lg leading-none">×</button>
