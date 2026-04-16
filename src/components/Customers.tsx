@@ -47,6 +47,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   const [unmappedList, setUnmappedList]         = useState<string[]>([]);
   const [promoOptions, setPromoOptions]         = useState<{id:string; name:string; short_name:string|null}[]>([]);
   const [mappingSelects, setMappingSelects]     = useState<Record<string, string>>({}); // raw_name → promo_id
+  const [mappingSearch, setMappingSearch]       = useState(''); // ค้นหาใน modal
   const [savingMappings, setSavingMappings]     = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success'|'error'|'warning' } | null>(null);
   const showToast = (msg: string, type: 'success'|'error'|'warning' = 'success') => {
@@ -234,7 +235,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
         // โหลด promo options แล้วเปิด modal ให้ user จับคู่เอง
         const { data: promos } = await supabase
           .from('products_promo')
-          .select('id, name, short_name')
+          .select('id, name, short_name, price_thb')
           .eq('active', true)
           .order('id');
         setPromoOptions(promos || []);
@@ -553,26 +554,72 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
               </button>
             </div>
 
+            {/* ช่องค้นหาสินค้า */}
+            <div className="shrink-0 mb-3">
+              <input
+                value={mappingSearch}
+                onChange={e => setMappingSearch(e.target.value)}
+                placeholder="🔍 ค้นหาชื่อสินค้า / รหัส..."
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"
+              />
+            </div>
+
             <div className="flex-1 overflow-auto space-y-3 min-h-0">
-              {unmappedList.map(rawName => (
-                <div key={rawName} className="bg-slate-50 rounded-xl p-3">
-                  <div className="text-sm font-medium text-slate-700 mb-2">
-                    <span className="text-orange-500">⚠</span> {rawName}
+              {unmappedList.map(rawName => {
+                const selectedPromo = promoOptions.find(p => p.id === mappingSelects[rawName]);
+                const filtered = promoOptions.filter(p => {
+                  const q = mappingSearch.toLowerCase();
+                  return !q || p.id.toLowerCase().includes(q)
+                    || p.name.toLowerCase().includes(q)
+                    || (p.short_name||'').toLowerCase().includes(q);
+                });
+                return (
+                  <div key={rawName} className="bg-slate-50 rounded-xl p-3">
+                    {/* ชื่อจาก Excel */}
+                    <div className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+                      <span className="text-orange-500">⚠</span>
+                      <span className="font-mono bg-orange-50 px-2 py-0.5 rounded text-orange-700">{rawName}</span>
+                    </div>
+
+                    {/* แสดงสินค้าที่เลือกไว้ */}
+                    {selectedPromo && (
+                      <div className="mb-2 px-2 py-1.5 bg-cyan-50 border border-cyan-200 rounded-lg text-xs text-cyan-700 flex items-center gap-2">
+                        <span className="font-bold">{selectedPromo.id}</span>
+                        <span>{selectedPromo.name}</span>
+                        <span className="ml-auto font-bold">฿{Number(selectedPromo.price_thb).toLocaleString()}</span>
+                      </div>
+                    )}
+
+                    {/* dropdown options แบบ list */}
+                    <div className="border rounded-lg overflow-hidden max-h-40 overflow-y-auto bg-white">
+                      <div
+                        onClick={() => setMappingSelects(prev => ({ ...prev, [rawName]: '' }))}
+                        className={`px-3 py-2 text-xs cursor-pointer border-b hover:bg-slate-50 ${
+                          !mappingSelects[rawName] ? 'bg-slate-100 font-medium' : ''
+                        }`}
+                      >
+                        — ข้ามไปก่อน —
+                      </div>
+                      {filtered.map(p => (
+                        <div
+                          key={p.id}
+                          onClick={() => setMappingSelects(prev => ({ ...prev, [rawName]: p.id }))}
+                          className={`px-3 py-2 text-xs cursor-pointer border-b last:border-0 hover:bg-cyan-50 flex items-center gap-2 ${
+                            mappingSelects[rawName] === p.id ? 'bg-cyan-100' : ''
+                          }`}
+                        >
+                          <span className="font-mono text-slate-500 shrink-0 w-20">{p.id}</span>
+                          <span className="flex-1 text-slate-700">{p.name}</span>
+                          <span className="shrink-0 font-bold text-emerald-600">฿{Number(p.price_thb).toLocaleString()}</span>
+                        </div>
+                      ))}
+                      {filtered.length === 0 && (
+                        <div className="px-3 py-3 text-xs text-slate-400 text-center">ไม่พบสินค้า</div>
+                      )}
+                    </div>
                   </div>
-                  <select
-                    value={mappingSelects[rawName] || ''}
-                    onChange={e => setMappingSelects(prev => ({ ...prev, [rawName]: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-cyan-300"
-                  >
-                    <option value="">— ข้ามไปก่อน (ยังไม่มีในระบบ) —</option>
-                    {promoOptions.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.id} · {p.short_name || p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="shrink-0 flex gap-2 mt-5">
