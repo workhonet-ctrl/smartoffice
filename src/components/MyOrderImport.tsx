@@ -8,6 +8,16 @@ import * as XLSX from 'xlsx';
 const SUPABASE_IN_LIMIT = 500;
 const STORAGE_KEY       = 'myorder_import_state';
 
+function readStorage(key: string) {
+  try {
+    const s = sessionStorage.getItem(key);
+    return s ? JSON.parse(s) : null;
+  } catch {
+    sessionStorage.removeItem(key);
+    return null;
+  }
+}
+
 // ── Types ─────────────────────────────────────────────────────
 
 type TrackingRow = {
@@ -129,27 +139,22 @@ function mergeResults(
 export default function MyOrderImport() {
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>({});
-  const [fileInfos, setFileInfos]     = useState<FileInfo[]>([]);
-  const [matching, setMatching]       = useState(false);
-  const [matched, setMatched]         = useState(false);
-  const [search, setSearch]           = useState('');
-  const [error, setError]             = useState<string | null>(null);
-
   // ── Session persistence ─────────────────────────────────────
-
-  useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(STORAGE_KEY);
-      if (!saved) return;
-      const { trackingMap: tm, fileInfos: fi, matched: m } = JSON.parse(saved);
-      if (tm) setTrackingMap(tm);
-      if (fi) setFileInfos(fi);
-      if (m  !== undefined) setMatched(m);
-    } catch {
-      sessionStorage.removeItem(STORAGE_KEY);
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // lazy initializer รันก่อน useEffect ไม่มี race condition
+  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>(
+    () => readStorage(STORAGE_KEY)?.trackingMap ?? {}
+  );
+  const [fileInfos, setFileInfos] = useState<FileInfo[]>(
+    () => readStorage(STORAGE_KEY)?.fileInfos ?? []
+  );
+  const [matched, setMatched] = useState<boolean>(
+    () => readStorage(STORAGE_KEY)?.matched ?? false
+  );
+  const [matching, setMatching] = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [isSaved, setIsSaved]   = useState(false);
+  const [search, setSearch]     = useState('');
+  const [error, setError]       = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -178,6 +183,7 @@ export default function MyOrderImport() {
         setTrackingMap(prev => mergeResults(prev, results));
         setFileInfos(prev => [...prev, ...results.map(r => r.fileInfo)]);
         setMatched(false);
+        setIsSaved(false);
       }
     };
 
@@ -203,6 +209,81 @@ export default function MyOrderImport() {
     }
 
     e.target.value = '';
+  };
+
+  // ── Save to Supabase ───────────────────────────────────────
+
+  const handleSave = async () => {
+    const rows = Object.values(trackingMap);
+    if (!rows.length) return;
+    setSaving(true);
+    setError(null);
+
+    try {
+      const myorderRows = rows.map(r => ({
+        tracking:    r.tracking,
+        page:        r.page        || null,
+        consignee:   r.consignee   || null,
+        weight_kg:   r.weight,
+        cod_thb:     r.cod,
+        cod_fee_thb: r.cod_fee,
+        freight_thb: r.freight,
+        total_thb:   r.total,
+        order_no:    r.order_no    ?? null,
+        customer:    r.customer    ?? null,
+        raw_prod:    r.raw_prod    ?? null,
+        matched:     r.matched,
+      }));
+
+      const { error: e } = await supabase
+        .from('shipping_myorder')
+        .upsert(myorderRows, { onConflict: 'tracking' });
+      if (e) throw e;
+
+      setIsSaved(true);
+    } catch (err: any) {
+      setError(`บันทึกไม่สำเร็จ: ${err?.message ?? String(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Load from Supabase ──────────────────────────────────────
+
+  const handleLoad = async () => {
+    setError(null);
+    try {
+      const { data, error: e } = await supabase
+        .from('shipping_myorder')
+        .select('*')
+        .order('imported_at', { ascending: false });
+      if (e) throw e;
+
+      const loaded: Record<string, TrackingRow> = {};
+      for (const r of data ?? []) {
+        loaded[r.tracking] = {
+          tracking:  r.tracking,
+          page:      r.page       ?? '',
+          consignee: r.consignee  ?? '',
+          weight:    Number(r.weight_kg),
+          cod:       Number(r.cod_thb),
+          cod_fee:   Number(r.cod_fee_thb),
+          freight:   Number(r.freight_thb),
+          total:     Number(r.total_thb),
+          order_no:  r.order_no   ?? undefined,
+          customer:  r.customer   ?? undefined,
+          raw_prod:  r.raw_prod   ?? undefined,
+          matched:   r.matched    ?? false,
+        };
+      }
+
+      setTrackingMap(loaded);
+      setFileInfos([{ name: '📂 โหลดจาก Supabase', rows: Object.keys(loaded).length }]);
+      setMatched(Object.values(loaded).some(r => r.matched));
+      setIsSaved(true);
+    } catch (err: any) {
+      setError(`โหลดไม่สำเร็จ: ${err?.message ?? String(err)}`);
+    }
   };
 
   // ── Match with Supabase ─────────────────────────────────────
@@ -275,6 +356,7 @@ export default function MyOrderImport() {
     setTrackingMap({});
     setFileInfos([]);
     setMatched(false);
+    setIsSaved(false);
     setSearch('');
     setError(null);
   };
@@ -433,6 +515,20 @@ export default function MyOrderImport() {
               รีเซ็ตจับคู่
             </button>
           )}
+
+          {rows.length > 0 && (
+            <button
+              onClick={handleSave}
+              disabled={saving || isSaved}
+              className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 ${
+                isSaved
+                  ? 'bg-emerald-100 text-emerald-700 cursor-default'
+                  : 'bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50'
+              }`}
+            >
+              {saving ? '⏳ กำลังบันทึก...' : isSaved ? '✓ บันทึกแล้ว' : '💾 บันทึกลง Supabase'}
+            </button>
+          )}
         </div>
       )}
 
@@ -542,6 +638,13 @@ export default function MyOrderImport() {
               ➕ COD Fee
             </span>
           </div>
+          <button
+            onClick={handleLoad}
+            className="mt-2 px-5 py-2.5 bg-purple-500 text-white rounded-lg text-sm font-medium
+                       hover:bg-purple-600 flex items-center gap-2"
+          >
+            📂 โหลดข้อมูลที่บันทึกไว้
+          </button>
         </div>
       )}
 
