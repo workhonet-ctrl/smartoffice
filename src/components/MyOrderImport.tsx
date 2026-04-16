@@ -140,21 +140,16 @@ export default function MyOrderImport() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Session persistence ─────────────────────────────────────
-  // lazy initializer รันก่อน useEffect ไม่มี race condition
-  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>(
-    () => readStorage(STORAGE_KEY)?.trackingMap ?? {}
-  );
-  const [fileInfos, setFileInfos] = useState<FileInfo[]>(
-    () => readStorage(STORAGE_KEY)?.fileInfos ?? []
-  );
-  const [matched, setMatched] = useState<boolean>(
-    () => readStorage(STORAGE_KEY)?.matched ?? false
-  );
-  const [matching, setMatching] = useState(false);
-  const [saving, setSaving]     = useState(false);
-  const [isSaved, setIsSaved]   = useState(false);
-  const [search, setSearch]     = useState('');
-  const [error, setError]       = useState<string | null>(null);
+  const _s = readStorage(STORAGE_KEY);
+  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>(() => _s?.trackingMap ?? {});
+  const [fileInfos, setFileInfos]     = useState<FileInfo[]>(() => _s?.fileInfos ?? []);
+  const [matched, setMatched]         = useState<boolean>(() => _s?.matched ?? false);
+  const [matching, setMatching]       = useState(false);
+  const [saving, setSaving]           = useState(false);
+  const [loadingDB, setLoadingDB]     = useState(false);
+  const [isSaved, setIsSaved]         = useState(false);
+  const [search, setSearch]           = useState('');
+  const [error, setError]             = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -251,6 +246,7 @@ export default function MyOrderImport() {
   // ── Load from Supabase ──────────────────────────────────────
 
   const handleLoad = async () => {
+    setLoadingDB(true);
     setError(null);
     try {
       const { data, error: e } = await supabase
@@ -283,6 +279,8 @@ export default function MyOrderImport() {
       setIsSaved(true);
     } catch (err: any) {
       setError(`โหลดไม่สำเร็จ: ${err?.message ?? String(err)}`);
+    } finally {
+      setLoadingDB(false);
     }
   };
 
@@ -327,6 +325,7 @@ export default function MyOrderImport() {
       });
 
       setMatched(true);
+      setIsSaved(false);
     } catch (err: any) {
       setError(`จับคู่ไม่สำเร็จ: ${err?.message ?? String(err)}`);
     } finally {
@@ -336,6 +335,7 @@ export default function MyOrderImport() {
 
   const resetMatch = () => {
     setMatched(false);
+    setIsSaved(false);
     setTrackingMap(prev => {
       const reset = { ...prev };
       for (const k of Object.keys(reset)) {
@@ -640,10 +640,11 @@ export default function MyOrderImport() {
           </div>
           <button
             onClick={handleLoad}
+            disabled={loadingDB}
             className="mt-2 px-5 py-2.5 bg-purple-500 text-white rounded-lg text-sm font-medium
-                       hover:bg-purple-600 flex items-center gap-2"
+                       hover:bg-purple-600 disabled:opacity-60 flex items-center gap-2"
           >
-            📂 โหลดข้อมูลที่บันทึกไว้
+            {loadingDB ? '⏳ กำลังโหลด...' : '📂 โหลดข้อมูลที่บันทึกไว้'}
           </button>
         </div>
       )}
