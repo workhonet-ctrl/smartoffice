@@ -2,6 +2,7 @@ import { useState, useEffect, type ChangeEvent } from 'react';
 import { supabase } from '../lib/supabase';
 import { Plus, Search, Trash2, X, Upload, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import FlashShippingImport from './FlashShippingImport';
 
 type ExpRecord = {
   id: string; doc_no: string | null; expense_date: string;
@@ -282,27 +283,22 @@ export default function FinanceExpenses() {
       )}
 
       {/* ── Tab: ค่าโฆษณา ── */}
-      {(subTab === 'ads' || subTab === 'shipping' || subTab === 'all') && (() => {
-        const catMap: Record<string, string> = { ads: 'ค่าโฆษณา', shipping: 'ค่าจัดส่ง', all: '' };
+      {(subTab === 'ads' || subTab === 'all') && (() => {
         const tabRows = records.filter(r => {
-          const cat = catMap[subTab];
-          if (cat && r.category !== cat) return false;
+          if (subTab === 'ads' && r.category !== 'ค่าโฆษณา') return false;
           const q = search.toLowerCase();
           if (q && !(r.description.toLowerCase().includes(q) || (r.doc_no||'').toLowerCase().includes(q))) return false;
           return true;
         });
         const tabTotal = tabRows.reduce((s,r) => s+Number(r.amount_thb), 0);
-        const tabColor = subTab==='ads' ? 'bg-pink-50 text-pink-700' : subTab==='shipping' ? 'bg-blue-50 text-blue-700' : 'bg-slate-50 text-slate-700';
         return (
           <>
-            {/* Summary */}
             <div className="shrink-0 flex gap-3 mb-3 flex-wrap items-center">
-              <div className={`rounded-xl px-4 py-3 border ${subTab==='ads'?'bg-pink-50 border-pink-200':subTab==='shipping'?'bg-blue-50 border-blue-200':'bg-slate-50 border-slate-200'}`}>
+              <div className={`rounded-xl px-4 py-3 border ${subTab==='ads'?'bg-pink-50 border-pink-200':'bg-slate-50 border-slate-200'}`}>
                 <div className="text-xs text-slate-500 font-semibold mb-0.5">ยอดรวม</div>
                 <div className="text-xl font-bold">฿{fmt(tabTotal)}</div>
                 <div className="text-xs text-slate-400">{tabRows.length} รายการ</div>
               </div>
-              {/* search */}
               <div className="relative">
                 <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
                 <input value={search} onChange={e=>setSearch(e.target.value)}
@@ -355,6 +351,9 @@ export default function FinanceExpenses() {
           </>
         );
       })()}
+
+      {/* ── Tab: ค่าขนส่ง Flash ── */}
+      {subTab === 'shipping' && <FlashShippingImport />}
 
       {/* Modal เพิ่มรายจ่าย */}
       {showModal && (
