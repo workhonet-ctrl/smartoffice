@@ -351,12 +351,11 @@ export default function FinanceExpenses() {
         );
       })()}
 
-      {/* ── Tab: ค่าขนส่ง → ShippingPage (Flash + MYORDER) ── */}
-      {subTab === 'shipping' && (
-        <div className="flex-1 min-h-0 flex flex-col -mx-4 -mb-4">
-          <ShippingPage />                         {/* ← เปลี่ยนจาก <FlashShippingImport /> */}
-        </div>
-      )}
+      {/* ── Tab: ค่าขนส่ง → ShippingPage (Flash + MYORDER) ──
+          ใช้ hidden แทน && เพื่อไม่ให้ unmount — สลับ tab แล้วกลับมา ข้อมูลไม่หาย */}
+      <div className={`flex-1 min-h-0 flex flex-col -mx-4 -mb-4 ${subTab === 'shipping' ? '' : 'hidden'}`}>
+        <ShippingPage />
+      </div>
 
       {/* Modal เพิ่มรายจ่าย */}
       {showModal && (
