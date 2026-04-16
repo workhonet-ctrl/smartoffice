@@ -26,7 +26,7 @@ const TAG_COLORS: Record<string, string> = {
 const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 0 });
 const fmt2 = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export default function Customers() {
+export default function Customers({ onGoToProducts }: { onGoToProducts?: () => void } = {}) {
   const [customers, setCustomers]   = useState<Customer[]>([]);
   const [search, setSearch]         = useState('');
   const [tagFilter, setTagFilter]   = useState('ทั้งหมด');
@@ -41,6 +41,13 @@ export default function Customers() {
     added: number; updated: number; skipped: number;
     unmapped: string[];
   } | null>(null);
+
+  // mapping modal state
+  const [showMappingModal, setShowMappingModal] = useState(false);
+  const [unmappedList, setUnmappedList]         = useState<string[]>([]);
+  const [promoOptions, setPromoOptions]         = useState<{id:string; name:string; short_name:string|null}[]>([]);
+  const [mappingSelects, setMappingSelects]     = useState<Record<string, string>>({}); // raw_name → promo_id
+  const [savingMappings, setSavingMappings]     = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success'|'error'|'warning' } | null>(null);
   const showToast = (msg: string, type: 'success'|'error'|'warning' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 5000);
@@ -224,10 +231,19 @@ export default function Customers() {
       });
 
       if (unmappedProds.length > 0) {
-        showToast(
-          `⚠ นำเข้าสำเร็จ แต่สินค้า ${unmappedProds.length} รายการยังไม่มีในระบบ — กรุณาเพิ่มสินค้าที่หน้า "เพิ่มสินค้า"`,
-          'warning'
-        );
+        // โหลด promo options แล้วเปิด modal ให้ user จับคู่เอง
+        const { data: promos } = await supabase
+          .from('products_promo')
+          .select('id, name, short_name')
+          .eq('active', true)
+          .order('id');
+        setPromoOptions(promos || []);
+        setUnmappedList(unmappedProds);
+        const defaults: Record<string, string> = {};
+        unmappedProds.forEach(n => { defaults[n] = ''; });
+        setMappingSelects(defaults);
+        setShowMappingModal(true);
+        showToast(`✓ นำเข้าสำเร็จ · พบสินค้า ${unmappedProds.length} รายการยังไม่มีในระบบ`, 'warning');
       } else {
         showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded} ข้าม ${orderSkipped}`);
       }
@@ -236,6 +252,23 @@ export default function Customers() {
       console.error(err);
       showToast('เกิดข้อผิดพลาดในการนำเข้า', 'error');
     } finally { setImporting(false); e.target.value = ''; }
+  };
+
+  // บันทึก mappings ที่ user เลือก → trigger remap orders อัตโนมัติ
+  const handleSaveMappings = async () => {
+    setSavingMappings(true);
+    const toSave = Object.entries(mappingSelects).filter(([, pid]) => pid);
+    for (const [rawName, promoId] of toSave) {
+      await supabase.from('product_mappings').upsert(
+        [{ raw_name: rawName, promo_id: promoId }],
+        { onConflict: 'raw_name' }
+      );
+    }
+    setSavingMappings(false);
+    setShowMappingModal(false);
+    if (toSave.length > 0) {
+      showToast(`✓ จับคู่สินค้า ${toSave.length} รายการ — ออเดอร์จะ sync อัตโนมัติ`);
+    }
   };
 
   const handleDelete = async (c: Customer, e: React.MouseEvent) => {
@@ -504,6 +537,72 @@ export default function Customers() {
       )}
 
       {/* Toast */}
+      {/* ── Mapping Modal ── */}
+      {showMappingModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[80vh] flex flex-col">
+            <div className="flex justify-between items-start mb-4 shrink-0">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">🔍 จับคู่สินค้าที่ยังไม่มีในระบบ</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  เลือกสินค้าที่ตรงกัน หรือกด "ไปเพิ่มสินค้า" ถ้ายังไม่มีในระบบ
+                </p>
+              </div>
+              <button onClick={() => setShowMappingModal(false)} className="text-slate-400 hover:text-slate-600 ml-4">
+                <X size={20}/>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto space-y-3 min-h-0">
+              {unmappedList.map(rawName => (
+                <div key={rawName} className="bg-slate-50 rounded-xl p-3">
+                  <div className="text-sm font-medium text-slate-700 mb-2">
+                    <span className="text-orange-500">⚠</span> {rawName}
+                  </div>
+                  <select
+                    value={mappingSelects[rawName] || ''}
+                    onChange={e => setMappingSelects(prev => ({ ...prev, [rawName]: e.target.value }))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-cyan-300"
+                  >
+                    <option value="">— ข้ามไปก่อน (ยังไม่มีในระบบ) —</option>
+                    {promoOptions.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.id} · {p.short_name || p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            <div className="shrink-0 flex gap-2 mt-5">
+              {onGoToProducts && (
+                <button
+                  onClick={() => { setShowMappingModal(false); onGoToProducts(); }}
+                  className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200 font-medium"
+                >
+                  ➕ ไปเพิ่มสินค้า
+                </button>
+              )}
+              <button
+                onClick={() => setShowMappingModal(false)}
+                className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-300"
+              >
+                ข้ามทั้งหมด
+              </button>
+              <button
+                onClick={handleSaveMappings}
+                disabled={savingMappings || Object.values(mappingSelects).every(v => !v)}
+                className="flex-1 py-2.5 bg-cyan-500 text-white rounded-lg text-sm font-medium
+                           hover:bg-cyan-600 disabled:opacity-50"
+              >
+                {savingMappings ? 'กำลังบันทึก...' : `✓ บันทึก (${Object.values(mappingSelects).filter(Boolean).length} รายการ)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toast && (
         <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-4 rounded-xl shadow-2xl text-white text-sm font-medium
           ${toast.type === 'success' ? 'bg-emerald-500' : toast.type === 'warning' ? 'bg-orange-500' : 'bg-red-500'}`}
