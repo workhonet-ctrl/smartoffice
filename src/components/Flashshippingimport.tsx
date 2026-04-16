@@ -1,0 +1,330 @@
+import { useState, useRef } from 'react';
+import { supabase } from '../lib/supabase';
+import { Upload, RefreshCw, X } from 'lucide-react';
+import * as XLSX from 'xlsx';
+
+const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+type TrackingRow = {
+  tracking:   string;
+  date:       string;
+  base:       number; // ค่าพัสดุ (col H)
+  extra:      number; // ค่าพัสดุเพิ่มเติม (col J)
+  total:      number;
+  order_no?:  string;
+  customer?:  string;
+  raw_prod?:  string;
+  matched:    boolean;
+};
+
+type TopupRow = {
+  date:   string;
+  amount: number;
+};
+
+type FileInfo = {
+  name: string;
+  type: 'ค่าพัสดุ' | 'ค่าพัสดุเพิ่มเติม' | 'โอนเงิน Flash Pay' | 'ไม่รู้จัก';
+  rows: number;
+};
+
+export default function FlashShippingImport() {
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>({});
+  const [topups,      setTopups]      = useState<TopupRow[]>([]);
+  const [fileInfos,   setFileInfos]   = useState<FileInfo[]>([]);
+  const [matching,    setMatching]    = useState(false);
+  const [matched,     setMatched]     = useState(false);
+  const [search,      setSearch]      = useState('');
+
+  // อ่านและ merge ไฟล์
+  const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    let newTrackingMap = { ...trackingMap };
+    let newTopups = [...topups];
+    const newFileInfos: FileInfo[] = [];
+
+    let pending = files.length;
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = ev => {
+        try {
+          const wb   = XLSX.read(ev.target?.result, { type: 'binary' });
+          const ws   = wb.Sheets[wb.SheetNames[0]];
+          const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+          // ข้ามแถว header (row 0) และแถวสรุป (row 1 = "ทั้งหมด")
+          const dataRows = rows.slice(2).filter(r => r[1]); // col B ต้องมีค่า
+
+          let fileType: FileInfo['type'] = 'ไม่รู้จัก';
+          let count = 0;
+
+          dataRows.forEach(r => {
+            const type    = String(r[1] || '').trim();  // col B
+            const tracking= String(r[3] || '').trim();  // col D
+            const date    = String(r[0] || '').split(' ')[0]; // col A วันที่
+
+            if (type === 'ค่าพัสดุ') {
+              fileType = 'ค่าพัสดุ';
+              if (!tracking) return;
+              const amount = Math.abs(parseFloat(String(r[7] || '0').replace(/[^0-9.-]/g, '')) || 0); // col H
+              if (!newTrackingMap[tracking]) {
+                newTrackingMap[tracking] = { tracking, date, base: 0, extra: 0, total: 0, matched: false };
+              }
+              newTrackingMap[tracking].base += amount;
+              newTrackingMap[tracking].total = newTrackingMap[tracking].base + newTrackingMap[tracking].extra;
+              count++;
+
+            } else if (type === 'ค่าพัสดุเพิ่มเติม') {
+              fileType = 'ค่าพัสดุเพิ่มเติม';
+              if (!tracking) return;
+              const amount = Math.abs(parseFloat(String(r[9] || '0').replace(/[^0-9.-]/g, '')) || 0); // col J
+              if (!newTrackingMap[tracking]) {
+                newTrackingMap[tracking] = { tracking, date, base: 0, extra: 0, total: 0, matched: false };
+              }
+              newTrackingMap[tracking].extra += amount;
+              newTrackingMap[tracking].total = newTrackingMap[tracking].base + newTrackingMap[tracking].extra;
+              count++;
+
+            } else if (type === 'โอนเงิน Flash Pay') {
+              fileType = 'โอนเงิน Flash Pay';
+              const amount = Math.abs(parseFloat(String(r[33] || '0').replace(/[^0-9.-]/g, '')) || 0); // col AH
+              if (amount > 0) { newTopups.push({ date, amount }); count++; }
+            }
+          });
+
+          newFileInfos.push({ name: file.name, type: fileType, rows: count });
+        } catch (err) {
+          console.error('Parse error', file.name, err);
+        }
+
+        pending--;
+        if (pending === 0) {
+          setTrackingMap(newTrackingMap);
+          setTopups(newTopups);
+          setFileInfos(prev => [...prev, ...newFileInfos]);
+          setMatched(false);
+        }
+      };
+      reader.readAsBinaryString(file);
+    });
+    e.target.value = '';
+  };
+
+  // จับคู่กับ orders
+  const handleMatch = async () => {
+    const trackings = Object.keys(trackingMap);
+    if (!trackings.length) return;
+    setMatching(true);
+
+    const { data } = await supabase.from('orders')
+      .select('tracking_no, order_no, customers(name), raw_prod')
+      .in('tracking_no', trackings);
+
+    const updated = { ...trackingMap };
+    (data || []).forEach((o: any) => {
+      if (updated[o.tracking_no]) {
+        updated[o.tracking_no].order_no  = o.order_no;
+        updated[o.tracking_no].customer  = o.customers?.name;
+        updated[o.tracking_no].raw_prod  = o.raw_prod;
+        updated[o.tracking_no].matched   = true;
+      }
+    });
+
+    setTrackingMap(updated);
+    setMatched(true);
+    setMatching(false);
+  };
+
+  const clearAll = () => {
+    setTrackingMap({});
+    setTopups([]);
+    setFileInfos([]);
+    setMatched(false);
+    setSearch('');
+  };
+
+  const rows = Object.values(trackingMap);
+  const filteredRows = rows.filter(r => {
+    const q = search.toLowerCase();
+    return !q ||
+      r.tracking.toLowerCase().includes(q) ||
+      (r.order_no||'').toLowerCase().includes(q) ||
+      (r.customer||'').toLowerCase().includes(q) ||
+      (r.raw_prod||'').toLowerCase().includes(q);
+  });
+
+  const totalBase    = rows.reduce((s, r) => s + r.base, 0);
+  const totalExtra   = rows.reduce((s, r) => s + r.extra, 0);
+  const totalShip    = rows.reduce((s, r) => s + r.total, 0);
+  const totalTopup   = topups.reduce((s, t) => s + t.amount, 0);
+  const cntMatched   = rows.filter(r => r.matched).length;
+  const cntNotFound  = rows.filter(r => !r.matched).length;
+
+  return (
+    <div className="flex flex-col h-full gap-3">
+
+      {/* Upload zone */}
+      <div className="shrink-0 border-2 border-dashed border-slate-200 rounded-xl p-4 flex items-center gap-4 hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer"
+        onClick={() => fileRef.current?.click()}>
+        <Upload size={22} className="text-slate-400 shrink-0"/>
+        <div className="flex-1">
+          <p className="font-medium text-slate-600 text-sm">อัพโหลดไฟล์ Flash Excel (เลือกได้หลายไฟล์พร้อมกัน)</p>
+          <p className="text-xs text-slate-400 mt-0.5">รองรับ: ค่าพัสดุ · ค่าพัสดุเพิ่มเติม · โอนเงิน Flash Pay</p>
+        </div>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" multiple className="hidden" onChange={handleFiles}/>
+      </div>
+
+      {/* File tags */}
+      {fileInfos.length > 0 && (
+        <div className="shrink-0 flex flex-wrap gap-2">
+          {fileInfos.map((f, i) => (
+            <span key={i} className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 ${
+              f.type === 'ค่าพัสดุ'           ? 'bg-blue-100 text-blue-700' :
+              f.type === 'ค่าพัสดุเพิ่มเติม'  ? 'bg-orange-100 text-orange-700' :
+              f.type === 'โอนเงิน Flash Pay'  ? 'bg-green-100 text-green-700' :
+                                                  'bg-slate-100 text-slate-500'
+            }`}>
+              {f.type === 'ค่าพัสดุ' && '📦'}
+              {f.type === 'ค่าพัสดุเพิ่มเติม' && '➕'}
+              {f.type === 'โอนเงิน Flash Pay' && '💳'}
+              {f.name} · {f.rows} แถว
+            </span>
+          ))}
+          <button onClick={clearAll} className="px-3 py-1.5 rounded-full text-xs bg-slate-100 text-slate-500 hover:bg-red-100 hover:text-red-600 flex items-center gap-1">
+            <X size={11}/> ล้างทั้งหมด
+          </button>
+        </div>
+      )}
+
+      {/* Summary cards */}
+      {rows.length > 0 && (
+        <div className="shrink-0 grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+            <div className="text-xs text-green-700 font-semibold mb-1">💳 เติม Flash Pay</div>
+            <div className="text-lg font-bold text-green-800">฿{fmt(totalTopup)}</div>
+            <div className="text-xs text-green-500">{topups.length} ครั้ง</div>
+          </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+            <div className="text-xs text-blue-700 font-semibold mb-1">📦 ค่าพัสดุ</div>
+            <div className="text-lg font-bold text-blue-800">฿{fmt(totalBase)}</div>
+            <div className="text-xs text-blue-500">{rows.filter(r=>r.base>0).length} tracking</div>
+          </div>
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3">
+            <div className="text-xs text-orange-700 font-semibold mb-1">➕ ค่าพัสดุเพิ่มเติม</div>
+            <div className="text-lg font-bold text-orange-800">฿{fmt(totalExtra)}</div>
+            <div className="text-xs text-orange-500">{rows.filter(r=>r.extra>0).length} tracking</div>
+          </div>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+            <div className="text-xs text-red-700 font-semibold mb-1">🚚 ค่าขนส่งรวม</div>
+            <div className="text-lg font-bold text-red-800">฿{fmt(totalShip)}</div>
+            <div className="text-xs text-red-500">{rows.length} tracking</div>
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      {rows.length > 0 && (
+        <div className="shrink-0 flex gap-2 items-center flex-wrap">
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="ค้นหา Tracking / ออเดอร์ / ลูกค้า..."
+              className="pl-8 pr-3 py-2 border rounded-lg text-xs w-56 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+          </div>
+          {matched && (
+            <div className="flex gap-2 text-xs">
+              <span className="bg-green-100 text-green-700 px-3 py-1.5 rounded-full font-medium">✓ จับคู่ได้ {cntMatched}</span>
+              {cntNotFound > 0 && <span className="bg-red-100 text-red-600 px-3 py-1.5 rounded-full font-medium">❌ ไม่พบ {cntNotFound}</span>}
+            </div>
+          )}
+          <button onClick={handleMatch} disabled={matching || matched}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 flex items-center gap-2">
+            <RefreshCw size={13} className={matching ? 'animate-spin' : ''}/>
+            {matched ? '✓ จับคู่แล้ว' : matching ? 'กำลังจับคู่...' : '🔗 จับคู่กับออเดอร์'}
+          </button>
+          {matched && (
+            <button onClick={() => { setMatched(false); setTrackingMap(prev => { const n={...prev}; Object.values(n).forEach(r=>{r.matched=false;r.order_no=undefined;r.customer=undefined;r.raw_prod=undefined;}); return n; }); }}
+              className="px-3 py-2 bg-slate-200 rounded-lg text-xs hover:bg-slate-300">
+              รีเซ็ตจับคู่
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Table */}
+      {rows.length > 0 && (
+        <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+          <table className="text-xs w-full" style={{minWidth:'900px'}}>
+            <thead className="bg-slate-800 text-slate-200 sticky top-0 z-10">
+              <tr>
+                <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                <th className="p-3 text-left whitespace-nowrap">Tracking No.</th>
+                <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
+                <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                <th className="p-3 text-left">สินค้า</th>
+                <th className="p-3 text-right whitespace-nowrap">ค่าพัสดุ</th>
+                <th className="p-3 text-right whitespace-nowrap">ค่าเพิ่มเติม</th>
+                <th className="p-3 text-right whitespace-nowrap">รวม</th>
+                {matched && <th className="p-3 text-center whitespace-nowrap">สถานะ</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRows.length === 0 && (
+                <tr><td colSpan={9} className="p-8 text-center text-slate-400">ไม่พบรายการ</td></tr>
+              )}
+              {filteredRows.map(r => (
+                <tr key={r.tracking}
+                  className={`border-b ${matched && !r.matched ? 'bg-red-50' : matched && r.matched ? 'hover:bg-green-50' : 'hover:bg-slate-50'}`}>
+                  <td className="p-3 text-slate-500 whitespace-nowrap">{r.date}</td>
+                  <td className="p-3 font-mono text-blue-600 whitespace-nowrap">{r.tracking}</td>
+                  <td className="p-3 font-mono text-slate-600 whitespace-nowrap">{r.order_no || (matched ? '-' : '')}</td>
+                  <td className="p-3 font-medium whitespace-nowrap">{r.customer || (matched ? '-' : '')}</td>
+                  <td className="p-3 text-slate-500 max-w-[180px] truncate">{r.raw_prod || ''}</td>
+                  <td className="p-3 text-right text-blue-700 font-medium">{r.base > 0 ? `฿${fmt(r.base)}` : '-'}</td>
+                  <td className="p-3 text-right text-orange-600">{r.extra > 0 ? `+฿${fmt(r.extra)}` : '-'}</td>
+                  <td className="p-3 text-right font-bold text-red-700">฿{fmt(r.total)}</td>
+                  {matched && (
+                    <td className="p-3 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${r.matched ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                        {r.matched ? '✓ พบออเดอร์' : '❌ ไม่พบ'}
+                      </span>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="bg-slate-50 border-t-2 sticky bottom-0 font-bold text-[11px]">
+              <tr>
+                <td className="p-3 text-slate-600" colSpan={5}>รวม {filteredRows.length} tracking</td>
+                <td className="p-3 text-right text-blue-700">฿{fmt(filteredRows.reduce((s,r)=>s+r.base,0))}</td>
+                <td className="p-3 text-right text-orange-600">+฿{fmt(filteredRows.reduce((s,r)=>s+r.extra,0))}</td>
+                <td className="p-3 text-right text-red-700">฿{fmt(filteredRows.reduce((s,r)=>s+r.total,0))}</td>
+                {matched && <td/>}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {rows.length === 0 && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-300">
+          <Upload size={48} strokeWidth={1}/>
+          <div className="text-center">
+            <p className="text-sm font-medium text-slate-400">อัพโหลดไฟล์ Flash Excel เพื่อวิเคราะห์ค่าขนส่ง</p>
+            <p className="text-xs text-slate-300 mt-1">สามารถอัพโหลดหลายไฟล์พร้อมกันได้ — ระบบจะ merge อัตโนมัติ</p>
+          </div>
+          <div className="flex gap-2 text-xs mt-1">
+            <span className="bg-blue-50 border border-blue-100 text-blue-500 px-3 py-1.5 rounded-lg">📦 ค่าพัสดุ</span>
+            <span className="bg-orange-50 border border-orange-100 text-orange-500 px-3 py-1.5 rounded-lg">➕ ค่าพัสดุเพิ่มเติม</span>
+            <span className="bg-green-50 border border-green-100 text-green-500 px-3 py-1.5 rounded-lg">💳 โอนเงิน Flash Pay</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
