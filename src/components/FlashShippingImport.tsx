@@ -176,6 +176,9 @@ export default function FlashShippingImport() {
   const [matched, setMatched] = useState<boolean>(
     () => readStorage(STORAGE_KEY)?.matched ?? false
   );
+  const [shipDate, setShipDate]   = useState(
+    () => new Date().toISOString().split('T')[0]  // default วันนี้
+  );
   const [matching, setMatching]   = useState(false);
   const [saving, setSaving]       = useState(false);
   const [loadingDB, setLoadingDB] = useState(false);
@@ -297,7 +300,7 @@ export default function FlashShippingImport() {
     try {
       const flashRows = Object.values(map).map(r => ({
         tracking:  r.tracking,
-        ship_date: r.date || null,
+        ship_date: shipDate,   // วันที่จัดส่งที่ user เลือก
         base_thb:  r.base,
         extra_thb: r.extra,
         total_thb: r.total,
@@ -307,6 +310,20 @@ export default function FlashShippingImport() {
         matched:   r.matched,
       }));
       await supabase.from('shipping_flash').upsert(flashRows, { onConflict: 'tracking' });
+
+      // อัพเดต orders.ship_date สำหรับออเดอร์ที่จับคู่แล้ว
+      const matchedTrackings = Object.values(map)
+        .filter(r => r.matched)
+        .map(r => r.tracking);
+      if (matchedTrackings.length > 0) {
+        // batch update ทีละ 500
+        for (let i = 0; i < matchedTrackings.length; i += 500) {
+          const batch = matchedTrackings.slice(i, i + 500);
+          await supabase.from('orders')
+            .update({ ship_date: shipDate })
+            .in('tracking_no', batch);
+        }
+      }
 
       const newTopups = topups.filter(t => !t.saved);
       if (newTopups.length > 0) {
@@ -426,29 +443,42 @@ export default function FlashShippingImport() {
   return (
     <div className="flex flex-col h-full gap-3">
 
-      {/* Upload zone */}
-      <div
-        className="shrink-0 border-2 border-dashed border-slate-200 rounded-xl p-4 flex items-center gap-4
-                   hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer"
-        onClick={() => fileRef.current?.click()}
-      >
-        <Upload size={22} className="text-slate-400 shrink-0" />
-        <div className="flex-1">
-          <p className="font-medium text-slate-600 text-sm">
-            อัพโหลดไฟล์ Flash Excel (เลือกได้หลายไฟล์พร้อมกัน)
-          </p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            รองรับ: ค่าพัสดุ · ค่าพัสดุเพิ่มเติม · โอนเงิน Flash Pay
-          </p>
+      {/* Upload zone + วันที่จัดส่ง */}
+      <div className="shrink-0 flex gap-3 items-stretch">
+        <div
+          className="flex-1 border-2 border-dashed border-slate-200 rounded-xl p-4 flex items-center gap-4
+                     hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer"
+          onClick={() => fileRef.current?.click()}
+        >
+          <Upload size={22} className="text-slate-400 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium text-slate-600 text-sm">
+              อัพโหลดไฟล์ Flash Excel (เลือกได้หลายไฟล์พร้อมกัน)
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              รองรับ: ค่าพัสดุ · ค่าพัสดุเพิ่มเติม · โอนเงิน Flash Pay
+            </p>
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls"
+            multiple
+            className="hidden"
+            onChange={handleFiles}
+          />
         </div>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".xlsx,.xls"
-          multiple
-          className="hidden"
-          onChange={handleFiles}
-        />
+        {/* วันที่จัดส่งจริง */}
+        <div className="shrink-0 border rounded-xl p-3 bg-white flex flex-col justify-center gap-1 min-w-[130px]">
+          <label className="text-[10px] text-slate-400 font-medium">📅 วันที่จัดส่ง</label>
+          <input
+            type="date"
+            value={shipDate}
+            onChange={e => setShipDate(e.target.value)}
+            className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 text-slate-700"
+          />
+          <p className="text-[10px] text-slate-400">บันทึกลงออเดอร์อัตโนมัติ</p>
+        </div>
       </div>
 
       {/* Error banner */}
