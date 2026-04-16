@@ -36,6 +36,9 @@ export default function FlashExport() {
   const [exportedOrders, setExportedOrders] = useState<Order[]>([]);
   const [printedOrders, setPrintedOrders]   = useState<Order[]>([]);
   const [loading, setLoading]             = useState(true);
+  const [shipDate, setShipDate]           = useState(
+    () => new Date().toISOString().split('T')[0]
+  );
   const [exporting, setExporting]         = useState(false);
   const [reExporting, setReExporting]     = useState(false);
   const [previewing, setPreviewing]       = useState(false);
@@ -182,7 +185,9 @@ export default function FlashExport() {
     URL.revokeObjectURL(url);
     if (updateStatus) {
       const ids = targetOrders.map(o => o.id);
-      await supabase.from('orders').update({ order_status: 'รอแพ็ค' }).in('id', ids);
+      await supabase.from('orders')
+        .update({ order_status: 'รอแพ็ค', ship_date: shipDate })
+        .in('id', ids);
       setOrders([]); setSelectedPending(new Set());
       await Promise.all([loadOrders(), loadPackReady()]);
     }
@@ -390,6 +395,15 @@ export default function FlashExport() {
               className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2 disabled:opacity-50 text-sm">
               <Eye size={16}/> {previewing?'กำลังโหลด...':'ดูตัวอย่าง'}{selectedPending.size>0?` (${selectedPending.size})`:''}
             </button>
+            <div className="flex flex-col">
+                <label className="text-[10px] text-slate-400 mb-0.5 font-medium">📅 วันที่จัดส่ง</label>
+                <input
+                  type="date"
+                  value={shipDate}
+                  onChange={e => setShipDate(e.target.value)}
+                  className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-yellow-300 text-slate-700"
+                />
+              </div>
             <button onClick={handleExport} disabled={orders.length===0||exporting}
               className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 flex items-center gap-2 disabled:opacity-50 text-sm">
               <Download size={16}/> {exporting?'กำลังส่งออก...':`ส่งออก Flash (${pendingCount} รายการ)`}
@@ -624,7 +638,7 @@ export default function FlashExport() {
                   const withTracking = printedOrders.filter(o => (o as any).tracking_no);
                   if (!confirm(`ยืนยันส่งแล้ว ${withTracking.length} ออเดอร์ที่มี Tracking?\nจะย้ายไปแท็บ ส่งสำเร็จ`)) return;
                   await supabase.from('orders')
-                    .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง' })
+                    .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง', ship_date: shipDate })
                     .in('id', withTracking.map(o => o.id));
                   await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
                 }}
@@ -700,7 +714,7 @@ export default function FlashExport() {
                           <button
                             onClick={async () => {
                               await supabase.from('orders')
-                                .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง' }).eq('id', o.id);
+                                .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง', ship_date: shipDate }).eq('id', o.id);
                               await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
                             }}
                             className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold whitespace-nowrap">
