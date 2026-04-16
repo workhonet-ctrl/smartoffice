@@ -449,7 +449,7 @@ export default function MyOrderExport() {
                 {packReadyOrders.map(o => (
                   <tr key={o.id} className="border-b hover:bg-teal-50">
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
-                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">{(o as any).ship_date ? (o as any).ship_date.split(\'-\').reverse().join(\'-\') : <span className="text-slate-300">-</span>}</td>
+                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">{(o as any).ship_date ? String((o as any).ship_date).split('-').reverse().join('-') : '-'}</td>
                     <td className="p-3 font-mono text-xs text-teal-700 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
@@ -496,7 +496,7 @@ export default function MyOrderExport() {
                 {filteredExported.map(o=>(
                   <tr key={o.id} className="border-b hover:bg-green-50">
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date||'-'}</td>
-                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">{(o as any).ship_date ? (o as any).ship_date.split(\'-\').reverse().join(\'-\') : <span className="text-slate-300">-</span>}</td>
+                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">{(o as any).ship_date ? String((o as any).ship_date).split('-').reverse().join('-') : '-'}</td>
                     <td className="p-3 font-mono text-xs text-green-700 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name||'-'}</td>
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel||'-'}</td>
@@ -583,7 +583,7 @@ export default function MyOrderExport() {
                   return (
                     <tr key={o.id} className={`border-b ${hasTracking?'bg-green-50 hover:bg-green-100':'hover:bg-orange-50'}`}>
                       <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date||'-'}</td>
-                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">{(o as any).ship_date ? (o as any).ship_date.split(\'-\').reverse().join(\'-\') : <span className="text-slate-300">-</span>}</td>
+                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">{(o as any).ship_date ? String((o as any).ship_date).split('-').reverse().join('-') : '-'}</td>
                       <td className="p-3 font-mono text-xs text-orange-700 whitespace-nowrap">{o.order_no}</td>
                       <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name||'-'}</td>
                       <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel||'-'}</td>
