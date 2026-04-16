@@ -103,6 +103,7 @@ type PromoFormState = {
   name: string;
   short_name: string;
   price_thb: number;
+  ship_thb: number;
   box_id: string;
   bubble_id: string;
   color: string;
@@ -122,6 +123,7 @@ const emptyPromoForm: PromoFormState = {
   name: '',
   short_name: '',
   price_thb: 0,
+  ship_thb: 0,
   box_id: '',
   bubble_id: '',
   color: '',
@@ -413,6 +415,7 @@ export default function Products() {
         name: promoForm.name.trim(),
         short_name: promoForm.short_name.trim() || null,
         price_thb: Number(promoForm.price_thb) || 0,
+        ship_thb: Number(promoForm.ship_thb) || 0,
         box_id: promoForm.box_id || null,
         bubble_id: promoForm.bubble_id || null,
         color: promoForm.color.trim() || 'ไม่มี',
@@ -668,7 +671,7 @@ export default function Products() {
                     <td className="p-2 text-xs whitespace-nowrap">{p.boxes?.name || '-'}</td>
                     <td className="p-2 text-xs whitespace-nowrap">{p.bubbles?.name || '-'}</td>
                     <td className="p-2 text-center whitespace-nowrap">
-                      <button onClick={() => { setEditingPromo(p); setPromoForm({ id: p.id, master_id: p.master_id, name: p.name, short_name: p.short_name || '', price_thb: Number(p.price_thb) || 0, box_id: p.box_id || '', bubble_id: p.bubble_id || '', color: p.color || '', item_type: p.item_type || 'อื่นๆ' }); setShowPromoForm(true); }} className="text-blue-600 hover:text-blue-800 mr-2"><Edit2 size={16}/></button>
+                      <button onClick={() => { setEditingPromo(p); setPromoForm({ id: p.id, master_id: p.master_id, name: p.name, short_name: p.short_name || '', price_thb: Number(p.price_thb) || 0, ship_thb: Number((p as any).ship_thb) || 0, box_id: p.box_id || '', bubble_id: p.bubble_id || '', color: p.color || '', item_type: p.item_type || 'อื่นๆ' }); setShowPromoForm(true); }} className="text-blue-600 hover:text-blue-800 mr-2"><Edit2 size={16}/></button>
                       <button onClick={() => deletePromo(p.id)} className="text-red-600 hover:text-red-800"><Trash2 size={16}/></button>
                     </td>
                   </tr>
@@ -859,6 +862,19 @@ export default function Products() {
                   onChange={(e) => setPromoForm({ ...promoForm, price_thb: Number(e.target.value) })}
                   className="w-full border rounded px-3 py-2"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">ค่าขนส่ง (THB)</label>
+                <input
+                  type="number"
+                  value={promoForm.ship_thb || ''}
+                  onChange={(e) => setPromoForm({ ...promoForm, ship_thb: Number(e.target.value) })}
+                  className="w-full border rounded px-3 py-2"
+                  placeholder="เช่น 60"
+                  min="0"
+                />
+                <p className="text-xs text-slate-400 mt-0.5">ค่าขนส่งสำหรับสินค้าขนาดนี้ — ใช้คำนวณกำไรในบัญชีรายวัน</p>
               </div>
 
               <div>
