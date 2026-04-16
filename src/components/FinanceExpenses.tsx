@@ -12,7 +12,7 @@ type PO = {
   id: string; po_no: string; po_date: string; supplier_name: string;
   total_thb: number; status: string; items: any[];
 };
-type SubTab = 'records' | 'po';
+type SubTab = 'records' | 'po' | 'ads' | 'shipping' | 'all';
 const EXP_CATS = ['ค่าวัตถุดิบ/สินค้า','ค่าจัดส่ง','ค่าบรรจุภัณฑ์','ค่าเงินเดือน','ค่าโฆษณา','ค่าสาธารณูปโภค','ค่าเช่า','อื่นๆ'];
 const fmt = (n:number) => n.toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtDate = (d:string) => new Date(d).toLocaleDateString('th-TH');
@@ -141,12 +141,21 @@ export default function FinanceExpenses() {
   return (
     <div className="flex flex-col h-full">
       {/* Sub-tabs */}
-      <div className="shrink-0 flex gap-1 bg-slate-100 p-1 rounded-xl w-fit mb-4">
+      <div className="shrink-0 flex gap-1 bg-slate-100 p-1 rounded-xl w-fit mb-4 flex-wrap">
         <button onClick={()=>setSubTab('records')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='records'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
-          ใบบันทึกรายจ่าย <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='records'?'bg-red-100 text-red-700':'bg-slate-200 text-slate-500'}`}>{records.length}</span>
+          📄 ใบบันทึกรายจ่าย <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='records'?'bg-red-100 text-red-700':'bg-slate-200 text-slate-500'}`}>{records.length}</span>
         </button>
         <button onClick={()=>setSubTab('po')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='po'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
-          ใบสั่งซื้อ (PO) <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='po'?'bg-purple-100 text-purple-700':'bg-slate-200 text-slate-500'}`}>{pos.length}</span>
+          🛒 ใบสั่งซื้อ (PO) <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='po'?'bg-purple-100 text-purple-700':'bg-slate-200 text-slate-500'}`}>{pos.length}</span>
+        </button>
+        <button onClick={()=>setSubTab('ads')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='ads'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
+          📢 ค่าโฆษณา <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='ads'?'bg-pink-100 text-pink-700':'bg-slate-200 text-slate-500'}`}>{records.filter(r=>r.category==='ค่าโฆษณา').length}</span>
+        </button>
+        <button onClick={()=>setSubTab('shipping')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='shipping'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
+          🚚 ค่าขนส่ง <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='shipping'?'bg-blue-100 text-blue-700':'bg-slate-200 text-slate-500'}`}>{records.filter(r=>r.category==='ค่าจัดส่ง').length}</span>
+        </button>
+        <button onClick={()=>setSubTab('all')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='all'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
+          📋 ทั้งหมด
         </button>
       </div>
 
@@ -271,6 +280,81 @@ export default function FinanceExpenses() {
           </div>
         </>
       )}
+
+      {/* ── Tab: ค่าโฆษณา ── */}
+      {(subTab === 'ads' || subTab === 'shipping' || subTab === 'all') && (() => {
+        const catMap: Record<string, string> = { ads: 'ค่าโฆษณา', shipping: 'ค่าจัดส่ง', all: '' };
+        const tabRows = records.filter(r => {
+          const cat = catMap[subTab];
+          if (cat && r.category !== cat) return false;
+          const q = search.toLowerCase();
+          if (q && !(r.description.toLowerCase().includes(q) || (r.doc_no||'').toLowerCase().includes(q))) return false;
+          return true;
+        });
+        const tabTotal = tabRows.reduce((s,r) => s+Number(r.amount_thb), 0);
+        const tabColor = subTab==='ads' ? 'bg-pink-50 text-pink-700' : subTab==='shipping' ? 'bg-blue-50 text-blue-700' : 'bg-slate-50 text-slate-700';
+        return (
+          <>
+            {/* Summary */}
+            <div className="shrink-0 flex gap-3 mb-3 flex-wrap items-center">
+              <div className={`rounded-xl px-4 py-3 border ${subTab==='ads'?'bg-pink-50 border-pink-200':subTab==='shipping'?'bg-blue-50 border-blue-200':'bg-slate-50 border-slate-200'}`}>
+                <div className="text-xs text-slate-500 font-semibold mb-0.5">ยอดรวม</div>
+                <div className="text-xl font-bold">฿{fmt(tabTotal)}</div>
+                <div className="text-xs text-slate-400">{tabRows.length} รายการ</div>
+              </div>
+              {/* search */}
+              <div className="relative">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                <input value={search} onChange={e=>setSearch(e.target.value)}
+                  placeholder="ค้นหารายการ..."
+                  className="pl-8 pr-3 py-2 border rounded-lg text-xs w-48 focus:outline-none focus:ring-2 focus:ring-red-300"/>
+              </div>
+            </div>
+            <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+              <table className="text-sm w-full" style={{minWidth:'650px'}}>
+                <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0">
+                  <tr>
+                    <th className="p-3 text-left">เลขที่</th>
+                    <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                    <th className="p-3 text-left">รายการ</th>
+                    <th className="p-3 text-center whitespace-nowrap">หมวด</th>
+                    <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
+                    <th className="p-3 text-left">หมายเหตุ</th>
+                    <th className="p-3 w-10"/>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tabRows.length===0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">ไม่มีรายการ</td></tr>}
+                  {tabRows.map(r=>(
+                    <tr key={r.id} className="border-b hover:bg-red-50">
+                      <td className="p-3 font-mono text-xs text-slate-500">{r.doc_no||'-'}</td>
+                      <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{fmtDate(r.expense_date)}</td>
+                      <td className="p-3 font-medium">{r.description}</td>
+                      <td className="p-3 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${r.category==='ค่าโฆษณา'?'bg-pink-100 text-pink-700':r.category==='ค่าจัดส่ง'?'bg-blue-100 text-blue-700':'bg-red-100 text-red-700'}`}>
+                          {r.category}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right font-bold text-red-600">฿{fmt(Number(r.amount_thb))}</td>
+                      <td className="p-3 text-xs text-slate-400">{r.note||'-'}</td>
+                      <td className="p-3 text-center">
+                        <button onClick={()=>handleDelete(r.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-slate-50 border-t-2 sticky bottom-0">
+                  <tr>
+                    <td colSpan={4} className="p-3 text-right font-semibold text-slate-600">รวม {tabRows.length} รายการ</td>
+                    <td className="p-3 text-right font-bold text-red-600 text-base">฿{fmt(tabTotal)}</td>
+                    <td colSpan={2}/>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </>
+        );
+      })()}
 
       {/* Modal เพิ่มรายจ่าย */}
       {showModal && (
