@@ -140,25 +140,33 @@ export default function MyOrderImport() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Session persistence ─────────────────────────────────────
-  const _s = readStorage(STORAGE_KEY);
-  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>(() => _s?.trackingMap ?? {});
-  const [fileInfos, setFileInfos]     = useState<FileInfo[]>(() => _s?.fileInfos ?? []);
-  const [matched, setMatched]         = useState<boolean>(() => _s?.matched ?? false);
-  const [matching, setMatching]       = useState(false);
-  const [saving, setSaving]           = useState(false);
-  const [loadingDB, setLoadingDB]     = useState(false);
-  const [isSaved, setIsSaved]         = useState(false);
-  const [search, setSearch]           = useState('');
-  const [error, setError]             = useState<string | null>(null);
+  const [trackingMap, setTrackingMap] = useState<Record<string, TrackingRow>>(
+    () => readStorage(STORAGE_KEY)?.trackingMap ?? {}
+  );
+  const [fileInfos, setFileInfos] = useState<FileInfo[]>(
+    () => readStorage(STORAGE_KEY)?.fileInfos ?? []
+  );
+  const [matched, setMatched] = useState<boolean>(
+    () => readStorage(STORAGE_KEY)?.matched ?? false
+  );
+  const [matching, setMatching]   = useState(false);
+  const [saving, setSaving]       = useState(false);
+  const [loadingDB, setLoadingDB] = useState(false);
+  const [search, setSearch]       = useState('');
+  const [error, setError]         = useState<string | null>(null);
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ trackingMap, fileInfos, matched }),
-      );
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ trackingMap, fileInfos, matched }));
     } catch {}
   }, [trackingMap, fileInfos, matched]);
+
+  // auto-load จาก Supabase เมื่อเปิดหน้า
+  useEffect(() => {
+    if (Object.keys(trackingMap).length === 0) {
+      handleLoad();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── File handling ───────────────────────────────────────────
 
@@ -178,8 +186,7 @@ export default function MyOrderImport() {
         setTrackingMap(prev => mergeResults(prev, results));
         setFileInfos(prev => [...prev, ...results.map(r => r.fileInfo)]);
         setMatched(false);
-        setIsSaved(false);
-      }
+        }
     };
 
     for (const file of files) {
@@ -206,43 +213,6 @@ export default function MyOrderImport() {
     e.target.value = '';
   };
 
-  // ── Save to Supabase ───────────────────────────────────────
-
-  const handleSave = async () => {
-    const rows = Object.values(trackingMap);
-    if (!rows.length) return;
-    setSaving(true);
-    setError(null);
-
-    try {
-      const myorderRows = rows.map(r => ({
-        tracking:    r.tracking,
-        page:        r.page        || null,
-        consignee:   r.consignee   || null,
-        weight_kg:   r.weight,
-        cod_thb:     r.cod,
-        cod_fee_thb: r.cod_fee,
-        freight_thb: r.freight,
-        total_thb:   r.total,
-        order_no:    r.order_no    ?? null,
-        customer:    r.customer    ?? null,
-        raw_prod:    r.raw_prod    ?? null,
-        matched:     r.matched,
-      }));
-
-      const { error: e } = await supabase
-        .from('shipping_myorder')
-        .upsert(myorderRows, { onConflict: 'tracking' });
-      if (e) throw e;
-
-      setIsSaved(true);
-    } catch (err: any) {
-      setError(`บันทึกไม่สำเร็จ: ${err?.message ?? String(err)}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   // ── Load from Supabase ──────────────────────────────────────
 
   const handleLoad = async () => {
@@ -250,8 +220,7 @@ export default function MyOrderImport() {
     setError(null);
     try {
       const { data, error: e } = await supabase
-        .from('shipping_myorder')
-        .select('*')
+        .from('shipping_myorder').select('*')
         .order('imported_at', { ascending: false });
       if (e) throw e;
 
@@ -276,11 +245,37 @@ export default function MyOrderImport() {
       setTrackingMap(loaded);
       setFileInfos([{ name: '📂 โหลดจาก Supabase', rows: Object.keys(loaded).length }]);
       setMatched(Object.values(loaded).some(r => r.matched));
-      setIsSaved(true);
     } catch (err: any) {
       setError(`โหลดไม่สำเร็จ: ${err?.message ?? String(err)}`);
     } finally {
       setLoadingDB(false);
+    }
+  };
+
+  // ── Auto-save ──────────────────────────────────────────────
+
+  const autoSave = async (map: Record<string, TrackingRow>) => {
+    setSaving(true);
+    try {
+      const rows = Object.values(map).map(r => ({
+        tracking:    r.tracking,
+        page:        r.page     || null,
+        consignee:   r.consignee || null,
+        weight_kg:   r.weight,
+        cod_thb:     r.cod,
+        cod_fee_thb: r.cod_fee,
+        freight_thb: r.freight,
+        total_thb:   r.total,
+        order_no:    r.order_no ?? null,
+        customer:    r.customer ?? null,
+        raw_prod:    r.raw_prod ?? null,
+        matched:     r.matched,
+      }));
+      await supabase.from('shipping_myorder').upsert(rows, { onConflict: 'tracking' });
+    } catch (err) {
+      console.error('auto-save failed:', err);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -308,24 +303,21 @@ export default function MyOrderImport() {
         allData.push(...(data ?? []));
       }
 
-      setTrackingMap(prev => {
-        const updated = { ...prev };
-        for (const o of allData) {
-          if (updated[o.tracking_no]) {
-            updated[o.tracking_no] = {
-              ...updated[o.tracking_no],
-              order_no: o.order_no,
-              customer: o.customers?.name,
-              raw_prod: o.raw_prod,
-              matched:  true,
-            };
-          }
+      const updatedMap = { ...trackingMap };
+      for (const o of allData) {
+        if (updatedMap[o.tracking_no]) {
+          updatedMap[o.tracking_no] = {
+            ...updatedMap[o.tracking_no],
+            order_no: o.order_no,
+            customer: o.customers?.name,
+            raw_prod: o.raw_prod,
+            matched:  true,
+          };
         }
-        return updated;
-      });
-
+      }
+      setTrackingMap(updatedMap);
       setMatched(true);
-      setIsSaved(false);
+      await autoSave(updatedMap);
     } catch (err: any) {
       setError(`จับคู่ไม่สำเร็จ: ${err?.message ?? String(err)}`);
     } finally {
@@ -335,7 +327,6 @@ export default function MyOrderImport() {
 
   const resetMatch = () => {
     setMatched(false);
-    setIsSaved(false);
     setTrackingMap(prev => {
       const reset = { ...prev };
       for (const k of Object.keys(reset)) {
@@ -356,7 +347,6 @@ export default function MyOrderImport() {
     setTrackingMap({});
     setFileInfos([]);
     setMatched(false);
-    setIsSaved(false);
     setSearch('');
     setError(null);
   };
@@ -516,18 +506,10 @@ export default function MyOrderImport() {
             </button>
           )}
 
-          {rows.length > 0 && (
-            <button
-              onClick={handleSave}
-              disabled={saving || isSaved}
-              className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 ${
-                isSaved
-                  ? 'bg-emerald-100 text-emerald-700 cursor-default'
-                  : 'bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50'
-              }`}
-            >
-              {saving ? '⏳ กำลังบันทึก...' : isSaved ? '✓ บันทึกแล้ว' : '💾 บันทึกลง Supabase'}
-            </button>
+          {saving && (
+            <span className="text-xs text-emerald-600 flex items-center gap-1.5 px-3 py-2 bg-emerald-50 rounded-lg">
+              <RefreshCw size={12} className="animate-spin"/> กำลังบันทึก...
+            </span>
           )}
         </div>
       )}
@@ -638,14 +620,9 @@ export default function MyOrderImport() {
               ➕ COD Fee
             </span>
           </div>
-          <button
-            onClick={handleLoad}
-            disabled={loadingDB}
-            className="mt-2 px-5 py-2.5 bg-purple-500 text-white rounded-lg text-sm font-medium
-                       hover:bg-purple-600 disabled:opacity-60 flex items-center gap-2"
-          >
-            {loadingDB ? '⏳ กำลังโหลด...' : '📂 โหลดข้อมูลที่บันทึกไว้'}
-          </button>
+          <span className="text-xs text-slate-400">
+            {loadingDB ? '⏳ กำลังโหลดข้อมูล...' : 'ไม่มีข้อมูล — อัพโหลดไฟล์ใหม่ได้เลย'}
+          </span>
         </div>
       )}
 
