@@ -41,8 +41,8 @@ export default function Customers() {
     added: number; updated: number; skipped: number;
     unmapped: string[];
   } | null>(null);
-  const [toast, setToast] = useState<{ msg: string; type: 'success'|'error' } | null>(null);
-  const showToast = (msg: string, type: 'success'|'error' = 'success') => {
+  const [toast, setToast] = useState<{ msg: string; type: 'success'|'error'|'warning' } | null>(null);
+  const showToast = (msg: string, type: 'success'|'error'|'warning' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 5000);
   };
 
@@ -506,7 +506,7 @@ export default function Customers() {
       {/* Toast */}
       {toast && (
         <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-4 rounded-xl shadow-2xl text-white text-sm font-medium
-          ${toast.type === 'success' ? 'bg-emerald-500' : type === 'warning' ? 'bg-orange-500' : 'bg-red-500'}`}
+          ${toast.type === 'success' ? 'bg-emerald-500' : toast.type === 'warning' ? 'bg-orange-500' : 'bg-red-500'}`}
           style={{minWidth:'260px'}}>
           <span>{toast.msg}</span>
           <button onClick={() => setToast(null)} className="ml-auto opacity-70 hover:opacity-100 text-lg leading-none">×</button>
