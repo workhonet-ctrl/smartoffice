@@ -56,7 +56,7 @@ export default function App() {
       case 'stock':          return <Stock onGoToPO={() => setActivePage('purchase-order')} />;
       case 'purchase-order': return <PurchaseOrder />;
       case 'suppliers':      return <Suppliers />;
-      case 'customers':      return <Customers />;
+      case 'customers':      return <Customers onGoToProducts={() => setActivePage('products')} />;
       case 'orders':         return <Orders onImportDone={goToPackaging} />;
       case 'flash-export':   return <FlashExport />;
       case 'myorder-export': return <MyOrderExport />;
