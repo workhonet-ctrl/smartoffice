@@ -75,7 +75,7 @@ export default function FinanceDaily() {
       const promoMap: Record<string, any> = {};
       if (allIds.length > 0) {
         const { data: promos } = await supabase.from('products_promo')
-          .select('id, name, boxes(price_thb), bubbles(price_thb, length_cm), products_master(cost_thb, name)')
+          .select('id, name, ship_thb, boxes(price_thb), bubbles(price_thb, length_cm), products_master(cost_thb, name)')
           .in('id', allIds);
         (promos||[]).forEach((p:any) => { promoMap[p.id] = p; });
       }
@@ -98,7 +98,7 @@ export default function FinanceDaily() {
 
           if (o.promo_ids?.length) {
             const qtys = String(o.quantities||o.quantity||'1').split('|');
-            let oGoods = 0, oBox = 0, oBubble = 0;
+            let oGoods = 0, oBox = 0, oBubble = 0, oShipFromPromo = 0;
             for (let i = 0; i < o.promo_ids.length; i++) {
               const promo = promoMap[o.promo_ids[i]]; if (!promo) continue;
               const qty = Number(qtys[i]?.trim())||1;
@@ -108,9 +108,16 @@ export default function FinanceDaily() {
               oGoods += master?.cost_thb ? Number(master.cost_thb)*pieces : 0;
               if (i===0 && box?.price_thb)  oBox    += Number(box.price_thb);
               if (i===0 && bub?.price_thb && bub?.length_cm>0) oBubble += Number(bub.price_thb);
+              // ค่าขนส่งจาก promo (ถ้ามี) ไม่งั้นใช้จาก shipping_thb ของ order
+              if (promo.ship_thb) oShipFromPromo += Number(promo.ship_thb) * qty;
             }
             o._cost_goods = oGoods; o._cost_box = oBox; o._cost_bubble = oBubble;
+            // ใช้ ship จาก promo ถ้ามี ไม่งั้นใช้จาก order
+            if (oShipFromPromo > 0) o._ship = oShipFromPromo;
             sumCostGoods += oGoods; sumCostBox += oBox; sumCostBubble += oBubble;
+            sumShip += o._ship || 0;
+          } else {
+            sumShip += o._ship || 0;
           }
         }
 
