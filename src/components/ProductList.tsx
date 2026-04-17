@@ -11,6 +11,7 @@ type PromoRow = {
   color: string | null;
   item_type: string | null;
   active: boolean;
+  ship_thb: number | null;
   boxes:   { name: string; length_cm: number; width_cm: number; height_cm: number; price_thb: number } | null;
   bubbles: { length_cm: number | null; price_thb: number | null } | null;
 };
@@ -47,7 +48,7 @@ export default function ProductList() {
     try {
       const [mastersRes, promosRes] = await Promise.all([
         supabase.from('products_master').select('*').order('id', { ascending: true }),
-        supabase.from('products_promo').select('*, boxes(*), bubbles(*)').order('id', { ascending: true }),
+        supabase.from('products_promo').select('*, ship_thb, boxes(*), bubbles(*)').order('id', { ascending: true }),
       ]);
       if (mastersRes.error) throw mastersRes.error;
       if (promosRes.error) throw promosRes.error;
@@ -147,6 +148,7 @@ export default function ProductList() {
               <th className="p-3 text-right whitespace-nowrap">ต้นทุนรวม</th>
               <th className="p-3 text-left whitespace-nowrap">กล่อง</th>
               <th className="p-3 text-left whitespace-nowrap">บั้บเบิ้ล</th>
+              <th className="p-3 text-right whitespace-nowrap">ค่าขนส่ง (฿)</th>
               <th className="p-3 text-right whitespace-nowrap">น้ำหนัก (kg)</th>
             </tr>
           </thead>
@@ -223,6 +225,12 @@ export default function ProductList() {
                         </td>
                         <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
                           {promo.bubbles ? `ยาว ${Number(promo.bubbles.length_cm ?? 0)} cm` : <span className="text-slate-400">-</span>}
+                        </td>
+                        {/* ค่าขนส่ง */}
+                        <td className="p-3 text-right text-sm font-medium text-blue-600 whitespace-nowrap">
+                          {promo.ship_thb && Number(promo.ship_thb) > 0
+                            ? `฿${Number(promo.ship_thb).toFixed(2)}`
+                            : <span className="text-slate-300 text-xs">-</span>}
                         </td>
                         {/* น้ำหนัก — 0.5 ไม่ใช่ 0.500 */}
                         <td className="p-3 text-right text-sm font-medium text-slate-700 whitespace-nowrap">
