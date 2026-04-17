@@ -20,6 +20,7 @@ import { EMPTY_COD_STATE } from './components/FinanceIncome';
 import Marketing from './components/Marketing';
 import HR from './components/HR';
 import ComingSoon from './components/ComingSoon';
+import ProductKPI from './components/ProductKPI';
 
 type PageKey =
   // ฝ่ายขาย
@@ -67,7 +68,7 @@ export default function App() {
       // ฝ่ายสินค้า
       case 'product-list':   return <ProductList />;
       case 'product-search': return <ComingSoon title="หาสินค้า" description="ค้นหาสินค้าจากแหล่งต่างๆ" />;
-      case 'product-kpi':    return <ComingSoon title="KPI สินค้า" description="ติดตามผลการขายรายสินค้า" />;
+      case 'product-kpi':    return <ProductKPI />;
       case 'packaging':      return <PackingMaterials />;
       case 'pack-products':  return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} onCreateRequisition={goToRequisition}/>;
       case 'pack-history':   return <PackHistory />;
