@@ -3,165 +3,218 @@ import {
   Package, List, Users, ShoppingCart, Truck, FileSpreadsheet,
   DollarSign, UserCog, Archive, Warehouse, ChevronDown, ChevronRight,
   PackageCheck, FileText, BarChart2, ShoppingBag, Handshake,
-  History, TrendingUp, ArrowDownCircle,
+  History, TrendingUp, ArrowDownCircle, Search, Target,
+  BookOpen, UserPlus, GraduationCap, PieChart, Building2,
+  MessageSquare, Megaphone, Store,
 } from 'lucide-react';
 
 type PageKey =
-  | 'products' | 'product-list' | 'packaging' | 'pack-products' | 'pack-history'
-  | 'requisition' | 'stock' | 'purchase-order' | 'suppliers'
-  | 'customers' | 'orders' | 'flash-export' | 'myorder-export'
-  | 'finance-daily' | 'finance-monthly' | 'finance-yearly' | 'finance-expenses'
-  | 'finance-income'
-  | 'marketing-graphic' | 'marketing-ads' | 'marketing-admin'
-  | 'hr';
+  | 'sales-admin' | 'sales-customers' | 'sales-crm'
+  | 'marketing-graphic' | 'marketing-ads'
+  | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
+  | 'orders' | 'flash-export' | 'myorder-export'
+  | 'pack-products' | 'requisition' | 'pack-history'
+  | 'stock' | 'purchase-order' | 'suppliers'
+  | 'finance-daily' | 'finance-monthly' | 'finance-yearly'
+  | 'finance-expenses' | 'finance-income' | 'finance-cost'
+  | 'hr-recruit' | 'hr' | 'hr-train' | 'hr-kpi' | 'hr-sop';
 
 type SidebarProps = {
   activePage: PageKey;
   setActivePage: (page: PageKey) => void;
 };
 
-const warehouseSubMenus: { key: PageKey; label: string; icon: any }[] = [
-  { key: 'products',       label: 'เพิ่มสินค้า',          icon: Package },
-  { key: 'product-list',   label: 'รายการสินค้าทั้งหมด', icon: List },
-  { key: 'packaging',      label: 'วัสดุแพ็กสินค้า',       icon: Archive },
-  { key: 'orders',         label: 'ออเดอร์',                icon: ShoppingCart },
-  { key: 'pack-products',  label: 'แพ็คสินค้า',             icon: PackageCheck },
-  { key: 'pack-history',   label: 'ประวัติแพ็คสินค้า',       icon: History },
-  { key: 'requisition',    label: 'ใบเบิกสินค้า',           icon: FileText },
-  { key: 'stock',          label: 'จัดการสต็อก',             icon: BarChart2 },
-  { key: 'purchase-order', label: 'ใบสั่งซื้อ (PO)',          icon: ShoppingBag },
-  { key: 'suppliers',      label: 'จัดการผู้ขาย',             icon: Handshake },
-  { key: 'flash-export',   label: 'Flash Export',           icon: Truck },
-  { key: 'myorder-export', label: 'MyOrder Export',         icon: FileSpreadsheet },
-];
+type MenuItem = { key: PageKey; label: string; icon: any; built?: boolean };
 
-const marketingSubMenus: { key: PageKey; label: string; icon: any }[] = [
-  { key: 'marketing-graphic', label: 'กราฟฟิก',   icon: BarChart2 },
-  { key: 'marketing-ads',     label: 'โฆษณา ADS', icon: TrendingUp },
-  { key: 'marketing-admin',   label: 'แอดมิน',    icon: UserCog   },
-];
-
-const financeSubMenus: { key: PageKey; label: string; icon: any }[] = [
-  { key: 'finance-daily',    label: 'บัญชีรายวัน',   icon: BarChart2 },
-  { key: 'finance-monthly',  label: 'บัญชีรายเดือน', icon: BarChart2 },
-  { key: 'finance-yearly',   label: 'บัญชีรายปี',    icon: BarChart2 },
-  { key: 'finance-expenses', label: 'รายจ่าย',       icon: FileText  },
-  { key: 'finance-income',   label: 'รายรับ',        icon: ArrowDownCircle },
+// accent สีต่างกันต่อแผนก
+const GROUPS = [
+  {
+    key: 'sales', label: 'ฝ่ายขาย', icon: Store,
+    accent: '#0ea5e9', bg: '#f0f9ff', dot: '#0ea5e9',
+    menus: [
+      { key: 'sales-admin',     label: 'แอดมิน',    icon: UserCog,       built: true  },
+      { key: 'sales-customers', label: 'ตามลูกค้า', icon: Users,         built: true  },
+      { key: 'sales-crm',       label: 'CRM',        icon: MessageSquare, built: false },
+    ] as MenuItem[],
+  },
+  {
+    key: 'marketing', label: 'ฝ่ายการตลาด', icon: Megaphone,
+    accent: '#ec4899', bg: '#fdf2f8', dot: '#ec4899',
+    menus: [
+      { key: 'marketing-graphic', label: 'กราฟฟิก',   icon: Target,    built: true },
+      { key: 'marketing-ads',     label: 'โฆษณา ADS', icon: TrendingUp, built: true },
+    ] as MenuItem[],
+  },
+  {
+    key: 'product', label: 'ฝ่ายสินค้า', icon: Package,
+    accent: '#f59e0b', bg: '#fffbeb', dot: '#f59e0b',
+    menus: [
+      { key: 'product-list',   label: 'รายการสินค้าทั้งหมด', icon: List,     built: true  },
+      { key: 'product-search', label: 'หาสินค้า',             icon: Search,   built: false },
+      { key: 'product-kpi',    label: 'KPI สินค้า',            icon: PieChart, built: false },
+      { key: 'products',       label: 'เพิ่มสินค้า',           icon: Package,  built: true  },
+      { key: 'packaging',      label: 'วัสดุแพ็กสินค้า',        icon: Archive,  built: true  },
+    ] as MenuItem[],
+  },
+  {
+    key: 'warehouse', label: 'ฝ่ายคลังสินค้า', icon: Warehouse,
+    accent: '#14b8a6', bg: '#f0fdfa', dot: '#14b8a6',
+    menus: [
+      { key: 'orders',         label: 'ออเดอร์',          icon: ShoppingCart,    built: true },
+      { key: 'flash-export',   label: 'Flash Export',      icon: Truck,           built: true },
+      { key: 'myorder-export', label: 'MyOrder Export',    icon: FileSpreadsheet, built: true },
+      { key: 'pack-products',  label: 'แพ็คสินค้า',        icon: PackageCheck,    built: true },
+      { key: 'requisition',    label: 'ใบเบิกสินค้า',      icon: FileText,        built: true },
+      { key: 'pack-history',   label: 'ประวัติแพ็คสินค้า', icon: History,         built: true },
+      { key: 'stock',          label: 'จัดการสต็อก',        icon: BarChart2,       built: true },
+      { key: 'purchase-order', label: 'ใบสั่งซื้อ (PO)',    icon: ShoppingBag,     built: true },
+      { key: 'suppliers',      label: 'จัดการผู้ขาย',        icon: Handshake,       built: true },
+    ] as MenuItem[],
+  },
+  {
+    key: 'finance', label: 'ฝ่ายการเงิน', icon: DollarSign,
+    accent: '#10b981', bg: '#f0fdf4', dot: '#10b981',
+    menus: [
+      { key: 'finance-daily',    label: 'บัญชีรายวัน',   icon: BarChart2,       built: true  },
+      { key: 'finance-monthly',  label: 'บัญชีรายเดือน', icon: BarChart2,       built: true  },
+      { key: 'finance-yearly',   label: 'บัญชีรายปี',    icon: BarChart2,       built: true  },
+      { key: 'finance-expenses', label: 'รายจ่าย',        icon: FileText,        built: true  },
+      { key: 'finance-income',   label: 'รายรับ',         icon: ArrowDownCircle, built: true  },
+      { key: 'finance-cost',     label: 'ต้นทุนสินค้า',   icon: DollarSign,      built: false },
+    ] as MenuItem[],
+  },
+  {
+    key: 'hr', label: 'ฝ่าย HR', icon: Building2,
+    accent: '#8b5cf6', bg: '#faf5ff', dot: '#8b5cf6',
+    menus: [
+      { key: 'hr-recruit', label: 'สรรหาพนักงาน',        icon: UserPlus,      built: false },
+      { key: 'hr',         label: 'พนักงาน',              icon: Users,         built: true  },
+      { key: 'hr-train',   label: 'เทรนพนักงาน',          icon: GraduationCap, built: false },
+      { key: 'hr-kpi',     label: 'KPI พนักงาน',           icon: PieChart,      built: false },
+      { key: 'hr-sop',     label: 'คู่มือการทำงาน (SOP)', icon: BookOpen,      built: false },
+    ] as MenuItem[],
+  },
 ];
 
 export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
-  const warehouseKeys = warehouseSubMenus.map(m => m.key);
-  const financeKeys   = financeSubMenus.map(m => m.key);
-  const marketingKeys = marketingSubMenus.map(m => m.key);
+  const initOpen = () => {
+    const g = GROUPS.find(g => g.menus.some(m => m.key === activePage));
+    return new Set<string>(g ? [g.key] : []);
+  };
+  const [openGroups, setOpenGroups] = useState<Set<string>>(initOpen);
 
-  const [warehouseOpen, setWarehouseOpen] = useState(warehouseKeys.includes(activePage));
-  const [financeOpen,   setFinanceOpen]   = useState(financeKeys.includes(activePage));
-  const [marketingOpen, setMarketingOpen] = useState(marketingKeys.includes(activePage));
+  const toggle = (key: string) => {
+    setOpenGroups(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
 
-  const handleSubMenu = (key: PageKey) => { setActivePage(key); setWarehouseOpen(true); };
+  const activeGroup = GROUPS.find(g => g.menus.some(m => m.key === activePage));
 
   return (
-    <aside className="w-60 bg-slate-950 text-white min-h-screen flex flex-col">
-      <div className="px-5 py-6 border-b border-slate-800">
-        <h1 className="text-2xl font-bold text-cyan-500">SmartOffice</h1>
-        <p className="text-slate-400 text-sm mt-1">Thai E-commerce Portal</p>
+    <aside className="w-[220px] shrink-0 flex flex-col bg-white border-r border-slate-100"
+      style={{ boxShadow: '2px 0 12px 0 rgba(0,0,0,0.04)' }}>
+
+      {/* Logo */}
+      <div className="px-5 py-5 border-b border-slate-100">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold"
+            style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)' }}>
+            S
+          </div>
+          <div>
+            <div className="text-sm font-bold text-slate-800 leading-none">SmartOffice</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">E-commerce Portal</div>
+          </div>
+        </div>
       </div>
 
-      <nav className="p-3 space-y-1">
+      {/* Nav */}
+      <nav className="flex-1 overflow-y-auto py-3 px-2">
+        {GROUPS.map(group => {
+          const isGroupActive = group.menus.some(m => m.key === activePage);
+          const isOpen = openGroups.has(group.key);
+          const Icon = group.icon;
 
-        {/* ── ฝ่ายคลังสินค้า ── */}
-        <div>
-          <button onClick={() => setWarehouseOpen(v => !v)}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition
-              ${warehouseKeys.includes(activePage) ? 'bg-slate-800 text-cyan-400' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
-            <Warehouse size={20}/>
-            <span className="flex-1">ฝ่ายคลังสินค้า</span>
-            {warehouseOpen ? <ChevronDown size={16} className="text-slate-400"/> : <ChevronRight size={16} className="text-slate-400"/>}
-          </button>
-          {warehouseOpen && (
-            <div className="mt-1 ml-3 pl-3 border-l border-slate-700 space-y-1">
-              {warehouseSubMenus.map(menu => {
-                const Icon = menu.icon;
-                const active = activePage === menu.key;
-                return (
-                  <button key={menu.key} onClick={() => handleSubMenu(menu.key)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition text-sm
-                      ${active ? 'bg-cyan-700 text-white font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-                    <Icon size={17}/><span>{menu.label}</span>
-                  </button>
-                );
-              })}
+          return (
+            <div key={group.key} className="mb-0.5">
+              {/* Group header */}
+              <button
+                onClick={() => toggle(group.key)}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-all group"
+                style={isGroupActive
+                  ? { background: group.bg }
+                  : {}
+                }
+              >
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-all"
+                  style={isGroupActive
+                    ? { background: group.accent + '20' }
+                    : { background: '#f1f5f9' }
+                  }>
+                  <Icon size={13}
+                    style={{ color: isGroupActive ? group.accent : '#94a3b8' }}
+                  />
+                </div>
+                <span className="flex-1 text-[13px] font-semibold leading-none"
+                  style={{ color: isGroupActive ? group.accent : '#64748b' }}>
+                  {group.label}
+                </span>
+                {isOpen
+                  ? <ChevronDown size={12} style={{ color: isGroupActive ? group.accent : '#cbd5e1' }} />
+                  : <ChevronRight size={12} style={{ color: '#cbd5e1' }} />
+                }
+              </button>
+
+              {/* Sub menus */}
+              {isOpen && (
+                <div className="ml-3 mt-0.5 mb-1 pl-3 space-y-0.5"
+                  style={{ borderLeft: `1.5px solid ${group.accent}25` }}>
+                  {group.menus.map(menu => {
+                    const MIcon = menu.icon;
+                    const active = activePage === menu.key;
+                    return (
+                      <button
+                        key={menu.key}
+                        onClick={() => setActivePage(menu.key)}
+                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[12.5px] transition-all"
+                        style={active
+                          ? {
+                              background: group.accent,
+                              color: '#fff',
+                              boxShadow: `0 2px 8px ${group.accent}40`,
+                            }
+                          : {
+                              color: menu.built ? '#475569' : '#94a3b8',
+                            }
+                        }
+                      >
+                        <MIcon size={13} style={{ opacity: menu.built ? 1 : 0.5 }} />
+                        <span className="flex-1 leading-none">{menu.label}</span>
+                        {!menu.built && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full shrink-0"
+                            style={{ background: '#f1f5f9', color: '#94a3b8' }}>
+                            เร็วๆนี้
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-
-        <div className="my-2 border-t border-slate-800"/>
-
-        {/* ── ลูกค้า ── */}
-        <button onClick={() => setActivePage('customers')}
-          className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition ${activePage==='customers'?'bg-cyan-700 text-white':'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
-          <Users size={20}/><span>ลูกค้า</span>
-        </button>
-
-        {/* ── การเงิน ── */}
-        <div>
-          <button onClick={() => setFinanceOpen(o => !o)}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition
-              ${financeKeys.includes(activePage) ? 'bg-slate-800 text-cyan-400' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
-            <DollarSign size={20}/>
-            <span className="flex-1">การเงิน</span>
-            {financeOpen ? <ChevronDown size={16} className="text-slate-400"/> : <ChevronRight size={16} className="text-slate-400"/>}
-          </button>
-          {financeOpen && (
-            <div className="ml-3 mt-1 space-y-0.5 border-l border-slate-700 pl-3">
-              {financeSubMenus.map(menu => {
-                const Icon = menu.icon;
-                const active = activePage === menu.key;
-                return (
-                  <button key={menu.key} onClick={() => setActivePage(menu.key)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition text-sm
-                      ${active ? 'bg-cyan-700 text-white font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-                    <Icon size={17}/><span>{menu.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* ── ฝ่ายการตลาด ── */}
-        <div>
-          <button onClick={() => setMarketingOpen(o => !o)}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition
-              ${marketingKeys.includes(activePage) ? 'bg-slate-800 text-pink-400' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
-            <TrendingUp size={20}/>
-            <span className="flex-1">ฝ่ายการตลาด</span>
-            {marketingOpen ? <ChevronDown size={16} className="text-slate-400"/> : <ChevronRight size={16} className="text-slate-400"/>}
-          </button>
-          {marketingOpen && (
-            <div className="ml-3 mt-1 space-y-0.5 border-l border-slate-700 pl-3">
-              {marketingSubMenus.map(menu => {
-                const Icon = menu.icon;
-                const active = activePage === menu.key;
-                return (
-                  <button key={menu.key} onClick={() => setActivePage(menu.key)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition text-sm
-                      ${active ? 'bg-cyan-700 text-white font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-                    <Icon size={17}/><span>{menu.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* ── พนักงาน ── */}
-        <button onClick={() => setActivePage('hr')}
-          className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition ${activePage==='hr'?'bg-cyan-700 text-white':'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
-          <UserCog size={20}/><span>พนักงาน</span>
-        </button>
-
+          );
+        })}
       </nav>
+
+      {/* Footer */}
+      <div className="shrink-0 px-4 py-3 border-t border-slate-100">
+        <div className="text-[10px] text-slate-300 text-center">
+          SmartOffice © 2026
+        </div>
+      </div>
     </aside>
   );
 }
