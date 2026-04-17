@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Products from './components/Products';
 import ProductList from './components/ProductList';
@@ -40,6 +40,13 @@ type PageKey =
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>('orders');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // ปิด sidebar อัตโนมัติเมื่อเปลี่ยนหน้าบนมือถือ
+  const handlePageChange = (page: PageKey) => {
+    setActivePage(page);
+    setSidebarOpen(false);
+  };
   const [packagingOrderIds, setPackagingOrderIds] = useState<string[]>([]);
   const [packHistoryId, setPackHistoryId]         = useState<string>('');
   const [codState, setCodState]                   = useState<CodFileState>(EMPTY_COD_STATE);
@@ -84,6 +91,10 @@ export default function App() {
       case 'hr-train':   return <ComingSoon title="เทรนพนักงาน" description="ระบบฝึกอบรมพนักงาน" />;
       case 'hr-kpi':     return <ComingSoon title="KPI พนักงาน" description="ประเมินผลงานพนักงาน" />;
       case 'hr-sop':     return <ComingSoon title="คู่มือการทำงาน (SOP)" description="Standard Operating Procedures" />;
+      // ฝ่ายขาย
+      case 'sales-admin':     return <Marketing page="admin" />;
+      case 'sales-customers': return <Customers onGoToProducts={() => setActivePage('products')} />;
+      case 'sales-crm':       return <ComingSoon title="CRM" description="ระบบจัดการความสัมพันธ์ลูกค้า" />;
       // ฝ่ายการตลาด
       case 'marketing-graphic': return <Marketing page="graphic" />;
       case 'marketing-ads':     return <Marketing page="ads" />;
@@ -92,9 +103,50 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex">
-      <Sidebar activePage={activePage} setActivePage={setActivePage} />
-      <main className="flex-1 overflow-x-auto">{renderPage()}</main>
+    <div className="min-h-screen bg-slate-50 flex">
+      {/* Overlay backdrop บนมือถือ */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-40 z-30 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar — ซ่อนบนมือถือ, แสดงเมื่อกด hamburger */}
+      <div className={`
+        fixed inset-y-0 left-0 z-40 transform transition-transform duration-300 ease-in-out
+        lg:relative lg:translate-x-0 lg:z-auto
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        <Sidebar activePage={activePage} setActivePage={handlePageChange} />
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+        {/* Mobile topbar */}
+        <div className="lg:hidden shrink-0 flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shadow-sm">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="p-2 rounded-lg hover:bg-slate-100 transition"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round">
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold"
+              style={{background:'linear-gradient(135deg,#0ea5e9,#6366f1)'}}>
+              S
+            </div>
+            <span className="font-bold text-slate-800 text-sm">SmartOffice</span>
+          </div>
+        </div>
+
+        {/* Page content */}
+        <main className="flex-1 overflow-auto">{renderPage()}</main>
+      </div>
     </div>
   );
 }
