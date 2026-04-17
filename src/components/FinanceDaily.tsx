@@ -162,12 +162,12 @@ export default function FinanceDaily() {
   const thClass  = "px-3 py-2 text-right text-[10px] font-semibold text-slate-400 whitespace-nowrap";
 
   return (
-    <div className="flex flex-col h-screen p-6 pb-2 gap-4">
+    <div className="flex flex-col h-screen p-3 sm:p-6 pb-2 gap-3 sm:gap-4">
 
       {/* Header */}
       <div className="shrink-0">
-        <h2 className="text-2xl font-bold text-slate-800 mb-3">📊 บัญชีรายวัน</h2>
-        <div className="flex flex-wrap gap-2 items-center">
+        <h2 className="text-lg sm:text-2xl font-bold text-slate-800 mb-2 sm:mb-3">📊 บัญชีรายวัน</h2>
+        <div className="flex flex-wrap gap-1.5 sm:gap-2 items-center">
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
             className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
           <span className="text-slate-400">–</span>
@@ -191,13 +191,13 @@ export default function FinanceDaily() {
 
       {/* KPI Summary */}
       {summaries.length > 0 && (
-        <div className="shrink-0 grid grid-cols-4 gap-3">
-          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+        <div className="shrink-0 grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 sm:p-4">
             <div className="text-xs text-emerald-600 font-semibold mb-1">รายรับรวม</div>
-            <div className="text-xl font-bold text-emerald-700">฿{fmt(totRevenue)}</div>
+            <div className="text-base sm:text-xl font-bold text-emerald-700">฿{fmt(totRevenue)}</div>
             <div className="text-xs text-emerald-500 mt-0.5">{totOrders} ออเดอร์ · {summaries.length} วัน</div>
           </div>
-          <div className="bg-slate-50 border rounded-xl p-4 space-y-1">
+          <div className="bg-slate-50 border rounded-xl p-3 sm:p-4 space-y-1">
             <div className="text-xs text-slate-500 font-semibold mb-1.5">ต้นทุนรวม</div>
             <div className="flex justify-between text-[11px]"><span className="text-slate-400">สินค้า</span><span className="font-medium">฿{fmt(totCostGoods)}</span></div>
             <div className="flex justify-between text-[11px]"><span className="text-slate-400">VAT 5%</span><span className="font-medium">฿{fmt(totVat)}</span></div>
@@ -206,14 +206,14 @@ export default function FinanceDaily() {
             {totAd > 0 && <div className="flex justify-between text-[11px]"><span className="text-slate-400">โฆษณา</span><span className="font-medium">฿{fmt(totAd)}</span></div>}
             {totOther > 0 && <div className="flex justify-between text-[11px]"><span className="text-slate-400">อื่นๆ</span><span className="font-medium">฿{fmt(totOther)}</span></div>}
           </div>
-          <div className={`rounded-xl p-4 border ${totProfit>=0?'bg-teal-50 border-teal-200':'bg-red-50 border-red-200'}`}>
+          <div className={`rounded-xl p-3 sm:p-4 border ${totProfit>=0?'bg-teal-50 border-teal-200':'bg-red-50 border-red-200'}`}>
             <div className={`text-xs font-semibold mb-1 ${totProfit>=0?'text-teal-600':'text-red-500'}`}>{totProfit>=0?'กำไรสุทธิ':'ขาดทุน'}</div>
-            <div className={`text-xl font-bold ${totProfit>=0?'text-teal-700':'text-red-600'}`}>{totProfit<0?'-':''}฿{fmt(Math.abs(totProfit))}</div>
+            <div className={`text-base sm:text-xl font-bold ${totProfit>=0?'text-teal-700':'text-red-600'}`}>{totProfit<0?'-':''}฿{fmt(Math.abs(totProfit))}</div>
             <div className={`text-xs mt-0.5 ${totProfit>=0?'text-teal-500':'text-red-400'}`}>{totRevenue>0?((totProfit/totRevenue)*100).toFixed(1):0}% margin</div>
           </div>
-          <div className="bg-white border rounded-xl p-4">
+          <div className="bg-white border rounded-xl p-3 sm:p-4">
             <div className="text-xs text-slate-500 font-semibold mb-1">เฉลี่ย / วัน</div>
-            <div className="text-xl font-bold text-slate-700">฿{fmt(summaries.length>0?totRevenue/summaries.length:0)}</div>
+            <div className="text-base sm:text-xl font-bold text-slate-700">฿{fmt(summaries.length>0?totRevenue/summaries.length:0)}</div>
             <div className="text-xs text-slate-400 mt-0.5">กำไร ฿{fmt(summaries.length>0?totProfit/summaries.length:0)}</div>
           </div>
         </div>
@@ -236,23 +236,23 @@ export default function FinanceDaily() {
             <div key={day.date} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
 
               {/* Day header */}
-              <button className="w-full px-5 py-3.5 flex items-center gap-4 hover:bg-slate-50 transition text-left"
+              <button className="w-full px-3 sm:px-5 py-3 sm:py-3.5 flex items-center gap-2 sm:gap-4 hover:bg-slate-50 transition text-left"
                 onClick={() => toggleExpand(day.date)}>
-                <div className="shrink-0 w-28">
+                <div className="shrink-0 w-20 sm:w-28">
                   <div className="font-bold text-slate-800 text-sm">{fmtD(day.date)}</div>
                   <div className="text-xs text-slate-400">{day.orders.length} ออเดอร์</div>
                 </div>
-                <div className="flex-1 grid grid-cols-4 gap-3 text-xs">
+                <div className="flex-1 grid grid-cols-3 sm:grid-cols-4 gap-2 sm:gap-3 text-xs">
                   <div><div className="text-[10px] text-slate-400 mb-0.5">รายรับ</div><div className="font-bold text-emerald-600">฿{fmt(day.revenue)}</div></div>
-                  <div><div className="text-[10px] text-slate-400 mb-0.5">ต้นทุนรวม</div><div className="font-medium text-slate-600">฿{fmt(totalCost)}</div></div>
+                  <div className="hidden sm:block"><div className="text-[10px] text-slate-400 mb-0.5">ต้นทุนรวม</div><div className="font-medium text-slate-600">฿{fmt(totalCost)}</div></div>
                   <div><div className="text-[10px] text-slate-400 mb-0.5">กำไร</div>
                     <div className={`font-bold ${day.profit>=0?'text-teal-600':'text-red-500'}`}>
-                      {day.profit<0?'-':''}฿{fmt(Math.abs(day.profit))} <span className="text-[10px] font-normal opacity-70">({margin.toFixed(0)}%)</span>
+                      {day.profit<0?'-':''}฿{fmt(Math.abs(day.profit))}
                     </div>
                   </div>
-                  <div className="hidden sm:block pt-1">
-                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full ${day.profit>=0?'bg-teal-400':'bg-red-400'}`} style={{width:`${Math.min(Math.abs(margin),100)}%`}}/>
+                  <div><div className="text-[10px] text-slate-400 mb-0.5">Margin</div>
+                    <div className={`font-medium text-xs ${day.profit>=0?'text-teal-500':'text-red-400'}`}>
+                      {margin.toFixed(0)}%
                     </div>
                   </div>
                 </div>
