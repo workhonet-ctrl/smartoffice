@@ -51,7 +51,7 @@ const GROUPS = [
     menus: [
       { key: 'product-list',   label: 'รายการสินค้าทั้งหมด', icon: List,     built: true  },
       { key: 'product-search', label: 'หาสินค้า',             icon: Search,   built: false },
-      { key: 'product-kpi',    label: 'KPI สินค้า',            icon: PieChart, built: false },
+      { key: 'product-kpi',    label: 'KPI สินค้า',            icon: PieChart, built: true  },
       { key: 'products',       label: 'เพิ่มสินค้า',           icon: Package,  built: true  },
       { key: 'packaging',      label: 'วัสดุแพ็กสินค้า',        icon: Archive,  built: true  },
     ] as MenuItem[],
