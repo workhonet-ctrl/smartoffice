@@ -97,8 +97,8 @@ export default function ProductKPI() {
     const free2    = p.price * 0.02;
     const totalCost = p.cost_goods + p.box_price + p.bub_price + p.ship_thb + vatVal + com + free2;
     const profit   = p.price - totalCost;
-    const margin   = p.price > 0 ? (profit / p.price) * 100 : 0;
-    const roas     = com > 0 ? p.price / com : 0;
+    const margin   = profit - 20;                          // กำไร - 20
+    const roas     = margin !== 0 ? p.price / margin : 0; // ราคาขาย ÷ Margin
     return { vatVal, com, free2, totalCost, profit, margin, roas };
   };
 
@@ -235,8 +235,8 @@ export default function ProductKPI() {
               <th className="p-3 text-right whitespace-nowrap">FREE 2%</th>
               <th className="p-3 text-right whitespace-nowrap">ต้นทุนรวม</th>
               <th className="p-3 text-right whitespace-nowrap text-teal-300">กำไร</th>
-              <th className="p-3 text-right whitespace-nowrap text-teal-300">Margin</th>
-              <th className="p-3 text-right whitespace-nowrap text-blue-300">ROAS</th>
+              <th className="p-3 text-right whitespace-nowrap text-teal-300">Margin (฿)</th>
+              <th className="p-3 text-right whitespace-nowrap text-blue-300">ROAS%</th>
             </tr>
           </thead>
           <tbody>
@@ -298,11 +298,11 @@ export default function ProductKPI() {
                   <td className={`p-3 text-right font-bold ${profit >= 0 ? 'text-teal-600' : 'text-red-500'}`}>
                     {profit < 0 ? '-' : ''}฿{fmt(Math.abs(profit))}
                   </td>
-                  <td className={`p-3 text-right font-bold ${margin >= 20 ? 'text-teal-600' : margin >= 10 ? 'text-amber-600' : 'text-red-500'}`}>
-                    {fmtP(margin)}
+                  <td className={`p-3 text-right font-bold ${margin >= 0 ? 'text-teal-600' : 'text-red-500'}`}>
+                    {margin < 0 ? '-' : ''}฿{fmt(Math.abs(margin))}
                   </td>
                   <td className="p-3 text-right font-medium text-blue-600">
-                    {roas > 0 ? roas.toFixed(2) : '-'}
+                    {roas !== 0 ? fmtP(roas) : '-'}
                   </td>
                 </tr>
               );
@@ -313,6 +313,7 @@ export default function ProductKPI() {
             const totPrice   = filtered.reduce((s, p) => s + p.price, 0);
             const totProfit  = filtered.reduce((s, p) => s + calcRow(p).profit, 0);
             const avgMargin  = filtered.reduce((s, p) => s + calcRow(p).margin, 0) / filtered.length;
+            const avgRoas   = filtered.reduce((s, p) => s + calcRow(p).roas, 0) / filtered.length;
             return (
               <tfoot className="bg-slate-50 border-t-2 sticky bottom-0 font-bold text-[11px]">
                 <tr>
@@ -322,8 +323,8 @@ export default function ProductKPI() {
                   <td className={`p-3 text-right ${totProfit >= 0 ? 'text-teal-600' : 'text-red-500'}`}>
                     {totProfit < 0 ? '-' : ''}฿{fmt(Math.abs(totProfit))}
                   </td>
-                  <td className={`p-3 text-right ${avgMargin >= 15 ? 'text-teal-600' : 'text-amber-600'}`}>
-                    {fmtP(avgMargin)}
+                  <td className={`p-3 text-right ${avgMargin >= 0 ? 'text-teal-600' : 'text-red-500'}`}>
+                    ฿{fmt(avgMargin)}
                   </td>
                   <td/>
                 </tr>
