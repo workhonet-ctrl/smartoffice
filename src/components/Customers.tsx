@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { TOURIST_ZIPS } from '../lib/types';
-import { Search, Users, TrendingUp, ShoppingBag, ChevronDown, ChevronRight, X, Upload } from 'lucide-react';
+import { Search, Users, TrendingUp, ShoppingBag, ChevronDown, ChevronRight, X, Upload, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 type Customer = {
@@ -36,6 +36,8 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   const [custOrders, setCustOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [editTag, setEditTag]       = useState<{id: string; tag: string} | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [importing, setImporting]   = useState(false);
   const [importResult, setImportResult] = useState<{
     added: number; updated: number; skipped: number;
@@ -272,6 +274,25 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    const hasOrders = filtered.filter(c => selectedIds.has(c.id) && c.order_count > 0);
+    const msg = hasOrders.length > 0
+      ? `ลบลูกค้า ${selectedIds.size} คน\n⚠ ${hasOrders.length} คน มีออเดอร์ — ออเดอร์จะถูกลบด้วย\nยืนยัน?`
+      : `ลบลูกค้า ${selectedIds.size} คน ยืนยัน?`;
+    if (!confirm(msg)) return;
+    setBulkDeleting(true);
+    const ids = Array.from(selectedIds);
+    // ลบออเดอร์ก่อน
+    await supabase.from('orders').delete().in('customer_id', ids);
+    // ลบลูกค้า
+    await supabase.from('customers').delete().in('id', ids);
+    setSelectedIds(new Set());
+    showToast(`✓ ลบลูกค้า ${ids.length} คนแล้ว`);
+    setBulkDeleting(false);
+    loadCustomers();
+  };
+
   const handleDelete = async (c: Customer, e: React.MouseEvent) => {
     e.stopPropagation();
     if (c.order_count > 0) {
@@ -396,11 +417,45 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
         <span className="text-xs text-slate-400">{filtered.length} คน</span>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="shrink-0 flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-2">
+          <span className="text-sm font-medium text-red-700">
+            เลือก {selectedIds.size} คน
+          </span>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 bg-white rounded-lg border"
+          >
+            ยกเลิก
+          </button>
+          <button
+            onClick={handleBulkDelete}
+            disabled={bulkDeleting}
+            className="ml-auto px-4 py-2 bg-red-500 text-white rounded-lg text-sm font-medium
+                       hover:bg-red-600 disabled:opacity-50 flex items-center gap-2"
+          >
+            <Trash2 size={14}/>
+            {bulkDeleting ? 'กำลังลบ...' : `ลบ ${selectedIds.size} คน`}
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
         <table className="text-sm w-full" style={{minWidth:'900px'}}>
           <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
             <tr>
+              <th className="p-3 w-8">
+                <input type="checkbox"
+                  checked={filtered.length > 0 && filtered.every(c => selectedIds.has(c.id))}
+                  onChange={e => {
+                    if (e.target.checked) setSelectedIds(new Set(filtered.map(c => c.id)));
+                    else setSelectedIds(new Set());
+                  }}
+                  className="rounded cursor-pointer"
+                />
+              </th>
               <th className="p-3 w-8"/>
               <th className="p-3 text-left">ชื่อลูกค้า</th>
               <th className="p-3 text-left whitespace-nowrap">ชื่อเฟสบุ๊ก</th>
@@ -415,12 +470,23 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={11} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
-            {!loading && filtered.length === 0 && <tr><td colSpan={11} className="p-8 text-center text-slate-400">ไม่พบลูกค้า</td></tr>}
+            {loading && <tr><td colSpan={13} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
+            {!loading && filtered.length === 0 && <tr><td colSpan={13} className="p-8 text-center text-slate-400">ไม่พบลูกค้า</td></tr>}
             {filtered.map(c => (
               <>
                 <tr key={c.id} onClick={() => toggleExpand(c.id)}
                   className={`border-b cursor-pointer hover:bg-cyan-50 transition ${expanded===c.id?'bg-cyan-50':''}`}>
+                  <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox"
+                      checked={selectedIds.has(c.id)}
+                      onChange={e => {
+                        const next = new Set(selectedIds);
+                        e.target.checked ? next.add(c.id) : next.delete(c.id);
+                        setSelectedIds(next);
+                      }}
+                      className="rounded cursor-pointer"
+                    />
+                  </td>
                   <td className="p-3 text-center text-slate-400">
                     {expanded===c.id ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
                   </td>
@@ -464,7 +530,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                 {/* ExpandedRow: รายละเอียด + ประวัติออเดอร์ */}
                 {expanded === c.id && (
                   <tr key={`${c.id}-detail`}>
-                    <td colSpan={11} className="bg-cyan-50 px-6 py-4 border-b">
+                    <td colSpan={13} className="bg-cyan-50 px-6 py-4 border-b">
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                         <div>
                           <div className="text-xs text-slate-400 mb-0.5">ที่อยู่</div>
