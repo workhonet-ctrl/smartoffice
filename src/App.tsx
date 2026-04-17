@@ -19,18 +19,27 @@ import type { CodFileState } from './components/FinanceIncome';
 import { EMPTY_COD_STATE } from './components/FinanceIncome';
 import Marketing from './components/Marketing';
 import HR from './components/HR';
+import ComingSoon from './components/ComingSoon';
 
 type PageKey =
-  | 'products' | 'product-list' | 'packaging' | 'pack-products' | 'pack-history'
-  | 'requisition' | 'stock' | 'purchase-order' | 'suppliers'
-  | 'customers' | 'orders' | 'flash-export' | 'myorder-export'
-  | 'finance-daily' | 'finance-monthly' | 'finance-yearly' | 'finance-expenses'
-  | 'finance-income'
-  | 'marketing-graphic' | 'marketing-ads' | 'marketing-admin'
-  | 'hr';
+  // ฝ่ายขาย
+  | 'sales-admin' | 'sales-customers' | 'sales-crm'
+  // ฝ่ายการตลาด
+  | 'marketing-graphic' | 'marketing-ads'
+  // ฝ่ายสินค้า
+  | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
+  // ฝ่ายคลังสินค้า
+  | 'orders' | 'flash-export' | 'myorder-export'
+  | 'pack-products' | 'requisition' | 'pack-history'
+  | 'stock' | 'purchase-order' | 'suppliers'
+  // ฝ่ายการเงิน
+  | 'finance-daily' | 'finance-monthly' | 'finance-yearly'
+  | 'finance-expenses' | 'finance-income' | 'finance-cost'
+  // ฝ่าย HR
+  | 'hr-recruit' | 'hr' | 'hr-train' | 'hr-kpi' | 'hr-sop';
 
 export default function App() {
-  const [activePage, setActivePage] = useState<PageKey>('products');
+  const [activePage, setActivePage] = useState<PageKey>('orders');
   const [packagingOrderIds, setPackagingOrderIds] = useState<string[]>([]);
   const [packHistoryId, setPackHistoryId]         = useState<string>('');
   const [codState, setCodState]                   = useState<CodFileState>(EMPTY_COD_STATE);
@@ -48,7 +57,10 @@ export default function App() {
   const renderPage = () => {
     switch (activePage) {
       case 'products':       return <Products />;
+      // ฝ่ายสินค้า
       case 'product-list':   return <ProductList />;
+      case 'product-search': return <ComingSoon title="หาสินค้า" description="ค้นหาสินค้าจากแหล่งต่างๆ" />;
+      case 'product-kpi':    return <ComingSoon title="KPI สินค้า" description="ติดตามผลการขายรายสินค้า" />;
       case 'packaging':      return <PackingMaterials />;
       case 'pack-products':  return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} onCreateRequisition={goToRequisition}/>;
       case 'pack-history':   return <PackHistory />;
@@ -56,7 +68,7 @@ export default function App() {
       case 'stock':          return <Stock onGoToPO={() => setActivePage('purchase-order')} />;
       case 'purchase-order': return <PurchaseOrder />;
       case 'suppliers':      return <Suppliers />;
-      case 'customers':      return <Customers onGoToProducts={() => setActivePage('products')} />;
+      case 'customers':      return <Customers />;
       case 'orders':         return <Orders onImportDone={goToPackaging} />;
       case 'flash-export':   return <FlashExport />;
       case 'myorder-export': return <MyOrderExport />;
@@ -65,10 +77,16 @@ export default function App() {
       case 'finance-yearly':   return <Finance page="yearly" />;
       case 'finance-expenses': return <Finance page="expenses" />;
       case 'finance-income':   return <FinanceIncome codState={codState} setCodState={setCodState} />;
-      case 'hr':             return <HR />;
+      case 'finance-cost':     return <ComingSoon title="ต้นทุนสินค้า" description="วิเคราะห์ต้นทุนและกำไรรายสินค้า" />;
+      // ฝ่าย HR
+      case 'hr-recruit': return <ComingSoon title="สรรหาพนักงาน" description="ระบบรับสมัครและคัดเลือกพนักงาน" />;
+      case 'hr':         return <HR />;
+      case 'hr-train':   return <ComingSoon title="เทรนพนักงาน" description="ระบบฝึกอบรมพนักงาน" />;
+      case 'hr-kpi':     return <ComingSoon title="KPI พนักงาน" description="ประเมินผลงานพนักงาน" />;
+      case 'hr-sop':     return <ComingSoon title="คู่มือการทำงาน (SOP)" description="Standard Operating Procedures" />;
+      // ฝ่ายการตลาด
       case 'marketing-graphic': return <Marketing page="graphic" />;
       case 'marketing-ads':     return <Marketing page="ads" />;
-      case 'marketing-admin':   return <Marketing page="admin" />;
       default:               return <Products />;
     }
   };
