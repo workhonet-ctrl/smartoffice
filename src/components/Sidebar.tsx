@@ -114,7 +114,7 @@ export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
   const activeGroup = GROUPS.find(g => g.menus.some(m => m.key === activePage));
 
   return (
-    <aside className="w-[220px] shrink-0 flex flex-col bg-white border-r border-slate-100"
+    <aside className="w-[220px] h-screen shrink-0 flex flex-col bg-white border-r border-slate-100"
       style={{ boxShadow: '2px 0 12px 0 rgba(0,0,0,0.04)' }}>
 
       {/* Logo */}
