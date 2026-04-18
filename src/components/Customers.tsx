@@ -102,7 +102,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
     setEditTag(null);
   };
 
-  // ── นำเข้า Excel ครั้งเดียว → บันทึก ลูกค้า + ออเดอร์ พร้อมกัน ─────────
+  // ── นำเข้า Excel ครั้งเดียว → บันทึก ลูกค้า + ออเดอร์ พร้อมกัน (BATCH) ──
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     setImporting(true); setImportResult(null);
@@ -111,132 +111,144 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
       const wb   = XLSX.read(buf);
       const ws   = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as Array<Array<string|number>>;
+      const dataRows = rows.slice(1).filter(r => String(r[6]||'').trim() && String(r[4]||'').trim());
 
-      let custAdded = 0, custUpdated = 0, orderAdded = 0, orderSkipped = 0;
-
-      // ── 1. Auto-map product names ────────────────────────────────────────
+      // ── Step 1: โหลด product_mappings ทั้งหมดครั้งเดียว ─────────────────
       const rawProdsAll = [...new Set(
-        rows.slice(1)
-          .filter(r => r[6])
-          .flatMap(r => String(r[14] || '').split('|').map(s => s.trim()).filter(Boolean))
+        dataRows.flatMap(r => String(r[14]||'').split('|').map(s=>s.trim()).filter(Boolean))
       )];
-      const autoPromoMap: Record<string, string> = {};
-      const unmappedProds: string[] = [];  // เก็บชื่อที่ไม่มีในระบบ
+      const autoPromoMap: Record<string,string> = {};
+      const unmappedProds: string[] = [];
+      if (rawProdsAll.length > 0) {
+        const { data: mappings } = await supabase
+          .from('product_mappings').select('raw_name, promo_id').in('raw_name', rawProdsAll);
+        (mappings||[]).forEach((m:any) => { autoPromoMap[m.raw_name] = m.promo_id; });
+        rawProdsAll.forEach(rp => { if (!autoPromoMap[rp]) unmappedProds.push(rp); });
+      }
 
-      for (const rp of rawProdsAll) {
-        const { data: mp } = await supabase
-          .from('product_mappings').select('promo_id').eq('raw_name', rp).maybeSingle();
-        if (mp?.promo_id) {
-          autoPromoMap[rp] = mp.promo_id;
+      // ── Step 2: โหลด customers ที่มีอยู่แล้วทั้งหมดครั้งเดียว (by tel) ──
+      const allTels = [...new Set(dataRows.map(r => String(r[6]||'').trim()))];
+      const existingCustMap: Record<string,string> = {}; // tel → id
+      for (let i=0; i<allTels.length; i+=500) {
+        const { data } = await supabase.from('customers').select('id,tel').in('tel', allTels.slice(i,i+500));
+        (data||[]).forEach((c:any) => { existingCustMap[c.tel] = c.id; });
+      }
+
+      // ── Step 3: โหลด orders ที่มีอยู่แล้วทั้งหมดครั้งเดียว (by order_no) ─
+      const allOrderNos = [...new Set(dataRows.map(r => String(r[1]||'').trim()).filter(Boolean))];
+      const existingOrderSet = new Set<string>();
+      for (let i=0; i<allOrderNos.length; i+=500) {
+        const { data } = await supabase.from('orders').select('order_no').in('order_no', allOrderNos.slice(i,i+500));
+        (data||[]).forEach((o:any) => existingOrderSet.add(o.order_no));
+      }
+
+      // ── Step 4: แยก insert vs update customers ─────────────────────────
+      const toInsertCusts: any[] = [];
+      const toUpdateCusts: {id:string; payload:any}[] = [];
+
+      for (const row of dataRows) {
+        const tel  = String(row[6]||'').trim();
+        const name = String(row[4]||'').trim();
+        const payload = {
+          name,
+          facebook_name:  String(row[5] ||'').trim()||null,
+          tel,
+          address:        String(row[7] ||'').trim()||null,
+          subdistrict:    String(row[8] ||'').trim()||null,
+          district:       String(row[9] ||'').trim()||null,
+          province:       String(row[10]||'').trim()||null,
+          postal_code:    String(row[11]||'').trim()||null,
+          channel:        String(row[2] ||'').trim()||null,
+          payment_method: String(row[22]||'').trim()||null,
+        };
+        if (existingCustMap[tel]) {
+          toUpdateCusts.push({ id: existingCustMap[tel], payload });
         } else {
-          unmappedProds.push(rp);  // ไม่พบ mapping → เก็บไว้แจ้งเตือน
+          toInsertCusts.push({ ...payload, tag: 'ใหม่' });
         }
       }
 
-      // ── 2. บันทึกทีละแถว ─────────────────────────────────────────────────
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        const tel = String(row[6] || '').trim();
-        const name = String(row[4] || '').trim();
-        if (!tel || !name) continue;
+      // batch insert new customers (500 ต่อครั้ง)
+      let custAdded = 0, custUpdated = 0;
+      const newCustIdMap: Record<string,string> = {}; // tel → new id
+      for (let i=0; i<toInsertCusts.length; i+=500) {
+        const { data } = await supabase.from('customers')
+          .insert(toInsertCusts.slice(i,i+500)).select('id,tel');
+        (data||[]).forEach((c:any) => { newCustIdMap[c.tel] = c.id; custAdded++; });
+      }
+      // batch update existing (ทีละ 1 ยังต้องเป็น individual แต่ parallel)
+      await Promise.all(toUpdateCusts.map(({id,payload}) =>
+        supabase.from('customers').update(payload).eq('id',id)
+      ));
+      custUpdated = toUpdateCusts.length;
 
-        // ── บันทึกลูกค้า ──
-        const custPayload = {
-          name,
-          facebook_name: String(row[5]  || '').trim() || null,
-          tel,
-          address:       String(row[7]  || '').trim() || null,
-          subdistrict:   String(row[8]  || '').trim() || null,
-          district:      String(row[9]  || '').trim() || null,
-          province:      String(row[10] || '').trim() || null,
-          postal_code:   String(row[11] || '').trim() || null,
-          channel:       String(row[2]  || '').trim() || null,
-          payment_method:String(row[22] || '').trim() || null,  // Col W: วิธีการชำระเงิน
-        };
+      // รวม telMap
+      const telToId: Record<string,string> = { ...existingCustMap, ...newCustIdMap };
 
-        let customerId: string | null = null;
-        const { data: existing } = await supabase.from('customers')
-          .select('id').eq('tel', tel).maybeSingle();
+      // ── Step 5: batch insert orders ────────────────────────────────────
+      const ordersToInsert: any[] = [];
+      let orderSkipped = 0;
 
-        if (existing?.id) {
-          await supabase.from('customers').update(custPayload).eq('id', existing.id);
-          customerId = existing.id;
-          custUpdated++;
-        } else {
-          const { data: nc } = await supabase.from('customers')
-            .insert([{ ...custPayload, tag: 'ใหม่' }]).select('id').single();
-          customerId = nc?.id ?? null;
-          if (customerId) custAdded++;
-        }
+      for (const row of dataRows) {
+        const orderNo = String(row[1]||'').trim();
+        if (!orderNo) continue;
+        if (existingOrderSet.has(orderNo)) { orderSkipped++; continue; }
 
+        const tel = String(row[6]||'').trim();
+        const customerId = telToId[tel];
         if (!customerId) continue;
 
-        // ── บันทึกออเดอร์ (ถ้ามีเลขออเดอร์) ──
-        const orderNo = String(row[1] || '').trim();
-        if (!orderNo) continue;
-
-        // เช็คออเดอร์ซ้ำ
-        const { data: existOrd } = await supabase.from('orders')
-          .select('id').eq('order_no', orderNo).maybeSingle();
-        if (existOrd?.id) { orderSkipped++; continue; }
-
-        // parse วันที่ + เวลา
-        const rawDate = String(row[3] || '');
-        const orderDate = rawDate
-          ? new Date(rawDate).toISOString().split('T')[0]
-          : new Date().toISOString().split('T')[0];
+        const rawDate  = String(row[3]||'');
+        const orderDate = rawDate ? new Date(rawDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
         const timeMatch = rawDate.match(/(\d{1,2}):(\d{2})/);
-        const orderTime = timeMatch
-          ? `${timeMatch[1].padStart(2,'0')}:${timeMatch[2]}`
-          : '';
+        const orderTime = timeMatch ? `${timeMatch[1].padStart(2,'0')}:${timeMatch[2]}` : '';
 
-        // parse tracking + courier
-        const rawTrack = String(row[17] || '');
-        const trackMatch = rawTrack.match(/^([^\s(]+)/);
-        const trackingNo = trackMatch ? trackMatch[1] : '';
+        const rawTrack    = String(row[17]||'');
+        const trackMatch  = rawTrack.match(/^([^\s(]+)/);
+        const trackingNo  = trackMatch ? trackMatch[1] : '';
         const courierMatch = rawTrack.match(/\(([^)]+)\)/);
         let courier = '';
         if (courierMatch) {
-          const c = courierMatch[1].toUpperCase();
-          if (c.includes('THAI_POST') || c.includes('EMS')) courier = 'ไปรษณีย์';
-          else if (c.includes('FLASH')) courier = 'FLASH';
-          else courier = courierMatch[1];
+          const cv = courierMatch[1].toUpperCase();
+          if (cv.includes('THAI_POST')||cv.includes('EMS')) courier='ไปรษณีย์';
+          else if (cv.includes('FLASH')) courier='FLASH';
+          else courier=courierMatch[1];
         }
 
-        // จับคู่สินค้า
-        const rawProds = String(row[14] || '').split('|').map(s => s.trim()).filter(Boolean);
-        const promoIds: string[] = rawProds.map(rp => autoPromoMap[rp] || '').filter(Boolean);
-        const quantities = String(row[15] || '1');
-        const weightKg   = (Number(row[16]) || 0) / 1000;
-        const postal      = String(row[11] || '').trim();
-        const hasTrack    = trackingNo.length > 3;
-        const isTourist   = TOURIST_ZIPS.has(postal);
-        const route       = hasTrack ? 'A' : isTourist ? 'C' : 'B';
-        const orderStatus = hasTrack ? 'รอแพ็ค' : 'รอคีย์ออเดอร์';
+        const rawProds = String(row[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
+        const promoIds = rawProds.map(rp=>autoPromoMap[rp]||'').filter(Boolean);
+        const quantities = String(row[15]||'1');
+        const weightKg   = (Number(row[16])||0)/1000;
+        const postal     = String(row[11]||'').trim();
+        const hasTrack   = trackingNo.length>3;
+        const isTourist  = TOURIST_ZIPS.has(postal);
+        const route      = hasTrack?'A':isTourist?'C':'B';
 
-        const { error: oe } = await supabase.from('orders').insert([{
-          order_no:       orderNo,
-          customer_id:    customerId,
-          channel:        String(row[2] || '').trim() || null,
-          order_date:     orderDate,
-          order_time:     orderTime || null,
-          raw_prod:       String(row[14] || '').trim() || null,
-          promo_ids:      promoIds,
-          quantity:       quantities.split('|').reduce((s, n) => s + (Number(n.trim()) || 1), 0),
-          quantities,
-          weight_kg:      weightKg,
-          tracking_no:    hasTrack ? trackingNo : null,
-          courier:        courier || null,
-          total_thb:      Number(row[21]) || 0,
-          payment_method: String(row[22] || 'COD').trim(),
-          payment_status: String(row[24] || 'รอชำระเงิน').trim(),
-          order_status:   orderStatus,
+        ordersToInsert.push({
+          order_no: orderNo, customer_id: customerId,
+          channel: String(row[2]||'').trim()||null,
+          order_date: orderDate, order_time: orderTime||null,
+          raw_prod: String(row[14]||'').trim()||null,
+          promo_ids: promoIds,
+          quantity: quantities.split('|').reduce((s:number,n:string)=>s+(Number(n.trim())||1),0),
+          quantities, weight_kg: weightKg,
+          tracking_no: hasTrack?trackingNo:null,
+          courier: courier||null,
+          total_thb: Number(row[21])||0,
+          payment_method: String(row[22]||'COD').trim(),
+          payment_status: String(row[24]||'รอชำระเงิน').trim(),
+          order_status: hasTrack?'รอแพ็ค':'รอคีย์ออเดอร์',
           route,
-        }]);
+          imported_at: importDate,
+        });
+      }
 
-        if (oe && oe.code !== '23505') console.error('order insert error:', oe);
-        else if (!oe) orderAdded++;
-        else orderSkipped++;
+      // batch insert orders (500 ต่อครั้ง)
+      let orderAdded = 0;
+      for (let i=0; i<ordersToInsert.length; i+=500) {
+        const { error } = await supabase.from('orders').insert(ordersToInsert.slice(i,i+500));
+        if (!error) orderAdded += Math.min(500, ordersToInsert.length-i);
+        else console.error('batch order insert error:', error);
       }
 
       setImportResult({
