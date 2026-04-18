@@ -48,7 +48,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   // mapping modal state
   const [showMappingModal, setShowMappingModal] = useState(false);
   const [unmappedList, setUnmappedList]         = useState<string[]>([]);
-  const [promoOptions, setPromoOptions]         = useState<{id:string; name:string; short_name:string|null}[]>([]);
+  const [promoOptions, setPromoOptions]         = useState<{id:string; name:string; short_name:string|null; price_thb:number; master_name:string}[]>([]);
   const [mappingSelects, setMappingSelects]     = useState<Record<string, string>>({}); // raw_name → promo_id
   const [mappingSearch, setMappingSearch]       = useState(''); // ค้นหาใน modal
   const [savingMappings, setSavingMappings]     = useState(false);
@@ -250,10 +250,13 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
         // โหลด promo options แล้วเปิด modal ให้ user จับคู่เอง
         const { data: promos } = await supabase
           .from('products_promo')
-          .select('id, name, short_name, price_thb')
+          .select('id, name, short_name, price_thb, products_master(name)')
           .eq('active', true)
           .order('id');
-        setPromoOptions(promos || []);
+        setPromoOptions((promos || []).map((p: any) => ({
+          ...p,
+          master_name: p.products_master?.name || '',
+        })));
         setUnmappedList(unmappedProds);
         const defaults: Record<string, string> = {};
         unmappedProds.forEach(n => { defaults[n] = ''; });
@@ -660,7 +663,8 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                   const q = mappingSearch.toLowerCase();
                   return !q || p.id.toLowerCase().includes(q)
                     || p.name.toLowerCase().includes(q)
-                    || (p.short_name||'').toLowerCase().includes(q);
+                    || (p.short_name||'').toLowerCase().includes(q)
+                    || (p.master_name||'').toLowerCase().includes(q);
                 });
                 return (
                   <div key={rawName} className="bg-slate-50 rounded-xl p-3">
@@ -674,8 +678,9 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                     {selectedPromo && (
                       <div className="mb-2 px-2 py-1.5 bg-cyan-50 border border-cyan-200 rounded-lg text-xs text-cyan-700 flex items-center gap-2">
                         <span className="font-bold">{selectedPromo.id}</span>
-                        <span>{selectedPromo.name}</span>
-                        <span className="ml-auto font-bold">฿{Number(selectedPromo.price_thb).toLocaleString()}</span>
+                        <span className="text-slate-500">{selectedPromo.master_name}</span>
+                        <span>· {selectedPromo.name}</span>
+                        <span className="ml-auto font-bold text-emerald-600">฿{Number(selectedPromo.price_thb).toLocaleString()}</span>
                       </div>
                     )}
 
@@ -697,8 +702,11 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                             mappingSelects[rawName] === p.id ? 'bg-cyan-100' : ''
                           }`}
                         >
-                          <span className="font-mono text-slate-500 shrink-0 w-20">{p.id}</span>
-                          <span className="flex-1 text-slate-700">{p.name}</span>
+                          <span className="font-mono text-slate-400 shrink-0 w-16">{p.id}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-slate-400 text-[10px] truncate">{p.master_name}</div>
+                            <div className="text-slate-700 font-medium truncate">{p.name}</div>
+                          </div>
                           <span className="shrink-0 font-bold text-emerald-600">฿{Number(p.price_thb).toLocaleString()}</span>
                         </div>
                       ))}
