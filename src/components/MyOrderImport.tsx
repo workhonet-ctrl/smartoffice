@@ -149,9 +149,7 @@ export default function MyOrderImport() {
   const [matched, setMatched] = useState<boolean>(
     () => readStorage(STORAGE_KEY)?.matched ?? false
   );
-  const [shipDate, setShipDate]   = useState(
-    () => new Date().toISOString().split('T')[0]
-  );
+
   const [matching, setMatching]   = useState(false);
   const [saving, setSaving]       = useState(false);
   const [loadingDB, setLoadingDB] = useState(false);
@@ -276,18 +274,7 @@ export default function MyOrderImport() {
       }));
       await supabase.from('shipping_myorder').upsert(rows, { onConflict: 'tracking' });
 
-      // อัพเดต orders.ship_date สำหรับออเดอร์ที่จับคู่แล้ว
-      const matchedTrackings = Object.values(map)
-        .filter(r => r.matched)
-        .map(r => r.tracking);
-      if (matchedTrackings.length > 0) {
-        for (let i = 0; i < matchedTrackings.length; i += 500) {
-          const batch = matchedTrackings.slice(i, i + 500);
-          await supabase.from('orders')
-            .update({ ship_date: shipDate })
-            .in('tracking_no', batch);
-        }
-      }
+      // ship_date อัพเดตเมื่อ MyOrderExport → ยืนยันส่งแล้ว (ไม่ใช่ตอนนำเข้าค่าขนส่ง)
     } catch (err) {
       console.error('auto-save failed:', err);
     } finally {
@@ -420,17 +407,7 @@ export default function MyOrderImport() {
             onChange={handleFiles}
           />
         </div>
-        {/* วันที่จัดส่งจริง */}
-        <div className="shrink-0 border rounded-xl p-3 bg-white flex flex-col justify-center gap-1 min-w-[130px]">
-          <label className="text-[10px] text-slate-400 font-medium">📅 วันที่จัดส่ง</label>
-          <input
-            type="date"
-            value={shipDate}
-            onChange={e => setShipDate(e.target.value)}
-            className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-300 text-slate-700"
-          />
-          <p className="text-[10px] text-slate-400">บันทึกลงออเดอร์อัตโนมัติ</p>
-        </div>
+
       </div>
 
       {/* Error banner */}
