@@ -475,7 +475,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
 
       {/* Table */}
       <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-        <table className="text-sm w-full" style={{minWidth:'900px'}}>
+        <table className="text-sm w-full" style={{minWidth:'1000px'}}>
           <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
             <tr>
               <th className="p-3 w-8">
@@ -489,7 +489,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                 />
               </th>
               <th className="p-3 w-8"/>
-              <th className="p-3 text-left">ชื่อลูกค้า</th>
+              <th className="p-3 text-left whitespace-nowrap" style={{minWidth:'140px'}}>ชื่อลูกค้า</th>
               <th className="p-3 text-left whitespace-nowrap">ชื่อเฟสบุ๊ก</th>
               <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
               <th className="p-3 text-left whitespace-nowrap">จังหวัด</th>
@@ -522,7 +522,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                   <td className="p-3 text-center text-slate-400">
                     {expanded===c.id ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
                   </td>
-                  <td className="p-3">
+                  <td className="p-3 whitespace-nowrap" style={{minWidth:'140px'}}>
                     <div className="font-medium text-slate-800">{c.name}</div>
                   </td>
                   <td className="p-3 text-xs text-blue-600 whitespace-nowrap">
