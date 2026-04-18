@@ -176,10 +176,14 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
           .insert(toInsertCusts.slice(i,i+500)).select('id,tel');
         (data||[]).forEach((c:any) => { newCustIdMap[c.tel] = c.id; custAdded++; });
       }
-      // batch update existing (ทีละ 1 ยังต้องเป็น individual แต่ parallel)
-      await Promise.all(toUpdateCusts.map(({id,payload}) =>
-        supabase.from('customers').update(payload).eq('id',id)
-      ));
+      // batch update existing (ทีละ 10 parallel ป้องกัน rate limit)
+      for (let i=0; i<toUpdateCusts.length; i+=10) {
+        await Promise.all(
+          toUpdateCusts.slice(i,i+10).map(({id,payload}) =>
+            supabase.from('customers').update(payload).eq('id',id)
+          )
+        );
+      }
       custUpdated = toUpdateCusts.length;
 
       // รวม telMap
@@ -239,7 +243,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
           payment_status: String(row[24]||'รอชำระเงิน').trim(),
           order_status: hasTrack?'รอแพ็ค':'รอคีย์ออเดอร์',
           route,
-          imported_at: importDate,
+          imported_at: new Date().toISOString().split('T')[0],
         });
       }
 
