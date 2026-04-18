@@ -32,8 +32,8 @@ const GROUPS = [
     key: 'sales', label: 'ฝ่ายขาย', icon: Store,
     accent: '#0ea5e9', bg: '#f0f9ff', dot: '#0ea5e9',
     menus: [
+      { key: 'sales-customers', label: 'ลูกค้า',    icon: Users,         built: true  },
       { key: 'sales-admin',     label: 'แอดมิน',    icon: UserCog,       built: true  },
-      { key: 'sales-customers', label: 'ตามลูกค้า', icon: Users,         built: true  },
       { key: 'sales-crm',       label: 'CRM',        icon: MessageSquare, built: false },
     ] as MenuItem[],
   },
