@@ -34,6 +34,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   const [loading, setLoading]       = useState(true);
   const [expanded, setExpanded]     = useState<string | null>(null);
   const [custOrders, setCustOrders] = useState<Order[]>([]);
+  const [shipCostMap, setShipCostMap] = useState<Record<string, number>>({});
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [editTag, setEditTag]       = useState<{id: string; tag: string} | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -56,7 +57,19 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
     setToast({ msg, type }); setTimeout(() => setToast(null), 5000);
   };
 
-  useEffect(() => { loadCustomers(); }, []);
+  useEffect(() => { loadCustomers(); loadShipCosts(); }, []);
+
+  const loadShipCosts = async () => {
+    const [{ data: flash }, { data: myorder }] = await Promise.all([
+      supabase.from('shipping_flash').select('tracking, total_thb'),
+      supabase.from('shipping_myorder').select('tracking, total_thb'),
+    ]);
+    const map: Record<string, number> = {};
+    [...(flash || []), ...(myorder || [])].forEach((r: any) => {
+      if (r.tracking) map[r.tracking] = Number(r.total_thb || 0);
+    });
+    setShipCostMap(map);
+  };
 
   const loadCustomers = async () => {
     setLoading(true);
@@ -562,6 +575,11 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                               {o.ship_date && (
                                 <span className="text-blue-600 text-xs font-medium w-24 shrink-0">
                                   🚚 {o.ship_date.split('-').reverse().join('-')}
+                                </span>
+                              )}
+                              {o.tracking_no && shipCostMap[o.tracking_no] && (
+                                <span className="text-blue-700 text-xs font-bold shrink-0">
+                                  ฿{Number(shipCostMap[o.tracking_no]).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2})}
                                 </span>
                               )}
                               <span className="text-slate-600 flex-1 truncate">{o.raw_prod || '-'}</span>
