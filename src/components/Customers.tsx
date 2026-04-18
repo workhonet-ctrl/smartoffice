@@ -151,8 +151,10 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
         (data||[]).forEach((o:any) => existingOrderSet.add(o.order_no));
       }
 
-      // ── Step 4: แยก insert vs update customers ─────────────────────────
-      const toInsertCusts: any[] = [];
+      // ── Step 4: แยก insert vs update — deduplicate by tel ────────────
+      // ลูกค้า 1 คนอาจมีหลายออเดอร์ → deduplicate ก่อน insert
+      const seenTels = new Set<string>();
+      const toInsertCustsMap: Record<string,any> = {}; // tel → payload (last wins)
       const toUpdateCusts: {id:string; payload:any}[] = [];
 
       for (const row of dataRows) {
@@ -171,21 +173,26 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
           payment_method: String(row[22]||'').trim()||null,
         };
         if (existingCustMap[tel]) {
-          toUpdateCusts.push({ id: existingCustMap[tel], payload });
+          if (!seenTels.has(tel)) {
+            toUpdateCusts.push({ id: existingCustMap[tel], payload });
+            seenTels.add(tel);
+          }
         } else {
-          toInsertCusts.push({ ...payload, tag: 'ใหม่' });
+          toInsertCustsMap[tel] = { ...payload, tag: 'ใหม่' }; // deduplicate by tel
         }
       }
+      const toInsertCusts = Object.values(toInsertCustsMap);
 
-      // batch insert new customers (500 ต่อครั้ง)
+      // batch insert new customers (500 ต่อครั้ง) — ไม่มี duplicate แล้ว
       let custAdded = 0, custUpdated = 0;
       const newCustIdMap: Record<string,string> = {}; // tel → new id
       for (let i=0; i<toInsertCusts.length; i+=500) {
-        const { data } = await supabase.from('customers')
+        const { data, error } = await supabase.from('customers')
           .insert(toInsertCusts.slice(i,i+500)).select('id,tel');
+        if (error) console.error('insert customers error:', error);
         (data||[]).forEach((c:any) => { newCustIdMap[c.tel] = c.id; custAdded++; });
       }
-      // batch update existing (ทีละ 10 parallel ป้องกัน rate limit)
+      // batch update existing (ทีละ 10 parallel)
       for (let i=0; i<toUpdateCusts.length; i+=10) {
         await Promise.all(
           toUpdateCusts.slice(i,i+10).map(({id,payload}) =>
