@@ -42,12 +42,12 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   const [importing, setImporting]   = useState(false);
   const [importResult, setImportResult] = useState<{
     added: number; updated: number; skipped: number;
-    unmapped: string[];
+    unmapped: {name:string; qty:string}[];
   } | null>(null);
 
   // mapping modal state
   const [showMappingModal, setShowMappingModal] = useState(false);
-  const [unmappedList, setUnmappedList]         = useState<string[]>([]);
+  const [unmappedList, setUnmappedList]         = useState<{name:string; qty:string}[]>([]);
   const [promoOptions, setPromoOptions]         = useState<{id:string; name:string; short_name:string|null; price_thb:number; master_name:string}[]>([]);
   const [mappingSelects, setMappingSelects]     = useState<Record<string, string>>({}); // raw_name → promo_id
   const [mappingSearch, setMappingSearch]       = useState(''); // ค้นหาใน modal
@@ -118,12 +118,21 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
         dataRows.flatMap(r => String(r[14]||'').split('|').map(s=>s.trim()).filter(Boolean))
       )];
       const autoPromoMap: Record<string,string> = {};
-      const unmappedProds: string[] = [];
+      const unmappedProds: {name:string; qty:string}[] = [];
+      // สร้าง map ชื่อสินค้า → จำนวน (ดึงจากแถวแรกที่เจอ)
+      const prodQtyMap: Record<string,string> = {};
+      dataRows.forEach(r => {
+        const prods = String(r[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
+        const qtys  = String(r[15]||'1').split('|').map((s:string)=>s.trim());
+        prods.forEach((p,i) => { if (!prodQtyMap[p]) prodQtyMap[p] = qtys[i] || '1'; });
+      });
       if (rawProdsAll.length > 0) {
         const { data: mappings } = await supabase
           .from('product_mappings').select('raw_name, promo_id').in('raw_name', rawProdsAll);
         (mappings||[]).forEach((m:any) => { autoPromoMap[m.raw_name] = m.promo_id; });
-        rawProdsAll.forEach(rp => { if (!autoPromoMap[rp]) unmappedProds.push(rp); });
+        rawProdsAll.forEach(rp => {
+          if (!autoPromoMap[rp]) unmappedProds.push({ name: rp, qty: prodQtyMap[rp] || '?' });
+        });
       }
 
       // ── Step 2: โหลด customers ที่มีอยู่แล้วทั้งหมดครั้งเดียว (by tel) ──
@@ -275,7 +284,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
         })));
         setUnmappedList(unmappedProds);
         const defaults: Record<string, string> = {};
-        unmappedProds.forEach(n => { defaults[n] = ''; });
+        unmappedProds.forEach(({name}) => { defaults[name] = ''; });
         setMappingSelects(defaults);
         setShowMappingModal(true);
         showToast(`✓ นำเข้าสำเร็จ · พบสินค้า ${unmappedProds.length} รายการยังไม่มีในระบบ`, 'warning');
@@ -384,8 +393,8 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
               {importResult.unmapped.length > 0 && (
                 <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg text-orange-700">
                   <div className="font-semibold mb-1">⚠ สินค้ายังไม่มีในระบบ ({importResult.unmapped.length} รายการ)</div>
-                  {importResult.unmapped.map((name, i) => (
-                    <div key={i} className="ml-2">· {name}</div>
+                  {importResult.unmapped.map(({name, qty}, i) => (
+                    <div key={i} className="ml-2">· {name} <span className="text-orange-500 font-bold">×{qty}</span></div>
                   ))}
                   <div className="mt-1 text-orange-600">→ ไปเพิ่มที่หน้า "เพิ่มสินค้า" แล้ว ออเดอร์จะ sync อัตโนมัติ</div>
                 </div>
@@ -673,7 +682,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
             </div>
 
             <div className="flex-1 overflow-auto space-y-3 min-h-0">
-              {unmappedList.map(rawName => {
+              {unmappedList.map(({name: rawName, qty}) => {
                 const selectedPromo = promoOptions.find(p => p.id === mappingSelects[rawName]);
                 const filtered = promoOptions.filter(p => {
                   const q = mappingSearch.toLowerCase();
@@ -684,10 +693,11 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                 });
                 return (
                   <div key={rawName} className="bg-slate-50 rounded-xl p-3">
-                    {/* ชื่อจาก Excel */}
+                    {/* ชื่อ + จำนวน จาก Excel */}
                     <div className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
                       <span className="text-orange-500">⚠</span>
                       <span className="font-mono bg-orange-50 px-2 py-0.5 rounded text-orange-700">{rawName}</span>
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">×{qty} ชิ้น</span>
                     </div>
 
                     {/* แสดงสินค้าที่เลือกไว้ */}
