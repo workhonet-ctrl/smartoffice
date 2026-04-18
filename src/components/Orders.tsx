@@ -384,11 +384,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [activeTab, setActiveTab] = useState<'orders' | 'parcel'>('orders');
   const today = new Date().toISOString().split('T')[0];
   // ข้อ 2: เริ่มต้นเห็นทั้งหมด (ไม่ filter วันที่)
-  const [dateFrom,    setDateFrom]    = useState('');
-  const [dateTo,      setDateTo]      = useState('');
-  const [importDate,  setImportDate]  = useState(
-    () => new Date().toISOString().split('T')[0]
-  );
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo,   setDateTo]   = useState('');
   // ข้อ 1: filter เพิ่มเติม
   const [filterRoute,  setFilterRoute]  = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -420,7 +417,22 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [dupTrackings, setDupTrackings] = useState<DupTracking[]>([]);
   const [checkingDups, setCheckingDups] = useState(false);
 
-  useEffect(() => { loadOrders(); loadPromoOptions(); }, []);
+  useEffect(() => { loadOrders(); loadPromoOptions(); loadShipCosts(); }, []);
+
+  // ค่าขนส่งจริงต่อ tracking จาก shipping_flash + shipping_myorder
+  const [shipCostMap, setShipCostMap] = useState<Record<string, number>>({});
+
+  const loadShipCosts = async () => {
+    const [{ data: flash }, { data: myorder }] = await Promise.all([
+      supabase.from('shipping_flash').select('tracking, total_thb'),
+      supabase.from('shipping_myorder').select('tracking, total_thb'),
+    ]);
+    const map: Record<string, number> = {};
+    [...(flash || []), ...(myorder || [])].forEach((r: any) => {
+      if (r.tracking) map[r.tracking] = Number(r.total_thb || 0);
+    });
+    setShipCostMap(map);
+  };
 
   const loadOrders = async () => {
     try {
@@ -694,7 +706,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           courier: order.courier || null,
           total_thb: order.total_thb, payment_method: order.payment_method,
           payment_status: order.payment_status, order_status: orderStatus, route,
-          imported_at: importDate, // วันที่นำเข้า (user เลือกได้)
+          imported_at: new Date().toISOString().split('T')[0], // วันที่นำเข้า
         }]);
 
         if (oe) {
@@ -836,21 +848,10 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               </button>
             </div>
             {activeTab === 'orders' && (
-              <div className="flex items-center gap-2">
-                <div className="flex flex-col">
-                  <label className="text-[10px] text-slate-400 mb-0.5 font-medium">วันที่นำเข้า</label>
-                  <input
-                    type="date"
-                    value={importDate}
-                    onChange={e => setImportDate(e.target.value)}
-                    className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 text-slate-700"
-                  />
-                </div>
-                <label className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-end">
-                  <Upload size={17}/> นำเข้า Excel
-                  <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden"/>
-                </label>
-              </div>
+              <label className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-start">
+                <Upload size={17}/> นำเข้า Excel
+                <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden"/>
+              </label>
             )}
           </div>
         </div>
@@ -954,7 +955,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
             <tr>
               <th className="p-3 text-left whitespace-nowrap">วันที่สั่งซื้อ</th>
-              <th className="p-3 text-left whitespace-nowrap">วันที่นำเข้า</th>
+              <th className="p-3 text-left whitespace-nowrap">วันที่จัดส่ง</th>
               <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
               <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
               <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
@@ -965,6 +966,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               <th className="p-3 text-center whitespace-nowrap">ขนส่ง</th>
               <th className="p-3 text-center whitespace-nowrap">สถานะชำระ</th>
               <th className="p-3 text-left whitespace-nowrap">Tracking</th>
+              <th className="p-3 text-right whitespace-nowrap text-blue-300">ค่าส่งจริง</th>
               <th className="p-3 text-center whitespace-nowrap">สถานะออเดอร์</th>
               <th className="p-3 w-10"/>
             </tr>
