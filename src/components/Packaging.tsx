@@ -308,11 +308,19 @@ export default function Packaging({
         console.error('pack_history insert error:', error);
         onCreateRequisition('');
       } else {
-        // ✅ อัพเดต order_status รอแพ็ค → กำลังแพ็ค
+        // ✅ อัพเดต order_status รอแพ็ค → กำลังแพ็ค + ship_date วันนี้ (ถ้ายังไม่มี)
         const packOrderIds = orders.map(o => o.id);
-        await supabase.from('orders')
-          .update({ order_status: 'กำลังแพ็ค' })
-          .in('id', packOrderIds);
+        const todayDate = new Date().toISOString().split('T')[0];
+        await Promise.all([
+          // orders ที่ยังไม่มี ship_date → ใส่วันนี้
+          supabase.from('orders')
+            .update({ order_status: 'กำลังแพ็ค', ship_date: todayDate })
+            .in('id', packOrderIds).is('ship_date', null),
+          // orders ที่มี ship_date แล้ว → คงไว้ เปลี่ยนแค่ status
+          supabase.from('orders')
+            .update({ order_status: 'กำลังแพ็ค' })
+            .in('id', packOrderIds).not('ship_date', 'is', null),
+        ]);
         onCreateRequisition(ph?.id || '');
       }
     } catch (err) {
