@@ -115,8 +115,40 @@ function ParcelTrackingPanel() {
     }
   };
 
+  // แปลงสถานะ Flash ไทย → สถานะในระบบ
+  const mapFlashThaiStatus = (raw: string): string => {
+    if (raw.includes('เซ็นรับแล้ว'))           return 'ส่งสำเร็จ';
+    if (raw.includes('ระหว่างการขนส่ง'))        return 'อยู่ระหว่างจัดส่ง';
+    if (raw.includes('รอการนำส่งเข้าระบบ'))     return 'อยู่ระหว่างจัดส่ง';
+    if (raw.includes('พัสดุคงคลัง'))            return 'อยู่ระหว่างจัดส่ง';
+    if (raw.includes('พัสดุตีกลับแล้ว') || raw.includes('ตีกลับ')) return 'ตีกลับ';
+    return 'อยู่ระหว่างจัดส่ง';
+  };
+
   const parseBulkTracking = (raw: string): { tracking: string; status: string }[] => {
     const results: { tracking: string; status: string }[] = [];
+
+    // ── รูปแบบ Flash ไทย (copy จากเว็บ aftership/flash) ──────
+    // pattern: "สถานะ ... TH/WA/EW... จังหวัด จังหวัด"
+    const flashThaiPattern = /(?:คลิ๊กเพื่อแสดงรายละเอียดการขนส่ง\s+)?([^
+]+?)\s+(TH|WA|EW)[A-Z0-9]+/g;
+    const thaiBlocks = raw.split(/คลิ๊กเพื่อแสดงรายละเอียดการขนส่ง/);
+    for (const block of thaiBlocks) {
+      const trackMatch = block.match(/((?:TH|WA|EW)[A-Z0-9]{8,})/);
+      if (!trackMatch) continue;
+      const tracking = trackMatch[1].trim();
+      // หาสถานะ — บรรทัดแรกของ block (ก่อน tracking)
+      const beforeTrack = block.substring(0, block.indexOf(tracking)).trim();
+      const lines = beforeTrack.split(/
+/).map(s => s.trim()).filter(Boolean);
+      const rawStatus = lines[0] || '';
+      if (tracking.length > 4) {
+        results.push({ tracking, status: mapFlashThaiStatus(rawStatus) });
+      }
+    }
+    if (results.length > 0) return results;
+
+    // ── รูปแบบ EN (เว็บอื่น) ────────────────────────────────
     const blocks = raw.split(/={3,}|={5,}/);
     for (const block of blocks) {
       const trackMatch  = block.match(/Tracking number[:\s]+([A-Z0-9]+)/i);
