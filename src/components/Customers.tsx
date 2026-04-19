@@ -275,6 +275,52 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
         else console.error('batch order insert error:', error);
       }
 
+      // อัพเดต tracking ให้ orders ที่มีอยู่แล้วแต่ยังไม่มี tracking
+      const toUpdateTracking: {order_no:string; tracking_no:string; courier:string; route:string}[] = [];
+      for (const row of dataRows) {
+        const orderNo   = String(row[1]||'').trim();
+        const rawTrack  = String(row[17]||'');
+        const trackMatch = rawTrack.match(/^([^\s(]+)/);
+        const trackingNo = trackMatch ? trackMatch[1] : '';
+        if (!orderNo || trackingNo.length <= 3) continue;
+        if (!existingOrderSet.has(orderNo)) continue; // ออเดอร์ใหม่ insert แล้ว
+        const courierMatch = rawTrack.match(/\(([^)]+)\)/);
+        let courier = '';
+        if (courierMatch) {
+          const cv = courierMatch[1].toUpperCase();
+          if (cv.includes('THAI_POST')||cv.includes('EMS')) courier='ไปรษณีย์';
+          else if (cv.includes('FLASH')) courier='FLASH';
+          else courier=courierMatch[1];
+        }
+        const postal    = String(row[11]||'').trim();
+        const isTourist = TOURIST_ZIPS.has(postal);
+        const isPost    = courier === 'ไปรษณีย์';
+        const route     = isPost ? (isTourist?'C':'A') : 'B';
+        toUpdateTracking.push({ order_no: orderNo, tracking_no: trackingNo, courier, route });
+      }
+      if (toUpdateTracking.length > 0) {
+        // โหลด orders ที่มีอยู่และยังไม่มี tracking
+        const { data: existingNoTrack } = await supabase
+          .from('orders').select('id, order_no')
+          .in('order_no', toUpdateTracking.map(t=>t.order_no))
+          .is('tracking_no', null);
+        const noTrackMap: Record<string,string> = {};
+        (existingNoTrack||[]).forEach((o:any) => { noTrackMap[o.order_no] = o.id; });
+        // อัพเดตเฉพาะที่ไม่มี tracking
+        const updates = toUpdateTracking.filter(t => noTrackMap[t.order_no]);
+        for (let i=0; i<updates.length; i+=10) {
+          await Promise.all(updates.slice(i,i+10).map(t =>
+            supabase.from('orders').update({
+              tracking_no: t.tracking_no,
+              courier: t.courier,
+              route: t.route,
+              order_status: 'รอแพ็ค',
+            }).eq('id', noTrackMap[t.order_no])
+          ));
+        }
+        orderAdded += updates.length; // นับรวมด้วย
+      }
+
       setImportResult({
         added: custAdded,
         updated: custUpdated,
