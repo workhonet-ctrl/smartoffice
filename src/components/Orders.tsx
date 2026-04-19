@@ -30,6 +30,7 @@ function ParcelTrackingPanel() {
   const [saving,       setSaving]       = useState(false);
   const [saveMsg,      setSaveMsg]      = useState('');
   const [uploading,    setUploading]    = useState(false);
+  const [search,       setSearch]       = useState('');
 
   // แปลงสถานะ EN → TH (Flash/เว็บ)
   const STATUS_MAP: Record<string, string> = {
@@ -164,8 +165,6 @@ function ParcelTrackingPanel() {
     setLoading(true);
     const { data } = await supabase.from('orders')
       .select('id, order_no, tracking_no, route, parcel_status, order_date, customers(name)')
-      .not('tracking_no', 'is', null)
-      .neq('tracking_no', '')
       .order('order_date', { ascending: false });
     if (data) setAllRows(data.map((o: any) => ({
       id: o.id, order_no: o.order_no,
@@ -182,7 +181,8 @@ function ParcelTrackingPanel() {
 
   const filtered = allRows.filter(r =>
     (!filterRoute  || (filterRoute === 'AC' ? (r.route === 'A' || r.route === 'C') : r.route === filterRoute)) &&
-    (!filterStatus || r.parcel_status === filterStatus)
+    (!filterStatus || (filterStatus === 'no-tracking' ? !r.tracking_no : r.parcel_status === filterStatus)) &&
+    (!search || r.tracking_no?.toLowerCase().includes(search.toLowerCase()) || r.customer_name.toLowerCase().includes(search.toLowerCase()))
   );
 
   const allSel = filtered.length > 0 && filtered.every(r => selected.has(r.id));
@@ -238,9 +238,13 @@ function ParcelTrackingPanel() {
               <option value="B">Flash</option>
               <option value="AC">ไปรษณีย์</option>
             </select>
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="🔍 ค้นชื่อ / เลขพัสดุ..."
+              className="border rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 min-w-[180px]"/>
             <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
               className="border rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-300">
               <option value="">สถานะ: ทั้งหมด</option>
+              <option value="no-tracking">⚠ ยังไม่มีเลขพัสดุ</option>
               <option value="รอรับพัสดุ">รอรับพัสดุ</option>
               {PARCEL_STATUSES.map(s => <option key={s.v}>{s.v}</option>)}
             </select>
@@ -266,7 +270,7 @@ function ParcelTrackingPanel() {
                   </th>
                   <th className="p-3 text-center whitespace-nowrap">ขนส่ง</th>
                   <th className="p-3 text-left whitespace-nowrap">Tracking No.</th>
-                  <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap" style={{maxWidth:'140px'}}>ลูกค้า</th>
                   <th className="p-3 text-center whitespace-nowrap">สถานะออเดอร์</th>
                 </tr>
               </thead>
