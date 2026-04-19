@@ -1244,6 +1244,12 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                         </div>
                       )}
                     </td>
+                    {/* ค่าส่งจริง */}
+                    <td className="p-3 text-right whitespace-nowrap">
+                      {o.tracking_no && shipCostMap[o.tracking_no]
+                        ? <span className="text-blue-600 font-medium text-xs">฿{Number(shipCostMap[o.tracking_no]).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                        : <span className="text-slate-200 text-xs">-</span>}
+                    </td>
                     {/* สถานะออเดอร์ */}
                     <td className="p-3 text-center">
                       <span className={`px-2 py-1 rounded-full text-xs font-bold ${status.color}`}>{status.label}</span>
