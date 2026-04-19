@@ -421,6 +421,14 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
 
   // ค่าขนส่งจริงต่อ tracking จาก shipping_flash + shipping_myorder
   const [shipCostMap, setShipCostMap] = useState<Record<string, number>>({});
+  // inline edit ship_date
+  const [editingShipDate, setEditingShipDate] = useState<string | null>(null); // order id
+
+  const updateShipDate = async (orderId: string, date: string) => {
+    await supabase.from('orders').update({ ship_date: date || null }).eq('id', orderId);
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ship_date: date || null } as any : o));
+    setEditingShipDate(null);
+  };
 
   const loadShipCosts = async () => {
     const [{ data: flash }, { data: myorder }] = await Promise.all([
@@ -1031,21 +1039,41 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                         </div>
                       ) : <span className="text-slate-300">-</span>}
                     </td>
-                    {/* วันที่จัดส่ง */}
-                    <td className="p-3 whitespace-nowrap">
-                      {(o as any).ship_date
-                        ? <div className="text-xs text-blue-600 font-medium">
-                            {String((o as any).ship_date).split('-').reverse().join('-')}
-                          </div>
-                        : <span className="text-slate-300 text-xs">-</span>}
+                    {/* วันที่จัดส่ง — คลิกเพื่อแก้ไข */}
+                    <td className="p-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                      {editingShipDate === o.id ? (
+                        <input
+                          type="date"
+                          defaultValue={(o as any).ship_date || ''}
+                          autoFocus
+                          onBlur={e => updateShipDate(o.id, e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') updateShipDate(o.id, (e.target as HTMLInputElement).value);
+                            if (e.key === 'Escape') setEditingShipDate(null);
+                          }}
+                          className="border border-blue-300 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 w-32"
+                        />
+                      ) : (
+                        <div
+                          onClick={() => setEditingShipDate(o.id)}
+                          className="text-xs cursor-pointer hover:bg-blue-50 px-1.5 py-1 rounded group min-w-[80px]"
+                        >
+                          {(o as any).ship_date
+                            ? <span className="text-blue-600 font-medium group-hover:underline">
+                                {String((o as any).ship_date).split('-').reverse().join('-')}
+                              </span>
+                            : <span className="text-slate-300 group-hover:text-blue-400">กรอกวันที่</span>
+                          }
+                        </div>
+                      )}
                     </td>
                     {/* เลขออเดอร์ */}
                     <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap">{o.order_no}</td>
                     {/* ลูกค้า */}
-                    <td className="p-3 whitespace-nowrap">
-                      <div className="font-medium">{o.customers?.name || '-'}</div>
+                    <td className="p-3" style={{maxWidth:'160px'}}>
+                      <div className="font-medium truncate">{o.customers?.name || '-'}</div>
                       {o.customers?.facebook_name && (
-                        <div className="text-[11px] text-blue-500 mt-0.5">📘 {o.customers.facebook_name}</div>
+                        <div className="text-[11px] text-blue-500 mt-0.5 truncate">📘 {o.customers.facebook_name}</div>
                       )}
                     </td>
                     {/* เบอร์โทร */}
