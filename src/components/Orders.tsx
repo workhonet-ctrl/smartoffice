@@ -181,7 +181,7 @@ function ParcelTrackingPanel() {
 
   const filtered = allRows.filter(r =>
     (!filterRoute  || (filterRoute === 'AC' ? (r.route === 'A' || r.route === 'C') : r.route === filterRoute)) &&
-    (!filterStatus || (filterStatus === 'no-tracking' ? (!r.parcel_status || r.parcel_status === 'ยังไม่มีเลยพัสดุ') : r.parcel_status === filterStatus)) &&
+    (!filterStatus || (filterStatus === 'no-tracking' ? r.parcel_status === 'รอรับพัสดุ' : r.parcel_status === filterStatus)) &&
     (!search || r.tracking_no?.toLowerCase().includes(search.toLowerCase()) || r.customer_name.toLowerCase().includes(search.toLowerCase()))
   );
 
@@ -244,7 +244,7 @@ function ParcelTrackingPanel() {
             <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
               className="border rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-300">
               <option value="">สถานะ: ทั้งหมด</option>
-              <option value="no-tracking">⚠ ยังไม่ได้เช็คสถานะ</option>
+              <option value="no-tracking">⚠ ยังไม่มีเลขพัสดุ</option>
               <option value="รอรับพัสดุ">รอรับพัสดุ</option>
               {PARCEL_STATUSES.map(s => <option key={s.v}>{s.v}</option>)}
             </select>
