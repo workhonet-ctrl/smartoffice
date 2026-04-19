@@ -55,60 +55,104 @@ export default function Packaging({
   const loadData = async () => {
     setLoading(true);
     try {
+      // ── 1. โหลด orders ──────────────────────────────────────────
       const query = orderIds.length > 0
         ? supabase.from('orders').select('*, customers(name, tel)').in('id', orderIds)
         : supabase.from('orders').select('*, customers(name, tel)').eq('order_status', 'รอแพ็ค');
       const { data: ordersData } = await query.order('created_at', { ascending: true });
       if (!ordersData) return;
 
-      const enriched: PackOrder[] = [];
-      for (const o of ordersData) {
-        const rawProds = (o.raw_prod || '').split('|').map((s: string) => s.trim()).filter(Boolean);
-        const qtys     = String(o.quantities || o.quantity || '1').split('|');
-        const promos: PromoDetail[] = [];
-        for (let i = 0; i < rawProds.length; i++) {
-          let pid = o.promo_ids?.[i];
+      // ── 2. รวม raw_names ทั้งหมด + promo_ids ──────────────────
+      const allRawNames = new Set<string>();
+      const allPromoIds = new Set<string>();
+      ordersData.forEach((o: any) => {
+        (o.raw_prod||'').split('|').map((s:string)=>s.trim()).filter(Boolean)
+          .forEach((n:string) => allRawNames.add(n));
+        (o.promo_ids||[]).filter(Boolean).forEach((pid:string) => allPromoIds.add(pid));
+      });
 
-          // ── Fallback: ถ้าไม่มี promo_id → หาจาก product_mappings ──
-          if (!pid && rawProds[i]) {
-            const { data: mapping } = await supabase
-              .from('product_mappings')
-              .select('promo_id')
-              .eq('raw_name', rawProds[i])
-              .maybeSingle();
-            if (mapping?.promo_id) {
-              pid = mapping.promo_id;
-              // บันทึก promo_ids กลับลงออเดอร์ให้ถูกต้องสำหรับครั้งต่อไป
-              const updatedPromoIds = [...(o.promo_ids || rawProds.map(() => null))];
-              updatedPromoIds[i] = pid;
-              await supabase.from('orders').update({ promo_ids: updatedPromoIds }).eq('id', o.id);
-            }
-          }
-
-          let promoData: any = null;
-          if (pid) {
-            const { data } = await supabase.from('products_promo')
+      // ── 3. batch โหลด product_mappings + promos + boxes + bubbles ──
+      const [
+        { data: mappingsData },
+        { data: promosData },
+        { data: boxData },
+        { data: bubData },
+      ] = await Promise.all([
+        allRawNames.size > 0
+          ? supabase.from('product_mappings').select('raw_name, promo_id').in('raw_name', [...allRawNames])
+          : Promise.resolve({ data: [] }),
+        allPromoIds.size > 0
+          ? supabase.from('products_promo')
               .select('id, name, short_name, box_id, bubble_id, boxes(name), bubbles(name, length_cm)')
-              .eq('id', pid).maybeSingle();
-            promoData = data;
-          }
-          const qty = promoData?.name ? extractQty(promoData.name) : (Number(qtys[i]?.trim()) || 1);
-          promos.push({
-            id: pid || `raw-${i}`, name: promoData?.name || rawProds[i],
-            short_name: promoData?.short_name || null, qty,
-            box_id:     promoData?.box_id || '', box_name: promoData?.boxes?.name || '-',
-            bubble_id:  promoData?.bubble_id || '',
-            bubble_name: promoData?.bubbles ? `ยาว ${Number(promoData.bubbles.length_cm)} cm` : '-',
-          });
-        }
-        enriched.push({ ...o, promos });
-      }
-      setOrders(enriched);
-
-      const [{ data: boxData }, { data: bubData }] = await Promise.all([
+              .in('id', [...allPromoIds])
+          : Promise.resolve({ data: [] }),
         supabase.from('boxes').select('id, name').order('id'),
         supabase.from('bubbles').select('id, name, length_cm').order('id'),
       ]);
+
+      // build lookup maps
+      const mappingMap: Record<string,string> = {};
+      (mappingsData||[]).forEach((m:any) => { mappingMap[m.raw_name] = m.promo_id; });
+      const promoMap: Record<string,any> = {};
+      (promosData||[]).forEach((p:any) => { promoMap[p.id] = p; });
+
+      // ── 4. ถ้ามี order ที่ยังไม่มี promo_id → ดึง mapping เพิ่ม ──
+      const missingNames = new Set<string>();
+      ordersData.forEach((o: any) => {
+        const raws = (o.raw_prod||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
+        raws.forEach((rp:string, i:number) => {
+          if (!o.promo_ids?.[i] && !mappingMap[rp]) missingNames.add(rp);
+        });
+      });
+      // โหลด promo สำหรับ mapped ids ที่ยังไม่มีใน promoMap
+      const mappedIds = [...missingNames].map(n => mappingMap[n]).filter(Boolean);
+      if (mappedIds.length > 0) {
+        const { data: extraPromos } = await supabase.from('products_promo')
+          .select('id, name, short_name, box_id, bubble_id, boxes(name), bubbles(name, length_cm)')
+          .in('id', mappedIds);
+        (extraPromos||[]).forEach((p:any) => { promoMap[p.id] = p; });
+      }
+
+      // ── 5. batch update orders ที่ promo_ids ขาด ──────────────
+      const toUpdate: {id:string; promo_ids:string[]}[] = [];
+      ordersData.forEach((o: any) => {
+        const raws = (o.raw_prod||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
+        const updatedIds = [...(o.promo_ids || raws.map(()=>null))];
+        let changed = false;
+        raws.forEach((rp:string, i:number) => {
+          if (!updatedIds[i] && mappingMap[rp]) {
+            updatedIds[i] = mappingMap[rp]; changed = true;
+          }
+        });
+        if (changed) toUpdate.push({ id: o.id, promo_ids: updatedIds });
+      });
+      // update parallel (ทีละ 10)
+      for (let i=0; i<toUpdate.length; i+=10) {
+        await Promise.all(toUpdate.slice(i,i+10).map(({id,promo_ids}) =>
+          supabase.from('orders').update({ promo_ids }).eq('id',id)
+        ));
+      }
+
+      // ── 6. สร้าง enriched orders ──────────────────────────────
+      const enriched: PackOrder[] = ordersData.map((o: any) => {
+        const rawProds = (o.raw_prod||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
+        const qtys = String(o.quantities||o.quantity||'1').split('|');
+        const promos: PromoDetail[] = rawProds.map((rp:string, i:number) => {
+          const pid = o.promo_ids?.[i] || mappingMap[rp];
+          const promoData = pid ? promoMap[pid] : null;
+          const qty = promoData?.name ? extractQty(promoData.name) : (Number(qtys[i]?.trim())||1);
+          return {
+            id: pid||`raw-${i}`, name: promoData?.name||rp,
+            short_name: promoData?.short_name||null, qty,
+            box_id: promoData?.box_id||'', box_name: promoData?.boxes?.name||'-',
+            bubble_id: promoData?.bubble_id||'',
+            bubble_name: promoData?.bubbles ? `ยาว ${Number(promoData.bubbles.length_cm)} cm` : '-',
+          };
+        });
+        return { ...o, promos };
+      });
+
+      setOrders(enriched);
       if (boxData) setBoxes(boxData);
       if (bubData) setBubbles(bubData);
     } finally { setLoading(false); }
