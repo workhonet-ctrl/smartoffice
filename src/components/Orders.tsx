@@ -87,7 +87,11 @@ function ParcelTrackingPanel() {
           .select('id, tracking_no').in('tracking_no', batch);
         await Promise.all((orders||[]).map(o =>
           supabase.from('orders')
-            .update({ parcel_status: latestMap[o.tracking_no!] })
+            .update((() => {
+              const ps = latestMap[o.tracking_no!];
+              const os = parcelToOrderStatus(ps);
+              return os ? { parcel_status: ps, order_status: os } : { parcel_status: ps };
+            })())
             .eq('id', o.id)
         ));
         updated += (orders||[]).length;
@@ -118,6 +122,15 @@ function ParcelTrackingPanel() {
     return results;
   };
 
+
+  // แปลง parcel_status → order_status
+  const parcelToOrderStatus = (parcelStatus: string): string | null => {
+    if (parcelStatus === 'ส่งสำเร็จ')          return 'ส่งสินค้าแล้ว';
+    if (parcelStatus === 'ไม่มีคนรับ')          return 'ไม่มีคนรับ';
+    if (parcelStatus === 'ตีกลับ')             return 'ตีกลับ';
+    if (parcelStatus === 'ส่งคืน')             return 'ส่งคืน';
+    return null; // สถานะอื่น ไม่เปลี่ยน order_status
+  };
   const handleBulkUpdate = async () => {
     const parsed = parseBulkTracking(bulkInput);
     if (!parsed.length) return;
@@ -127,7 +140,10 @@ function ParcelTrackingPanel() {
       const { data } = await supabase.from('orders')
         .select('id').eq('tracking_no', tracking).maybeSingle();
       if (data?.id) {
-        await supabase.from('orders').update({ parcel_status: status }).eq('id', data.id);
+        const orderStatus = parcelToOrderStatus(status);
+        const updatePayload: any = { parcel_status: status };
+        if (orderStatus) updatePayload.order_status = orderStatus;
+        await supabase.from('orders').update(updatePayload).eq('id', data.id);
         updated++;
       }
     }
