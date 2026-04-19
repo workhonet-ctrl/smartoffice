@@ -242,7 +242,11 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
         const postal     = String(row[11]||'').trim();
         const hasTrack   = trackingNo.length>3;
         const isTourist  = TOURIST_ZIPS.has(postal);
-        const route      = hasTrack?'A':isTourist?'C':'B';
+        // route ตาม courier จริง
+        // B = Flash, A = ไปรษณีย์มี tracking, C = ไปรษณีย์นักท่องเที่ยว, ไม่มี tracking = B
+        const route = hasTrack
+          ? (courier === 'ไปรษณีย์' ? (isTourist ? 'C' : 'A') : 'B')
+          : (isTourist ? 'C' : 'B');
 
         ordersToInsert.push({
           order_no: orderNo, customer_id: customerId,
