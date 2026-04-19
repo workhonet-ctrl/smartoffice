@@ -8,6 +8,8 @@ import * as XLSX from 'xlsx';
 const PARCEL_STATUSES = [
   { v: 'อยู่ระหว่างจัดส่ง',  color: 'bg-blue-100 text-blue-700' },
   { v: 'ส่งสำเร็จ',           color: 'bg-green-100 text-green-700' },
+  { v: 'ยังไม่ได้ส่ง',        color: 'bg-slate-100 text-slate-500' },
+  { v: 'ค้างอยู่คลัง',        color: 'bg-purple-100 text-purple-700' },
   { v: 'ไม่มีคนรับ',          color: 'bg-orange-100 text-orange-700' },
   { v: 'ตีกลับ',              color: 'bg-yellow-100 text-yellow-700' },
   { v: 'ส่งคืน',              color: 'bg-red-100 text-red-700' },
@@ -119,8 +121,8 @@ function ParcelTrackingPanel() {
   const mapFlashThaiStatus = (raw: string): string => {
     if (raw.includes('เซ็นรับแล้ว'))           return 'ส่งสำเร็จ';
     if (raw.includes('ระหว่างการขนส่ง'))        return 'อยู่ระหว่างจัดส่ง';
-    if (raw.includes('รอการนำส่งเข้าระบบ'))     return 'อยู่ระหว่างจัดส่ง';
-    if (raw.includes('พัสดุคงคลัง'))            return 'อยู่ระหว่างจัดส่ง';
+    if (raw.includes('รอการนำส่งเข้าระบบ'))     return 'ยังไม่ได้ส่ง';
+    if (raw.includes('พัสดุคงคลัง'))            return 'ค้างอยู่คลัง';
     if (raw.includes('พัสดุตีกลับแล้ว') || raw.includes('ตีกลับ')) return 'ตีกลับ';
     return 'อยู่ระหว่างจัดส่ง';
   };
@@ -166,7 +168,9 @@ function ParcelTrackingPanel() {
     if (parcelStatus === 'ตีกลับ')             return 'ตีกลับ';
     if (parcelStatus === 'ส่งคืน')             return 'ส่งคืน';
     if (parcelStatus === 'อยู่ระหว่างจัดส่ง')   return 'อยู่ระหว่างจัดส่ง';
-    return 'อยู่ระหว่างจัดส่ง'; // สถานะอื่นๆ → อยู่ระหว่างจัดส่ง
+    if (parcelStatus === 'ยังไม่ได้ส่ง')        return 'กำลังแพ็ค';
+    if (parcelStatus === 'ค้างอยู่คลัง')        return 'อยู่ระหว่างจัดส่ง';
+    return 'อยู่ระหว่างจัดส่ง';
   };
   const handleBulkUpdate = async () => {
     const parsed = parseBulkTracking(bulkInput);
@@ -381,16 +385,16 @@ function ParcelTrackingPanel() {
 
           {/* Status map */}
           <div className="bg-slate-50 border rounded-xl p-3 text-xs text-slate-500 space-y-1.5">
-            <div className="font-semibold text-slate-600 mb-1">🔄 แปลงสถานะอัตโนมัติ</div>
+            <div className="font-semibold text-slate-600 mb-1">🔄 Flash → สถานะในระบบ</div>
             {[
-              { from: 'In transit',       to: 'อยู่ระหว่างจัดส่ง' },
-              { from: 'Delivered',        to: 'ส่งสำเร็จ' },
-              { from: 'Out for delivery', to: 'อยู่ระหว่างจัดส่ง' },
-              { from: 'Returned/Exception', to: 'ตีกลับ' },
-              { from: 'Not found',        to: 'รอรับพัสดุ' },
+              { from: 'เซ็นรับแล้ว',           to: 'ส่งสำเร็จ' },
+              { from: 'ระหว่างการขนส่ง',        to: 'อยู่ระหว่างจัดส่ง' },
+              { from: 'รอการนำส่งเข้าระบบ',     to: 'ยังไม่ได้ส่ง' },
+              { from: 'พัสดุคงคลัง',            to: 'ค้างอยู่คลัง' },
+              { from: 'พัสดุตีกลับแล้ว',        to: 'ตีกลับ' },
             ].map(m => (
               <div key={m.from} className="flex items-center gap-1.5">
-                <span className="font-mono text-slate-400">{m.from}</span>
+                <span className="text-slate-500">{m.from}</span>
                 <span className="text-slate-300">→</span>
                 <span className={`px-1.5 py-0.5 rounded-full font-bold ${statusColor(m.to)}`}>{m.to}</span>
               </div>
