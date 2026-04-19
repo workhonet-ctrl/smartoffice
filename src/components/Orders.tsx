@@ -6,15 +6,19 @@ import * as XLSX from 'xlsx';
 
 // ── ParcelTracking (inline) ───────────────────────────────────
 const PARCEL_STATUSES = [
-  { v: 'อยู่ระหว่างจัดส่ง',  color: 'bg-blue-100 text-blue-700' },
   { v: 'ส่งสำเร็จ',           color: 'bg-green-100 text-green-700' },
+  { v: 'อยู่ระหว่างจัดส่ง',  color: 'bg-blue-100 text-blue-700' },
   { v: 'รอจัดส่ง',           color: 'bg-indigo-100 text-indigo-700' },
   { v: 'ค้างอยู่คลัง',        color: 'bg-purple-100 text-purple-700' },
   { v: 'ไม่มีคนรับ',          color: 'bg-orange-100 text-orange-700' },
   { v: 'ตีกลับ',              color: 'bg-yellow-100 text-yellow-700' },
   { v: 'ส่งคืน',              color: 'bg-red-100 text-red-700' },
   { v: 'ปัญหา',               color: 'bg-red-200 text-red-800' },
+  { v: 'รอรับพัสดุ',          color: 'bg-slate-100 text-slate-500' },
 ];
+
+// สถานะที่ถือว่า "เช็คแล้ว"
+const KNOWN_PARCEL_STATUSES = ['ส่งสำเร็จ','อยู่ระหว่างจัดส่ง','รอจัดส่ง','ค้างอยู่คลัง','ไม่มีคนรับ','ตีกลับ','ส่งคืน','ปัญหา','รอรับพัสดุ'];
 
 type TrackRow = {
   id: string; order_no: string; tracking_no: string; customer_name: string;
@@ -219,7 +223,7 @@ function ParcelTrackingPanel() {
   const filtered = allRows.filter(r =>
     (!filterRoute  || (filterRoute === 'AC' ? (r.route === 'A' || r.route === 'C') : r.route === filterRoute)) &&
     (!filterStatus || (filterStatus === 'no-tracking'
-      ? !['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน','รอจัดส่ง','ค้างอยู่คลัง','ปัญหา'].includes(r.parcel_status)
+      ? !KNOWN_PARCEL_STATUSES.includes(r.parcel_status)
       : r.parcel_status === filterStatus)) &&
     (!search || r.tracking_no?.toLowerCase().includes(search.toLowerCase()) || r.customer_name.toLowerCase().includes(search.toLowerCase()))
   );
@@ -246,7 +250,7 @@ function ParcelTrackingPanel() {
   const countWaiting   = allRows.filter(r => r.parcel_status === 'รอจัดส่ง').length;
   const countIssue     = allRows.filter(r => r.parcel_status === 'ปัญหา' || r.parcel_status === 'ค้างอยู่คลัง').length;
   const countTransit   = allRows.filter(r => r.parcel_status === 'อยู่ระหว่างจัดส่ง').length;
-  const countUnchecked = allRows.filter(r => !['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน','รอจัดส่ง','ค้างอยู่คลัง','ปัญหา'].includes(r.parcel_status)).length;
+  const countUnchecked = allRows.filter(r => !KNOWN_PARCEL_STATUSES.includes(r.parcel_status)).length;
 
   const routeLabel = (r: string) => r === 'B' ? 'Flash' : 'ไปรษณีย์';
   const routeColor = (r: string) => r === 'B' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700';
@@ -292,8 +296,7 @@ function ParcelTrackingPanel() {
             <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
               className="border rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-300">
               <option value="">สถานะ: ทั้งหมด</option>
-              <option value="no-tracking">⚠ ยังไม่มีเลขพัสดุ</option>
-              <option value="รอรับพัสดุ">รอรับพัสดุ</option>
+              <option value="no-tracking">⚠ ยังไม่ได้เช็ค</option>
               {PARCEL_STATUSES.map(s => <option key={s.v}>{s.v}</option>)}
             </select>
             <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))}
@@ -351,7 +354,7 @@ function ParcelTrackingPanel() {
                       {r.ship_date ? String(r.ship_date).split('-').reverse().join('/') : <span className="text-slate-300">-</span>}
                     </td>
                     <td className="p-3 text-center">
-                      {['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน','รอจัดส่ง','ค้างอยู่คลัง','ปัญหา'].includes(r.parcel_status)
+                      {KNOWN_PARCEL_STATUSES.includes(r.parcel_status)
                         ? <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusColor(r.parcel_status)}`}>{r.parcel_status}</span>
                         : <span className="text-[10px] text-slate-400">ยังไม่ได้เช็ค</span>}
                     </td>
