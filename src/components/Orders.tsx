@@ -606,7 +606,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     try {
       const { data, error } = await supabase
         .from('orders').select('*, customers(*)')
-        .order('created_at', { ascending: false });
+        .order('imported_at', { ascending: false, nullsFirst: false });
       if (error) throw error;
       if (data) setOrders(data);
     } catch (err) { console.error(err); }
@@ -941,6 +941,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     if (search) {
       const q = search.toLowerCase();
       const matchSearch = o.order_no?.toLowerCase().includes(q) ||
+        o.tracking_no?.toLowerCase().includes(q) ||
         o.customers?.name?.toLowerCase().includes(q) ||
         o.customers?.tel?.includes(q) ||
         o.raw_prod?.toLowerCase().includes(q);
@@ -1044,7 +1045,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             <div className="relative flex-1 min-w-[180px]">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
               <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="ค้นหา ออเดอร์ / ลูกค้า / เบอร์ / สินค้า..."
+                placeholder="ค้นหา ออเดอร์ / Tracking / ลูกค้า / เบอร์ / สินค้า..."
                 className="pl-8 pr-4 py-1.5 border rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
             </div>
             <div className="flex items-center gap-1.5 text-sm">
