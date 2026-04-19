@@ -12,16 +12,17 @@ type PackHistoryRow = {
 export default function PackHistory() {
   const [rows, setRows]         = useState<PackHistoryRow[]>([]);
   const [loading, setLoading]   = useState(true);
-  const [search, setSearch]     = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo]     = useState('');
+  const [search, setSearch]       = useState('');
+  const [dateFrom, setDateFrom]   = useState('');
+  const [dateTo, setDateTo]       = useState('');
+  const [filterStatus, setFilterStatus] = useState<'all'|'printed'|'approved'>('all');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => { load(); }, []);
 
   const load = async () => {
     setLoading(true);
-    let q = supabase.from('pack_history').select('*').eq('status','approved').order('created_at', { ascending: false });
+    let q = supabase.from('pack_history').select('*').in('status',['approved','printed']).order('created_at', { ascending: false });
     if (dateFrom) q = q.gte('pack_date', dateFrom);
     if (dateTo)   q = q.lte('pack_date', dateTo);
     const { data } = await q;
@@ -31,12 +32,16 @@ export default function PackHistory() {
 
   const filtered = rows.filter(r => {
     if (!search) return true;
-    return (r.req_doc_no||'').includes(search) || (r.responsible_person||'').toLowerCase().includes(search.toLowerCase());
+    const matchSearch = (r.req_doc_no||'').includes(search) || (r.responsible_person||'').toLowerCase().includes(search.toLowerCase());
+    const matchStatus = filterStatus === 'all' || r.status === filterStatus;
+    return matchSearch && matchStatus;
   });
 
   const toggleExpand = (id: string) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const statusBadge = (s: string) => s === 'approved'
+  const statusBadge = (s: string) => s === 'printed'
+    ? <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">🖨 ปริ้นแล้ว</span>
+    : s === 'approved'
     ? <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">✓ อนุมัติแล้ว</span>
     : <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">รอ</span>;
 
