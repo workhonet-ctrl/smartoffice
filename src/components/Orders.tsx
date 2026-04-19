@@ -226,6 +226,10 @@ function ParcelTrackingPanel() {
               className="ml-auto px-3 py-2 bg-slate-700 text-white rounded-lg text-xs hover:bg-slate-800 flex items-center gap-1.5">
               📋 Copy Tracking {selected.size > 0 ? `(${selected.size})` : `ทั้งหมด (${filtered.length})`}
             </button>
+            <label className={`px-3 py-2 rounded-lg text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${uploading?'bg-slate-200 text-slate-400':'bg-purple-500 text-white hover:bg-purple-600'}`}>
+              📥 {uploading ? 'กำลังอัพเดต...' : 'อัพโหลด Excel ไปรษณีย์'}
+              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleThaiPostExcel} disabled={uploading}/>
+            </label>
             {saveMsg && <span className="text-xs text-green-600 font-medium">{saveMsg}</span>}
           </div>
 
