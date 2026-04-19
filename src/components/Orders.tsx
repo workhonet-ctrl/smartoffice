@@ -335,7 +335,7 @@ function ParcelTrackingPanel() {
                     <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap font-bold">{r.tracking_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{r.customer_name}</td>
                     <td className="p-3 text-center">
-                      {['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน'].includes(r.parcel_status)
+                      {['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน','รอจัดส่ง','ค้างอยู่คลัง'].includes(r.parcel_status)
                         ? <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusColor(r.parcel_status)}`}>{r.parcel_status}</span>
                         : <span className="text-[10px] text-slate-400">ยังไม่ได้เช็ค</span>}
                     </td>
