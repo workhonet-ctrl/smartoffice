@@ -243,8 +243,10 @@ function ParcelTrackingPanel() {
   const countDone    = allRows.filter(r => r.parcel_status === 'ส่งสำเร็จ').length;
   const countPending = allRows.filter(r => r.parcel_status === 'ไม่มีคนรับ').length;
   const countReturn  = allRows.filter(r => r.parcel_status === 'ตีกลับ' || r.parcel_status === 'ส่งคืน').length;
-  const countWaiting = allRows.filter(r => r.parcel_status === 'รอจัดส่ง').length;
-  const countIssue   = allRows.filter(r => r.parcel_status === 'ปัญหา' || r.parcel_status === 'ค้างอยู่คลัง').length;
+  const countWaiting   = allRows.filter(r => r.parcel_status === 'รอจัดส่ง').length;
+  const countIssue     = allRows.filter(r => r.parcel_status === 'ปัญหา' || r.parcel_status === 'ค้างอยู่คลัง').length;
+  const countTransit   = allRows.filter(r => r.parcel_status === 'อยู่ระหว่างจัดส่ง').length;
+  const countUnchecked = allRows.filter(r => !['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน','รอจัดส่ง','ค้างอยู่คลัง','ปัญหา'].includes(r.parcel_status)).length;
 
   const routeLabel = (r: string) => r === 'B' ? 'Flash' : 'ไปรษณีย์';
   const routeColor = (r: string) => r === 'B' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700';
@@ -254,19 +256,21 @@ function ParcelTrackingPanel() {
     <div className="flex flex-col h-full gap-3">
 
       {/* Summary bar */}
-      <div className="shrink-0 grid grid-cols-7 gap-2">
+      <div className="shrink-0 grid grid-cols-9 gap-1.5">
         {[
-          { label: 'Flash',        count: countFlash,   color: 'bg-orange-50 border-orange-200 text-orange-700' },
-          { label: 'ไปรษณีย์',     count: countPost,    color: 'bg-purple-50 border-purple-200 text-purple-700' },
-          { label: 'ส่งสำเร็จ',    count: countDone,    color: 'bg-green-50 border-green-200 text-green-700' },
-          { label: 'ไม่มีคนรับ',   count: countPending, color: 'bg-orange-50 border-orange-100 text-orange-600' },
-          { label: 'ตีกลับ/ส่งคืน',count: countReturn,  color: 'bg-yellow-50 border-yellow-200 text-yellow-700' },
-          { label: 'รอจัดส่ง',     count: countWaiting, color: 'bg-slate-100 border-slate-300 text-slate-700' },
-          { label: 'คลัง/ปัญหา',   count: countIssue,   color: 'bg-red-50 border-red-200 text-red-700' },
+          { label: 'Flash',          count: countFlash,     color: 'bg-orange-50 border-orange-200 text-orange-700' },
+          { label: 'ไปรษณีย์',       count: countPost,      color: 'bg-purple-50 border-purple-200 text-purple-700' },
+          { label: 'ส่งสำเร็จ',      count: countDone,      color: 'bg-green-50 border-green-200 text-green-700' },
+          { label: 'กำลังจัดส่ง',    count: countTransit,   color: 'bg-blue-50 border-blue-200 text-blue-700' },
+          { label: 'ไม่มีคนรับ',     count: countPending,   color: 'bg-orange-50 border-orange-100 text-orange-600' },
+          { label: 'ตีกลับ/ส่งคืน', count: countReturn,    color: 'bg-yellow-50 border-yellow-200 text-yellow-700' },
+          { label: 'รอจัดส่ง',       count: countWaiting,   color: 'bg-indigo-50 border-indigo-200 text-indigo-700' },
+          { label: 'คลัง/ปัญหา',     count: countIssue,     color: 'bg-red-50 border-red-200 text-red-700' },
+          { label: 'ยังไม่ได้เช็ค',   count: countUnchecked, color: 'bg-slate-50 border-slate-200 text-slate-500' },
         ].map(s => (
-          <div key={s.label} className={`border rounded-xl p-3 text-center ${s.color}`}>
-            <div className="text-xs font-semibold mb-0.5">{s.label}</div>
-            <div className="text-xl font-bold">{s.count}</div>
+          <div key={s.label} className={`border rounded-xl p-2.5 text-center ${s.color}`}>
+            <div className="text-[11px] font-semibold mb-0.5 leading-tight">{s.label}</div>
+            <div className="text-lg font-bold">{s.count}</div>
           </div>
         ))}
       </div>
