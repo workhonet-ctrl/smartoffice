@@ -99,7 +99,7 @@ function ParcelTrackingPanel() {
   useEffect(() => { load(); }, []);
 
   const filtered = allRows.filter(r =>
-    (!filterRoute  || r.route === filterRoute) &&
+    (!filterRoute  || (filterRoute === 'AC' ? (r.route === 'A' || r.route === 'C') : r.route === filterRoute)) &&
     (!filterStatus || r.parcel_status === filterStatus)
   );
 
@@ -154,8 +154,7 @@ function ParcelTrackingPanel() {
               className="border rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-300">
               <option value="">ขนส่ง: ทั้งหมด</option>
               <option value="B">Flash</option>
-              <option value="A">ไปรษณีย์ (A)</option>
-              <option value="C">ไปรษณีย์ (C)</option>
+              <option value="AC">ไปรษณีย์</option>
             </select>
             <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
               className="border rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-300">
@@ -384,8 +383,9 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [activeTab, setActiveTab] = useState<'orders' | 'parcel'>('orders');
   const today = new Date().toISOString().split('T')[0];
   // ข้อ 2: เริ่มต้นเห็นทั้งหมด (ไม่ filter วันที่)
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo,   setDateTo]   = useState('');
+  const [dateFrom,   setDateFrom]   = useState('');
+  const [dateTo,     setDateTo]     = useState('');
+  const [importDate, setImportDate] = useState(() => new Date().toISOString().split('T')[0]);
   // ข้อ 1: filter เพิ่มเติม
   const [filterRoute,  setFilterRoute]  = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -419,27 +419,23 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
 
   useEffect(() => { loadOrders(); loadPromoOptions(); loadShipCosts(); }, []);
 
-  // ค่าขนส่งจริงต่อ tracking จาก shipping_flash + shipping_myorder
-  const [shipCostMap, setShipCostMap] = useState<Record<string, number>>({});
-  // inline edit ship_date
-  const [editingShipDate, setEditingShipDate] = useState<string | null>(null); // order id
-
-  const updateShipDate = async (orderId: string, date: string) => {
-    await supabase.from('orders').update({ ship_date: date || null }).eq('id', orderId);
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ship_date: date || null } as any : o));
-    setEditingShipDate(null);
-  };
+  const [shipCostMap, setShipCostMap] = useState<Record<string,number>>({});
+  const [editingShipDate, setEditingShipDate] = useState<string|null>(null);
 
   const loadShipCosts = async () => {
     const [{ data: flash }, { data: myorder }] = await Promise.all([
       supabase.from('shipping_flash').select('tracking, total_thb'),
       supabase.from('shipping_myorder').select('tracking, total_thb'),
     ]);
-    const map: Record<string, number> = {};
-    [...(flash || []), ...(myorder || [])].forEach((r: any) => {
-      if (r.tracking) map[r.tracking] = Number(r.total_thb || 0);
-    });
+    const map: Record<string,number> = {};
+    [...(flash||[]), ...(myorder||[])].forEach((r:any) => { if (r.tracking) map[r.tracking] = Number(r.total_thb||0); });
     setShipCostMap(map);
+  };
+
+  const updateShipDate = async (orderId: string, date: string) => {
+    await supabase.from('orders').update({ ship_date: date||null }).eq('id', orderId);
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ship_date: date||null } as any : o));
+    setEditingShipDate(null);
   };
 
   const loadOrders = async () => {
@@ -714,7 +710,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
           courier: order.courier || null,
           total_thb: order.total_thb, payment_method: order.payment_method,
           payment_status: order.payment_status, order_status: orderStatus, route,
-          imported_at: new Date().toISOString().split('T')[0], // วันที่นำเข้า
+          imported_at: importDate,
         }]);
 
         if (oe) {
@@ -787,7 +783,10 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     const orderDay = o.order_date || o.created_at?.split('T')[0];
     if (dateFrom && orderDay && orderDay < dateFrom) return false;
     if (dateTo   && orderDay && orderDay > dateTo)   return false;
-    if (filterRoute  && o.route         !== filterRoute)  return false;
+    if (filterRoute) {
+      if (filterRoute === 'AC') { if (o.route !== 'A' && o.route !== 'C') return false; }
+      else if (o.route !== filterRoute) return false;
+    }
     if (filterStatus && o.order_status  !== filterStatus) return false;
     if (filterPay    && o.payment_status !== filterPay)   return false;
     return true;
@@ -856,10 +855,17 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               </button>
             </div>
             {activeTab === 'orders' && (
-              <label className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-start">
-                <Upload size={17}/> นำเข้า Excel
-                <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden"/>
-              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex flex-col">
+                  <label className="text-[10px] text-slate-400 mb-0.5 font-medium">วันที่นำเข้า</label>
+                  <input type="date" value={importDate} onChange={e => setImportDate(e.target.value)}
+                    className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+                </div>
+                <label className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-end">
+                  <Upload size={17}/> นำเข้า Excel
+                  <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden"/>
+                </label>
+              </div>
             )}
           </div>
         </div>
@@ -907,6 +913,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             <select value={filterRoute} onChange={e => setFilterRoute(e.target.value)}
               className="border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
               <option value="">ขนส่ง: ทั้งหมด</option>
+              <option value="AC">ไปรษณีย์ (A+C)</option>
               <option value="A">A — มี Tracking</option>
               <option value="B">B — Flash</option>
               <option value="C">C — ไปรษณีย์</option>
@@ -1039,31 +1046,23 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                         </div>
                       ) : <span className="text-slate-300">-</span>}
                     </td>
-                    {/* วันที่จัดส่ง — คลิกเพื่อแก้ไข */}
-                    <td className="p-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                    {/* วันที่จัดส่ง — คลิกแก้ไข */}
+                    <td className="p-3 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
                       {editingShipDate === o.id ? (
-                        <input
-                          type="date"
-                          defaultValue={(o as any).ship_date || ''}
-                          autoFocus
-                          onBlur={e => updateShipDate(o.id, e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') updateShipDate(o.id, (e.target as HTMLInputElement).value);
-                            if (e.key === 'Escape') setEditingShipDate(null);
+                        <input type="date" defaultValue={(o as any).ship_date||''} autoFocus
+                          onBlur={e=>updateShipDate(o.id,e.target.value)}
+                          onKeyDown={e=>{
+                            if(e.key==='Enter') updateShipDate(o.id,(e.target as HTMLInputElement).value);
+                            if(e.key==='Escape') setEditingShipDate(null);
                           }}
-                          className="border border-blue-300 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 w-32"
+                          className="border border-blue-300 rounded px-1.5 py-0.5 text-xs w-32 focus:outline-none focus:ring-2 focus:ring-blue-300"
                         />
                       ) : (
-                        <div
-                          onClick={() => setEditingShipDate(o.id)}
-                          className="text-xs cursor-pointer hover:bg-blue-50 px-1.5 py-1 rounded group min-w-[80px]"
-                        >
+                        <div onClick={()=>setEditingShipDate(o.id)}
+                          className="text-xs cursor-pointer hover:bg-blue-50 px-1.5 py-1 rounded group min-w-[80px]">
                           {(o as any).ship_date
-                            ? <span className="text-blue-600 font-medium group-hover:underline">
-                                {String((o as any).ship_date).split('-').reverse().join('-')}
-                              </span>
-                            : <span className="text-slate-300 group-hover:text-blue-400">กรอกวันที่</span>
-                          }
+                            ? <span className="text-blue-600 font-medium group-hover:underline">{String((o as any).ship_date).split('-').reverse().join('-')}</span>
+                            : <span className="text-slate-300 group-hover:text-blue-400">กรอกวันที่</span>}
                         </div>
                       )}
                     </td>
@@ -1073,7 +1072,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                     <td className="p-3" style={{maxWidth:'160px'}}>
                       <div className="font-medium truncate">{o.customers?.name || '-'}</div>
                       {o.customers?.facebook_name && (
-                        <div className="text-[11px] text-blue-500 mt-0.5 truncate">📘 {o.customers.facebook_name}</div>
+                        <div className="text-[11px] text-blue-500 mt-0.5">📘 {o.customers.facebook_name}</div>
                       )}
                     </td>
                     {/* เบอร์โทร */}
@@ -1179,14 +1178,6 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                           ⚠ Track ซ้ำ!
                         </div>
                       )}
-                    </td>
-                    {/* ค่าส่งจริง */}
-                    <td className="p-3 text-right whitespace-nowrap">
-                      {o.tracking_no && shipCostMap[o.tracking_no]
-                        ? <span className="text-blue-600 font-medium text-xs">
-                            ฿{Number(shipCostMap[o.tracking_no]).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2})}
-                          </span>
-                        : <span className="text-slate-200 text-xs">-</span>}
                     </td>
                     {/* สถานะออเดอร์ */}
                     <td className="p-3 text-center">
