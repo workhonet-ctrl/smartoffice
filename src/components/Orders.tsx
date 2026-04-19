@@ -13,6 +13,7 @@ const PARCEL_STATUSES = [
   { v: 'ไม่มีคนรับ',          color: 'bg-orange-100 text-orange-700' },
   { v: 'ตีกลับ',              color: 'bg-yellow-100 text-yellow-700' },
   { v: 'ส่งคืน',              color: 'bg-red-100 text-red-700' },
+  { v: 'ปัญหา',               color: 'bg-red-200 text-red-800' },
 ];
 
 type TrackRow = {
@@ -124,6 +125,7 @@ function ParcelTrackingPanel() {
     if (raw.includes('รอการนำส่งเข้าระบบ'))     return 'รอจัดส่ง';
     if (raw.includes('พัสดุคงคลัง'))            return 'ค้างอยู่คลัง';
     if (raw.includes('พัสดุตีกลับแล้ว') || raw.includes('ตีกลับ')) return 'ตีกลับ';
+    if (raw.includes('มีปัญหา') || raw.includes('ระหว่างจัดการพัสดุมีปัญหา')) return 'ปัญหา';
     return 'อยู่ระหว่างจัดส่ง';
   };
 
@@ -170,6 +172,7 @@ function ParcelTrackingPanel() {
     if (parcelStatus === 'อยู่ระหว่างจัดส่ง')   return 'อยู่ระหว่างจัดส่ง';
     if (parcelStatus === 'รอจัดส่ง')            return 'กำลังแพ็ค';
     if (parcelStatus === 'ค้างอยู่คลัง')        return 'อยู่ระหว่างจัดส่ง';
+    if (parcelStatus === 'ปัญหา')               return 'ไม่มีคนรับ';
     return 'อยู่ระหว่างจัดส่ง';
   };
   const handleBulkUpdate = async () => {
@@ -215,7 +218,7 @@ function ParcelTrackingPanel() {
   const filtered = allRows.filter(r =>
     (!filterRoute  || (filterRoute === 'AC' ? (r.route === 'A' || r.route === 'C') : r.route === filterRoute)) &&
     (!filterStatus || (filterStatus === 'no-tracking'
-      ? !['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน','รอจัดส่ง','ค้างอยู่คลัง'].includes(r.parcel_status)
+      ? !['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน','รอจัดส่ง','ค้างอยู่คลัง','ปัญหา'].includes(r.parcel_status)
       : r.parcel_status === filterStatus)) &&
     (!search || r.tracking_no?.toLowerCase().includes(search.toLowerCase()) || r.customer_name.toLowerCase().includes(search.toLowerCase()))
   );
@@ -335,7 +338,7 @@ function ParcelTrackingPanel() {
                     <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap font-bold">{r.tracking_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{r.customer_name}</td>
                     <td className="p-3 text-center">
-                      {['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน','รอจัดส่ง','ค้างอยู่คลัง'].includes(r.parcel_status)
+                      {['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน','รอจัดส่ง','ค้างอยู่คลัง','ปัญหา'].includes(r.parcel_status)
                         ? <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusColor(r.parcel_status)}`}>{r.parcel_status}</span>
                         : <span className="text-[10px] text-slate-400">ยังไม่ได้เช็ค</span>}
                     </td>
@@ -392,6 +395,7 @@ function ParcelTrackingPanel() {
               { from: 'รอการนำส่งเข้าระบบ',     to: 'รอจัดส่ง' },
               { from: 'พัสดุคงคลัง',            to: 'ค้างอยู่คลัง' },
               { from: 'พัสดุตีกลับแล้ว',        to: 'ตีกลับ' },
+              { from: 'ระหว่างจัดการพัสดุมีปัญหา', to: 'ปัญหา' },
             ].map(m => (
               <div key={m.from} className="flex items-center gap-1.5">
                 <span className="text-slate-500">{m.from}</span>
@@ -491,6 +495,7 @@ function getAutoStatus(order: Order): { label: string; color: string } {
   if (p === 'อยู่ระหว่างจัดส่ง')  return { label: '🚚 กำลังจัดส่ง',    color: 'bg-blue-100 text-blue-700' };
   if (p === 'รอจัดส่ง')           return { label: '📦 รอจัดส่ง',          color: 'bg-slate-100 text-slate-600' };
   if (p === 'ค้างอยู่คลัง')       return { label: '🏭 ค้างอยู่คลัง',      color: 'bg-purple-100 text-purple-700' };
+  if (p === 'ปัญหา')              return { label: '⚠ ปัญหา',               color: 'bg-red-200 text-red-800' };
 
   // ไม่มี parcel_status → ใช้ order_status
   if (s === 'ส่งสินค้าแล้ว' || s === 'ส่งไปรษณีย์') return { label: '📦 ส่งแล้ว', color: 'bg-green-100 text-green-700' };
