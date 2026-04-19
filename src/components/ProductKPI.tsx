@@ -49,7 +49,40 @@ export default function ProductKPI() {
   // เลือกแถวสำหรับ bulk VAT
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  useEffect(() => { loadData(); }, []);
+  const [shipActualMap, setShipActualMap] = useState<Record<string,number>>({}); // promo_id → avg actual
+
+  useEffect(() => { loadData(); loadActualShipping(); }, []);
+
+  const loadActualShipping = async () => {
+    // ดึงค่าส่งจริงเฉลี่ยต่อ promo จาก orders join shipping_flash/myorder
+    const [{ data: flash }, { data: myorder }] = await Promise.all([
+      supabase.from('shipping_flash').select('tracking, total_thb'),
+      supabase.from('shipping_myorder').select('tracking, total_thb'),
+    ]);
+    const trackMap: Record<string,number> = {};
+    [...(flash||[]), ...(myorder||[])].forEach((r:any) => {
+      if (r.tracking) trackMap[r.tracking] = Number(r.total_thb||0);
+    });
+    // ดึง orders ที่มี tracking + promo_ids
+    const { data: orders } = await supabase
+      .from('orders').select('tracking_no, promo_ids').not('tracking_no','is',null);
+    // คำนวณเฉลี่ยต่อ promo_id
+    const promoShip: Record<string, number[]> = {};
+    (orders||[]).forEach((o:any) => {
+      const cost = trackMap[o.tracking_no];
+      if (!cost) return;
+      const perPromo = cost / Math.max((o.promo_ids||[]).length, 1);
+      (o.promo_ids||[]).forEach((pid:string) => {
+        if (!promoShip[pid]) promoShip[pid] = [];
+        promoShip[pid].push(perPromo);
+      });
+    });
+    const avgMap: Record<string,number> = {};
+    Object.entries(promoShip).forEach(([pid, costs]) => {
+      avgMap[pid] = costs.reduce((s,v) => s+v, 0) / costs.length;
+    });
+    setShipActualMap(avgMap);
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -229,7 +262,8 @@ export default function ProductKPI() {
               <th className="p-3 text-right whitespace-nowrap">ต้นทุนสินค้า</th>
               <th className="p-3 text-right whitespace-nowrap">กล่อง (฿)</th>
               <th className="p-3 text-right whitespace-nowrap">บั้บเบิ้ล (฿)</th>
-              <th className="p-3 text-right whitespace-nowrap">ขนส่ง (฿)</th>
+              <th className="p-3 text-right whitespace-nowrap">ขนส่งประมาณ</th>
+              <th className="p-3 text-right whitespace-nowrap text-blue-300">ขนส่งจริงเฉลี่ย</th>
               <th className="p-3 text-right whitespace-nowrap text-amber-300">VAT (฿)</th>
               <th className="p-3 text-right whitespace-nowrap">COM 1.5%</th>
               <th className="p-3 text-right whitespace-nowrap">FREE 2%</th>
@@ -279,8 +313,13 @@ export default function ProductKPI() {
                   <td className="p-3 text-right text-slate-500">
                     {p.bub_price > 0 ? `฿${fmt(p.bub_price)}` : <span className="text-slate-300">-</span>}
                   </td>
-                  <td className="p-3 text-right text-blue-600">
+                  <td className="p-3 text-right text-slate-500">
                     {p.ship_thb > 0 ? `฿${fmt(p.ship_thb)}` : <span className="text-slate-300">-</span>}
+                  </td>
+                  <td className="p-3 text-right text-blue-600">
+                    {shipActualMap[p.promo_id]
+                      ? `฿${fmt(shipActualMap[p.promo_id])}`
+                      : <span className="text-slate-300">-</span>}
                   </td>
                   {/* VAT — กรอกได้ทีละแถว */}
                   <td className="p-3 text-right">
