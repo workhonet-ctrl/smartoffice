@@ -695,8 +695,10 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
 
         const hasTrack   = order.tracking_no && String(order.tracking_no).length > 3;
         const isTourist  = TOURIST_ZIPS.has(String(order.postal_code));
-        const route      = hasTrack ? 'A' : isTourist ? 'C' : 'B';
-        // มี tracking → รอแพ็ค, ไม่มี tracking → รอคีย์ออเดอร์ (ต้อง export Flash ก่อน)
+        const isPost     = (order.courier||'').includes('ไปรษณีย์') || (order.courier||'').includes('EMS');
+        const route = hasTrack
+          ? (isPost ? (isTourist ? 'C' : 'A') : 'B')
+          : (isTourist ? 'C' : 'B');
         const orderStatus = hasTrack ? 'รอแพ็ค' : 'รอคีย์ออเดอร์';
 
         const { error: oe } = await supabase.from('orders').insert([{
