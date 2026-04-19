@@ -45,14 +45,19 @@ function ParcelTrackingPanel() {
     'exception':         'ตีกลับ',
   };
 
-  // แปลงสถานะไปรษณีย์ไทย → สถานะในระบบ
-  const mapThaiPostStatus = (raw: string): string => {
+  // แปลงสถานะไปรษณีย์ไทย → สถานะในระบบ (รับทั้ง status + recipient)
+  const mapThaiPostStatus = (raw: string, recipient?: string): string => {
     const s = raw.trim();
+    const rec = (recipient || '').trim();
+
+    // ตีกลับ — ตรวจ recipient ก่อน (กรณี นำจ่ายสำเร็จ แต่เป็นคืนต้นทาง)
+    if (rec.includes('คืนต้นทาง') || rec.includes('ส่งคืน') || rec.includes('ตีกลับ')) return 'ตีกลับ';
+    if (s.includes('ตีกลับ') || s.includes('ส่งคืน') || s.includes('คืนสิ่งของ'))      return 'ตีกลับ';
+
     if (s.includes('นำจ่ายสำเร็จ'))              return 'ส่งสำเร็จ';
     if (s.includes('นำจ่ายไม่สำเร็จ'))            return 'ไม่มีคนรับ';
     if (s.includes('อยู่ระหว่างการนำจ่าย'))        return 'อยู่ระหว่างจัดส่ง';
     if (s.includes('ส่งออก') || s.includes('สิ่งของถึง') || s.includes('รับฝาก')) return 'อยู่ระหว่างจัดส่ง';
-    if (s.includes('ตีกลับ') || s.includes('ส่งคืน') || s.includes('คืนสิ่งของ')) return 'ตีกลับ';
     if (s.includes('โทรศัพท์ติดต่อ') || s.includes('ผู้ฝากส่งกำหนดวัน')) return 'ไม่มีคนรับ';
     return 'อยู่ระหว่างจัดส่ง';
   };
@@ -74,7 +79,8 @@ function ParcelTrackingPanel() {
         const statusRaw = String(row[2]||'').trim();
         if (!tracking || tracking === 'เลขพัสดุ' || !statusRaw) continue;
         if (!latestMap[tracking]) { // แถวแรก = ล่าสุด
-          latestMap[tracking] = mapThaiPostStatus(statusRaw);
+          const recipientRaw = String(row[4]||'').trim();
+          latestMap[tracking] = mapThaiPostStatus(statusRaw, recipientRaw);
         }
       }
 
