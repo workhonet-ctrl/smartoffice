@@ -36,7 +36,6 @@ export default function FlashExport() {
   const [exportedOrders, setExportedOrders] = useState<Order[]>([]);
   const [printedOrders, setPrintedOrders]   = useState<Order[]>([]);
   const [loading, setLoading]             = useState(true);
-
   const [exporting, setExporting]         = useState(false);
   const [reExporting, setReExporting]     = useState(false);
   const [previewing, setPreviewing]       = useState(false);
@@ -183,9 +182,7 @@ export default function FlashExport() {
     URL.revokeObjectURL(url);
     if (updateStatus) {
       const ids = targetOrders.map(o => o.id);
-      await supabase.from('orders')
-        .update({ order_status: 'รอแพ็ค', ship_date: new Date().toISOString().split('T')[0] })
-        .in('id', ids);
+      await supabase.from('orders').update({ order_status: 'รอแพ็ค' }).in('id', ids);
       setOrders([]); setSelectedPending(new Set());
       await Promise.all([loadOrders(), loadPackReady()]);
     }
@@ -409,8 +406,7 @@ export default function FlashExport() {
                       onChange={e => setSelectedPending(e.target.checked ? new Set(filteredOrders.map(o=>o.id)) : new Set())}
                       className="rounded"/>
                   </th>
-                  <th className="p-3 text-left whitespace-nowrap">วันที่สั่ง</th>
-                  <th className="p-3 text-left whitespace-nowrap text-yellow-300">วันที่จัดส่ง</th>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left">ลูกค้า</th>
                   <th className="p-3 text-left">สินค้า</th>
@@ -488,8 +484,7 @@ export default function FlashExport() {
                     checked={packReadyOrders.length > 0 && packReadyOrders.every(o => selectedPrinted.has(o.id))}
                     onChange={e => setSelectedPrinted(e.target.checked ? new Set(packReadyOrders.map(o => o.id)) : new Set())}
                     className="rounded"/></th>
-                  <th className="p-3 text-left whitespace-nowrap">วันที่สั่ง</th>
-                  <th className="p-3 text-left whitespace-nowrap text-yellow-300">วันที่จัดส่ง</th>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
                   <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
@@ -508,11 +503,6 @@ export default function FlashExport() {
                       onChange={() => setSelectedPrinted(s => { const n = new Set(s); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n; })}
                       className="rounded"/></td>
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
-                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">
-                      {(o as any).ship_date
-                        ? (o as any).ship_date.split('-').reverse().join('-')
-                        : <span className="text-slate-300">-</span>}
-                    </td>
                     <td className="p-3 font-mono text-xs text-teal-700 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
@@ -547,8 +537,7 @@ export default function FlashExport() {
             <table className="text-sm w-full" style={{minWidth:'800px'}}>
               <thead className="bg-green-800 text-green-100 text-xs sticky top-0 z-10">
                 <tr>
-                  <th className="p-3 text-left whitespace-nowrap">วันที่สั่ง</th>
-                  <th className="p-3 text-left whitespace-nowrap text-yellow-300">วันที่จัดส่ง</th>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
                   <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
@@ -568,16 +557,6 @@ export default function FlashExport() {
                   <tr key={o.id} className="border-b hover:bg-green-50">
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
                       {o.order_date ? o.order_date.split('-').reverse().join('-') : '-'}
-                    </td>
-                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">
-                      {(o as any).ship_date
-                        ? (o as any).ship_date.split('-').reverse().join('-')
-                        : <span className="text-slate-300">-</span>}
-                    </td>
-                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">
-                      {(o as any).ship_date
-                        ? (o as any).ship_date.split('-').reverse().join('-')
-                        : <span className="text-slate-300">-</span>}
                     </td>
                     <td className="p-3 font-mono text-xs text-green-700 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
@@ -645,7 +624,7 @@ export default function FlashExport() {
                   const withTracking = printedOrders.filter(o => (o as any).tracking_no);
                   if (!confirm(`ยืนยันส่งแล้ว ${withTracking.length} ออเดอร์ที่มี Tracking?\nจะย้ายไปแท็บ ส่งสำเร็จ`)) return;
                   await supabase.from('orders')
-                    .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง', ship_date: new Date().toISOString().split('T')[0] })
+                    .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง' })
                     .in('id', withTracking.map(o => o.id));
                   await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
                 }}
@@ -658,8 +637,7 @@ export default function FlashExport() {
             <table className="text-sm w-full" style={{minWidth:'750px'}}>
               <thead className="bg-orange-700 text-orange-100 text-xs sticky top-0 z-10">
                 <tr>
-                  <th className="p-3 text-left whitespace-nowrap">วันที่สั่ง</th>
-                  <th className="p-3 text-left whitespace-nowrap text-yellow-300">วันที่จัดส่ง</th>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
                   <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
@@ -680,11 +658,6 @@ export default function FlashExport() {
                   return (
                     <tr key={o.id} className={`border-b ${hasTracking ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-orange-50'}`}>
                       <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
-                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">
-                      {(o as any).ship_date
-                        ? (o as any).ship_date.split('-').reverse().join('-')
-                        : <span className="text-slate-300">-</span>}
-                    </td>
                       <td className="p-3 font-mono text-xs text-orange-700 whitespace-nowrap">{o.order_no}</td>
                       <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
                       <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
@@ -727,7 +700,7 @@ export default function FlashExport() {
                           <button
                             onClick={async () => {
                               await supabase.from('orders')
-                                .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง', ship_date: new Date().toISOString().split('T')[0] }).eq('id', o.id);
+                                .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง' }).eq('id', o.id);
                               await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
                             }}
                             className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold whitespace-nowrap">
