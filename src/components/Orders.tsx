@@ -181,7 +181,9 @@ function ParcelTrackingPanel() {
 
   const filtered = allRows.filter(r =>
     (!filterRoute  || (filterRoute === 'AC' ? (r.route === 'A' || r.route === 'C') : r.route === filterRoute)) &&
-    (!filterStatus || (filterStatus === 'no-tracking' ? r.parcel_status === 'รอรับพัสดุ' : r.parcel_status === filterStatus)) &&
+    (!filterStatus || (filterStatus === 'no-tracking'
+      ? !['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน'].includes(r.parcel_status)
+      : r.parcel_status === filterStatus)) &&
     (!search || r.tracking_no?.toLowerCase().includes(search.toLowerCase()) || r.customer_name.toLowerCase().includes(search.toLowerCase()))
   );
 
@@ -291,9 +293,9 @@ function ParcelTrackingPanel() {
                     <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap font-bold">{r.tracking_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{r.customer_name}</td>
                     <td className="p-3 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusColor(r.parcel_status)}`}>
-                        {r.parcel_status}
-                      </span>
+                      {['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน'].includes(r.parcel_status)
+                        ? <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusColor(r.parcel_status)}`}>{r.parcel_status}</span>
+                        : <span className="text-[10px] text-slate-400">ยังไม่ได้เช็ค</span>}
                     </td>
                   </tr>
                 ))}
