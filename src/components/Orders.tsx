@@ -8,7 +8,7 @@ import * as XLSX from 'xlsx';
 const PARCEL_STATUSES = [
   { v: 'อยู่ระหว่างจัดส่ง',  color: 'bg-blue-100 text-blue-700' },
   { v: 'ส่งสำเร็จ',           color: 'bg-green-100 text-green-700' },
-  { v: 'ยังไม่ได้ส่ง',        color: 'bg-slate-100 text-slate-500' },
+  { v: 'รอจัดส่ง',           color: 'bg-slate-100 text-slate-600' },
   { v: 'ค้างอยู่คลัง',        color: 'bg-purple-100 text-purple-700' },
   { v: 'ไม่มีคนรับ',          color: 'bg-orange-100 text-orange-700' },
   { v: 'ตีกลับ',              color: 'bg-yellow-100 text-yellow-700' },
@@ -121,7 +121,7 @@ function ParcelTrackingPanel() {
   const mapFlashThaiStatus = (raw: string): string => {
     if (raw.includes('เซ็นรับแล้ว'))           return 'ส่งสำเร็จ';
     if (raw.includes('ระหว่างการขนส่ง'))        return 'อยู่ระหว่างจัดส่ง';
-    if (raw.includes('รอการนำส่งเข้าระบบ'))     return 'ยังไม่ได้ส่ง';
+    if (raw.includes('รอการนำส่งเข้าระบบ'))     return 'รอจัดส่ง';
     if (raw.includes('พัสดุคงคลัง'))            return 'ค้างอยู่คลัง';
     if (raw.includes('พัสดุตีกลับแล้ว') || raw.includes('ตีกลับ')) return 'ตีกลับ';
     return 'อยู่ระหว่างจัดส่ง';
@@ -168,7 +168,7 @@ function ParcelTrackingPanel() {
     if (parcelStatus === 'ตีกลับ')             return 'ตีกลับ';
     if (parcelStatus === 'ส่งคืน')             return 'ส่งคืน';
     if (parcelStatus === 'อยู่ระหว่างจัดส่ง')   return 'อยู่ระหว่างจัดส่ง';
-    if (parcelStatus === 'ยังไม่ได้ส่ง')        return 'กำลังแพ็ค';
+    if (parcelStatus === 'รอจัดส่ง')            return 'กำลังแพ็ค';
     if (parcelStatus === 'ค้างอยู่คลัง')        return 'อยู่ระหว่างจัดส่ง';
     return 'อยู่ระหว่างจัดส่ง';
   };
@@ -389,7 +389,7 @@ function ParcelTrackingPanel() {
             {[
               { from: 'เซ็นรับแล้ว',           to: 'ส่งสำเร็จ' },
               { from: 'ระหว่างการขนส่ง',        to: 'อยู่ระหว่างจัดส่ง' },
-              { from: 'รอการนำส่งเข้าระบบ',     to: 'ยังไม่ได้ส่ง' },
+              { from: 'รอการนำส่งเข้าระบบ',     to: 'รอจัดส่ง' },
               { from: 'พัสดุคงคลัง',            to: 'ค้างอยู่คลัง' },
               { from: 'พัสดุตีกลับแล้ว',        to: 'ตีกลับ' },
             ].map(m => (
@@ -489,6 +489,8 @@ function getAutoStatus(order: Order): { label: string; color: string } {
   if (p === 'ตีกลับ')             return { label: '↩ ตีกลับ',          color: 'bg-yellow-100 text-yellow-700' };
   if (p === 'ส่งคืน')             return { label: '↩ ส่งคืน',          color: 'bg-red-100 text-red-600' };
   if (p === 'อยู่ระหว่างจัดส่ง')  return { label: '🚚 กำลังจัดส่ง',    color: 'bg-blue-100 text-blue-700' };
+  if (p === 'รอจัดส่ง')           return { label: '📦 รอจัดส่ง',          color: 'bg-slate-100 text-slate-600' };
+  if (p === 'ค้างอยู่คลัง')       return { label: '🏭 ค้างอยู่คลัง',      color: 'bg-purple-100 text-purple-700' };
 
   // ไม่มี parcel_status → ใช้ order_status
   if (s === 'ส่งสินค้าแล้ว' || s === 'ส่งไปรษณีย์') return { label: '📦 ส่งแล้ว', color: 'bg-green-100 text-green-700' };
