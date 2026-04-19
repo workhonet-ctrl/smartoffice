@@ -128,27 +128,23 @@ function ParcelTrackingPanel() {
   const parseBulkTracking = (raw: string): { tracking: string; status: string }[] => {
     const results: { tracking: string; status: string }[] = [];
 
-    // ── รูปแบบ Flash ไทย (copy จากเว็บ aftership/flash) ──────
-    // pattern: "สถานะ ... TH/WA/EW... จังหวัด จังหวัด"
-    const flashThaiPattern = /(?:คลิ๊กเพื่อแสดงรายละเอียดการขนส่ง\s+)?([^
-]+?)\s+(TH|WA|EW)[A-Z0-9]+/g;
-    const thaiBlocks = raw.split(/คลิ๊กเพื่อแสดงรายละเอียดการขนส่ง/);
-    for (const block of thaiBlocks) {
-      const trackMatch = block.match(/((?:TH|WA|EW)[A-Z0-9]{8,})/);
-      if (!trackMatch) continue;
-      const tracking = trackMatch[1].trim();
-      // หาสถานะ — บรรทัดแรกของ block (ก่อน tracking)
-      const beforeTrack = block.substring(0, block.indexOf(tracking)).trim();
-      const lines = beforeTrack.split(/
-/).map(s => s.trim()).filter(Boolean);
-      const rawStatus = lines[0] || '';
-      if (tracking.length > 4) {
-        results.push({ tracking, status: mapFlashThaiStatus(rawStatus) });
+    // รูปแบบ Flash ไทย: split ด้วยคำว่า "คลิ๊กเพื่อแสดงรายละเอียดการขนส่ง"
+    const CLICK = '\u0E04\u0E25\u0E34\u0E4A\u0E01\u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E41\u0E2A\u0E14\u0E07\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14\u0E01\u0E32\u0E23\u0E02\u0E19\u0E2A\u0E48\u0E07';
+    if (raw.includes(CLICK)) {
+      const blocks = raw.split(CLICK);
+      for (const block of blocks) {
+        const trackMatch = block.match(/((TH|WA|EW)[A-Z0-9]{8,})/);
+        if (!trackMatch) continue;
+        const tracking = trackMatch[1].trim();
+        const beforeTrack = block.substring(0, block.indexOf(tracking)).trim();
+        const lines = beforeTrack.split('\n').map((s: string) => s.trim()).filter(Boolean);
+        const rawStatus = lines[0] || '';
+        if (tracking.length > 4) results.push({ tracking, status: mapFlashThaiStatus(rawStatus) });
       }
+      return results;
     }
-    if (results.length > 0) return results;
 
-    // ── รูปแบบ EN (เว็บอื่น) ────────────────────────────────
+    // รูปแบบ EN (เว็บอื่น)
     const blocks = raw.split(/={3,}|={5,}/);
     for (const block of blocks) {
       const trackMatch  = block.match(/Tracking number[:\s]+([A-Z0-9]+)/i);
@@ -156,7 +152,7 @@ function ParcelTrackingPanel() {
       if (!trackMatch) continue;
       const tracking = trackMatch[1].trim();
       const rawStatus = (statusMatch?.[1] || '').trim().toLowerCase();
-      const status = STATUS_MAP[rawStatus] || 'อยู่ระหว่างจัดส่ง';
+      const status = STATUS_MAP[rawStatus] || '\u0E2D\u0E22\u0E39\u0E48\u0E23\u0E30\u0E2B\u0E27\u0E48\u0E32\u0E07\u0E08\u0E31\u0E14\u0E2A\u0E48\u0E07';
       if (tracking.length > 4) results.push({ tracking, status });
     }
     return results;
