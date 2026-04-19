@@ -180,8 +180,30 @@ export default function Packaging({
     return { grouped: Object.values(grouped), multiOrders };
   })();
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+    // ── บันทึกประวัติการปริ้นลง pack_history ──
+    try {
+      const summarySnapshot = [
+        ...summaryGroups.grouped.map(g => ({ name: g.short_name||g.promo_name, count: g.count, box: g.box_name, type:'single' })),
+        ...summaryGroups.multiOrders.map(o => ({
+          name: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
+          count: 1, box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '', type:'multi'
+        })),
+      ];
+      const ordersSnapshot = orders.map(o => ({
+        order_no: o.order_no, customer: o.customers?.name,
+        promos: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
+      }));
+      await supabase.from('pack_history').insert([{
+        pack_date: new Date().toISOString().split('T')[0],
+        responsible_person: responsible || 'ไม่ระบุ',
+        order_count: orders.length,
+        orders_snapshot: ordersSnapshot,
+        summary_snapshot: summarySnapshot,
+        status: 'printed',
+      }]);
+    } catch (err) { console.error('print history error:', err); }
     const rows = [
       ...summaryGroups.grouped.map(g => ({
         name: g.short_name || g.promo_name,
