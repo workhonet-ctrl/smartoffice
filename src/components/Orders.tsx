@@ -31,6 +31,7 @@ function ParcelTrackingPanel() {
   const [saveMsg,      setSaveMsg]      = useState('');
   const [uploading,    setUploading]    = useState(false);
   const [search,       setSearch]       = useState('');
+  const [pageSize,     setPageSize]     = useState(30);
 
   // แปลงสถานะ EN → TH (Flash/เว็บ)
   const STATUS_MAP: Record<string, string> = {
@@ -187,8 +188,9 @@ function ParcelTrackingPanel() {
     (!search || r.tracking_no?.toLowerCase().includes(search.toLowerCase()) || r.customer_name.toLowerCase().includes(search.toLowerCase()))
   );
 
-  const allSel = filtered.length > 0 && filtered.every(r => selected.has(r.id));
-  const toggleAll = () => setSelected(allSel ? new Set() : new Set(filtered.map(r => r.id)));
+  const paged  = pageSize === 0 ? filtered : filtered.slice(0, pageSize);
+  const allSel = paged.length > 0 && paged.every(r => selected.has(r.id));
+  const toggleAll = () => setSelected(allSel ? new Set() : new Set(paged.map(r => r.id)));
   const toggle = (id: string) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   // Copy selected tracking numbers
@@ -250,7 +252,15 @@ function ParcelTrackingPanel() {
               <option value="รอรับพัสดุ">รอรับพัสดุ</option>
               {PARCEL_STATUSES.map(s => <option key={s.v}>{s.v}</option>)}
             </select>
-            <span className="text-xs text-slate-400">{filtered.length} รายการ</span>
+            <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))}
+              className="border rounded-lg px-2 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-300">
+              <option value={20}>20 แถว</option>
+              <option value={30}>30 แถว</option>
+              <option value={50}>50 แถว</option>
+              <option value={300}>300 แถว</option>
+              <option value={0}>ทั้งหมด</option>
+            </select>
+            <span className="text-xs text-slate-400">{filtered.length} รายการ{pageSize > 0 && filtered.length > pageSize ? ` (แสดง ${pageSize})` : ''}</span>
             <button onClick={copyTracking}
               className="ml-auto px-3 py-2 bg-slate-700 text-white rounded-lg text-xs hover:bg-slate-800 flex items-center gap-1.5">
               📋 Copy Tracking {selected.size > 0 ? `(${selected.size})` : `ทั้งหมด (${filtered.length})`}
