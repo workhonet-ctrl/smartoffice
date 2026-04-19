@@ -237,9 +237,7 @@ export default function MyOrderExport() {
     try {
       await exportToExcel(targetOrders, orderSelections, `MyOrder_Export_${new Date().toISOString().split('T')[0]}.xlsx`, channel);
       if (updateStatus) {
-        await supabase.from('orders')
-          .update({ order_status: 'รอแพ็ค', ship_date: new Date().toISOString().split('T')[0] })
-          .in('id', targetOrders.map(o => o.id));
+        await supabase.from('orders').update({ order_status: 'รอแพ็ค' }).in('id', targetOrders.map(o => o.id));
         await Promise.all([loadOrders(), loadPackReady()]);
       }
     } catch (e) { console.error(e); alert('เกิดข้อผิดพลาดในการส่งออก'); }
@@ -308,7 +306,10 @@ export default function MyOrderExport() {
           return cTel === tel || cName === name;
         });
 
-        if (match) { await supabase.from('orders').update({ tracking_no: tracking, order_status: 'กำลังแพ็ค' }).eq('id', match.id); matched++; }
+        if (match) {
+          await supabase.from('orders').update({ tracking_no: tracking, order_status: 'กำลังแพ็ค' }).eq('id', match.id);
+          matched++;
+        }
         else { notFound++; console.log(`ไม่พบ: ชื่อ=${name} เบอร์=${tel}`); }
       }
       setUploadResult({ matched, notFound });
@@ -382,8 +383,7 @@ export default function MyOrderExport() {
               <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
                 <tr>
                   <th className="p-3 w-8"><input type="checkbox" checked={allPendingSelected} onChange={e=>setSelectedPending(e.target.checked?new Set(filteredPending.map(o=>o.id)):new Set())} className="rounded"/></th>
-                  <th className="p-3 text-left whitespace-nowrap">วันที่สั่ง</th>
-                  <th className="p-3 text-left whitespace-nowrap text-yellow-300">วันที่จัดส่ง</th>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left">ลูกค้า</th>
                   <th className="p-3 text-left">สินค้า</th>
@@ -432,8 +432,7 @@ export default function MyOrderExport() {
             <table className="text-sm w-full" style={{minWidth:'700px'}}>
               <thead className="bg-teal-800 text-teal-100 text-xs sticky top-0 z-10">
                 <tr>
-                  <th className="p-3 text-left whitespace-nowrap">วันที่สั่ง</th>
-                  <th className="p-3 text-left whitespace-nowrap text-yellow-300">วันที่จัดส่ง</th>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
                   <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
@@ -449,7 +448,6 @@ export default function MyOrderExport() {
                 {packReadyOrders.map(o => (
                   <tr key={o.id} className="border-b hover:bg-teal-50">
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date || '-'}</td>
-                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">{(o as any).ship_date ? String((o as any).ship_date).split('-').reverse().join('-') : '-'}</td>
                     <td className="p-3 font-mono text-xs text-teal-700 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel || '-'}</td>
@@ -480,8 +478,7 @@ export default function MyOrderExport() {
             <table className="text-sm w-full" style={{minWidth:'800px'}}>
               <thead className="bg-green-800 text-green-100 text-xs sticky top-0 z-10">
                 <tr>
-                  <th className="p-3 text-left whitespace-nowrap">วันที่สั่ง</th>
-                  <th className="p-3 text-left whitespace-nowrap text-yellow-300">วันที่จัดส่ง</th>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
                   <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
@@ -496,7 +493,6 @@ export default function MyOrderExport() {
                 {filteredExported.map(o=>(
                   <tr key={o.id} className="border-b hover:bg-green-50">
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date||'-'}</td>
-                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">{(o as any).ship_date ? String((o as any).ship_date).split('-').reverse().join('-') : '-'}</td>
                     <td className="p-3 font-mono text-xs text-green-700 whitespace-nowrap">{o.order_no}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name||'-'}</td>
                     <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel||'-'}</td>
@@ -552,7 +548,7 @@ export default function MyOrderExport() {
                   const withTracking = printedOrders.filter(o => (o as any).tracking_no);
                   if (!confirm(`ยืนยันส่งแล้ว ${withTracking.length} ออเดอร์ที่มี Tracking?`)) return;
                   await supabase.from('orders')
-                    .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง', ship_date: new Date().toISOString().split('T')[0] })
+                    .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง' })
                     .in('id', withTracking.map(o => o.id));
                   await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
                 }}
@@ -565,8 +561,7 @@ export default function MyOrderExport() {
             <table className="text-sm w-full" style={{minWidth:'800px'}}>
               <thead className="bg-orange-700 text-orange-100 text-xs sticky top-0 z-10">
                 <tr>
-                  <th className="p-3 text-left whitespace-nowrap">วันที่สั่ง</th>
-                  <th className="p-3 text-left whitespace-nowrap text-yellow-300">วันที่จัดส่ง</th>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
                   <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
                   <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
@@ -583,7 +578,6 @@ export default function MyOrderExport() {
                   return (
                     <tr key={o.id} className={`border-b ${hasTracking?'bg-green-50 hover:bg-green-100':'hover:bg-orange-50'}`}>
                       <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{o.order_date||'-'}</td>
-                    <td className="p-3 text-xs text-blue-600 font-medium whitespace-nowrap">{(o as any).ship_date ? String((o as any).ship_date).split('-').reverse().join('-') : '-'}</td>
                       <td className="p-3 font-mono text-xs text-orange-700 whitespace-nowrap">{o.order_no}</td>
                       <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name||'-'}</td>
                       <td className="p-3 font-mono text-xs whitespace-nowrap">{o.customers?.tel||'-'}</td>
@@ -619,7 +613,7 @@ export default function MyOrderExport() {
                         {hasTracking&&(
                           <button
                             onClick={async()=>{
-                              await supabase.from('orders').update({order_status:'ส่งสินค้าแล้ว', parcel_status:'อยู่ระหว่างจัดส่ง', ship_date:new Date().toISOString().split('T')[0]}).eq('id',o.id);
+                              await supabase.from('orders').update({order_status:'ส่งสินค้าแล้ว', parcel_status:'อยู่ระหว่างจัดส่ง'}).eq('id',o.id);
                               await Promise.all([loadPrintedOrders(),loadExportedOrders()]);
                             }}
                             className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold whitespace-nowrap">
