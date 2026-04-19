@@ -29,8 +29,9 @@ function ParcelTrackingPanel() {
   const [bulkInput,    setBulkInput]    = useState('');
   const [saving,       setSaving]       = useState(false);
   const [saveMsg,      setSaveMsg]      = useState('');
+  const [uploading,    setUploading]    = useState(false);
 
-  // แปลงสถานะ EN → TH
+  // แปลงสถานะ EN → TH (Flash/เว็บ)
   const STATUS_MAP: Record<string, string> = {
     'in transit':        'อยู่ระหว่างจัดส่ง',
     'out for delivery':  'อยู่ระหว่างจัดส่ง',
@@ -42,6 +43,64 @@ function ParcelTrackingPanel() {
     'return':            'ตีกลับ',
     'returning':         'ตีกลับ',
     'exception':         'ตีกลับ',
+  };
+
+  // แปลงสถานะไปรษณีย์ไทย → สถานะในระบบ
+  const mapThaiPostStatus = (raw: string): string => {
+    const s = raw.trim();
+    if (s.includes('นำจ่ายสำเร็จ'))              return 'ส่งสำเร็จ';
+    if (s.includes('นำจ่ายไม่สำเร็จ'))            return 'ไม่มีคนรับ';
+    if (s.includes('อยู่ระหว่างการนำจ่าย'))        return 'อยู่ระหว่างจัดส่ง';
+    if (s.includes('ส่งออก') || s.includes('สิ่งของถึง') || s.includes('รับฝาก')) return 'อยู่ระหว่างจัดส่ง';
+    if (s.includes('ตีกลับ') || s.includes('ส่งคืน') || s.includes('คืนสิ่งของ')) return 'ตีกลับ';
+    if (s.includes('โทรศัพท์ติดต่อ') || s.includes('ผู้ฝากส่งกำหนดวัน')) return 'ไม่มีคนรับ';
+    return 'อยู่ระหว่างจัดส่ง';
+  };
+
+  // อัพโหลด Excel ไปรษณีย์
+  const handleThaiPostExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setUploading(true); setSaveMsg('');
+    try {
+      const buf = await file.arrayBuffer();
+      const wb  = XLSX.read(buf);
+      const ws  = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as string[][];
+
+      // ดึงสถานะล่าสุดของแต่ละ tracking (แถวแรกที่เจอ = ล่าสุด)
+      const latestMap: Record<string, string> = {};
+      for (const row of rows) {
+        const tracking = String(row[0]||'').trim();
+        const statusRaw = String(row[2]||'').trim();
+        if (!tracking || tracking === 'เลขพัสดุ' || !statusRaw) continue;
+        if (!latestMap[tracking]) { // แถวแรก = ล่าสุด
+          latestMap[tracking] = mapThaiPostStatus(statusRaw);
+        }
+      }
+
+      // batch โหลด orders ที่ match tracking
+      const trackings = Object.keys(latestMap);
+      let updated = 0;
+      for (let i = 0; i < trackings.length; i += 500) {
+        const batch = trackings.slice(i, i + 500);
+        const { data: orders } = await supabase.from('orders')
+          .select('id, tracking_no').in('tracking_no', batch);
+        await Promise.all((orders||[]).map(o =>
+          supabase.from('orders')
+            .update({ parcel_status: latestMap[o.tracking_no!] })
+            .eq('id', o.id)
+        ));
+        updated += (orders||[]).length;
+      }
+
+      setSaveMsg(`✓ อัพเดตสถานะ ${updated}/${trackings.length} รายการจากไฟล์ไปรษณีย์`);
+      await load();
+    } catch (err) {
+      setSaveMsg('❌ เกิดข้อผิดพลาด: ' + String(err));
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
   };
 
   const parseBulkTracking = (raw: string): { tracking: string; status: string }[] => {
