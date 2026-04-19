@@ -503,20 +503,22 @@ function getAutoStatus(order: Order): { label: string; color: string } {
   const s = order.order_status;
   const p = (order as any).parcel_status;
 
-  // สถานะแพ็ค → ใช้ order_status เสมอ (parcel_status ไม่ override)
-  const packingStatuses = ['รอคีย์ออเดอร์','กำลังคีย์','รอแพ็ค','กำลังแพ็ค','แพ็คสินค้า','ปริ้นแล้ว'];
-  const isStillPacking = packingStatuses.includes(s);
-
-  // parcel_status override เฉพาะสถานะที่เกิดหลังจากส่งแล้ว และ order ไม่ได้อยู่ในขั้นแพ็ค
-  if (!isStillPacking) {
+  // parcel_status ที่หมายความว่า "พัสดุออกจากคลังแล้ว" → override order_status ทุกกรณี
+  const shippedStatuses = ['ส่งสำเร็จ','อยู่ระหว่างจัดส่ง','ไม่มีคนรับ','ตีกลับ','ส่งคืน','ปัญหา','ค้างอยู่คลัง'];
+  if (shippedStatuses.includes(p)) {
     if (p === 'ส่งสำเร็จ')         return { label: '✓ ส่งสำเร็จ',       color: 'bg-green-100 text-green-700' };
     if (p === 'ไม่มีคนรับ')         return { label: '⚠ ไม่มีคนรับ',      color: 'bg-orange-100 text-orange-700' };
     if (p === 'ตีกลับ')             return { label: '↩ ตีกลับ',          color: 'bg-yellow-100 text-yellow-700' };
     if (p === 'ส่งคืน')             return { label: '↩ ส่งคืน',          color: 'bg-red-100 text-red-600' };
     if (p === 'อยู่ระหว่างจัดส่ง')  return { label: '🚚 กำลังจัดส่ง',    color: 'bg-blue-100 text-blue-700' };
-    if (p === 'รอจัดส่ง')           return { label: '📦 รอจัดส่ง',       color: 'bg-indigo-100 text-indigo-700' };
     if (p === 'ค้างอยู่คลัง')       return { label: '🏭 ค้างอยู่คลัง',   color: 'bg-purple-100 text-purple-700' };
     if (p === 'ปัญหา')              return { label: '⚠ ปัญหา',            color: 'bg-red-200 text-red-800' };
+  }
+
+  // รอจัดส่ง / รอรับพัสดุ = ยังไม่ออกจากคลัง → ไม่ override order_status ที่อยู่ในขั้นแพ็ค
+  const packingStatuses = ['รอคีย์ออเดอร์','กำลังคีย์','รอแพ็ค','กำลังแพ็ค','แพ็คสินค้า','ปริ้นแล้ว'];
+  if (!packingStatuses.includes(s)) {
+    if (p === 'รอจัดส่ง')   return { label: '📦 รอจัดส่ง',  color: 'bg-indigo-100 text-indigo-700' };
   }
 
   // ใช้ order_status
