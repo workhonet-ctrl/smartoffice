@@ -507,6 +507,14 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
 
   useEffect(() => { loadOrders(); loadPromoOptions(); loadShipCosts(); }, []);
 
+  // refresh เมื่อ switch กลับมาแท็บ orders
+  useEffect(() => {
+    if (activeTab === 'orders') {
+      loadOrders();
+      loadShipCosts();
+    }
+  }, [activeTab]);
+
   const [shipCostMap, setShipCostMap] = useState<Record<string,number>>({});
   const [editingShipDate, setEditingShipDate] = useState<string|null>(null);
 
