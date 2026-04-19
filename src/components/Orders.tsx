@@ -215,7 +215,7 @@ function ParcelTrackingPanel() {
   const filtered = allRows.filter(r =>
     (!filterRoute  || (filterRoute === 'AC' ? (r.route === 'A' || r.route === 'C') : r.route === filterRoute)) &&
     (!filterStatus || (filterStatus === 'no-tracking'
-      ? !['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน'].includes(r.parcel_status)
+      ? !['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน','รอจัดส่ง','ค้างอยู่คลัง'].includes(r.parcel_status)
       : r.parcel_status === filterStatus)) &&
     (!search || r.tracking_no?.toLowerCase().includes(search.toLowerCase()) || r.customer_name.toLowerCase().includes(search.toLowerCase()))
   );
