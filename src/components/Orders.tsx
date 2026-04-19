@@ -129,7 +129,8 @@ function ParcelTrackingPanel() {
     if (parcelStatus === 'ไม่มีคนรับ')          return 'ไม่มีคนรับ';
     if (parcelStatus === 'ตีกลับ')             return 'ตีกลับ';
     if (parcelStatus === 'ส่งคืน')             return 'ส่งคืน';
-    return null; // สถานะอื่น ไม่เปลี่ยน order_status
+    if (parcelStatus === 'อยู่ระหว่างจัดส่ง')   return 'อยู่ระหว่างจัดส่ง';
+    return 'อยู่ระหว่างจัดส่ง'; // สถานะอื่นๆ → อยู่ระหว่างจัดส่ง
   };
   const handleBulkUpdate = async () => {
     const parsed = parseBulkTracking(bulkInput);
@@ -442,8 +443,12 @@ function getAutoStatus(order: Order): { label: string; color: string } {
   if (s === 'กำลังคีย์')     return { label: 'กำลังคีย์',     color: 'bg-indigo-100 text-indigo-700' };
   if (s === 'รอแพ็ค')        return { label: 'รอแพ็ค',        color: 'bg-yellow-100 text-yellow-700' };
   if (s === 'กำลังแพ็ค')     return { label: 'กำลังแพ็ค',     color: 'bg-orange-100 text-orange-700' };
-  if (s === 'แพ็คสินค้า')    return { label: 'แพ็คสินค้า',    color: 'bg-teal-100 text-teal-700' };
-  if (s === 'ปริ้นแล้ว')     return { label: 'ปริ้นแล้ว',     color: 'bg-sky-100 text-sky-700' };
+  if (s === 'แพ็คสินค้า')         return { label: 'แพ็คสินค้า',      color: 'bg-teal-100 text-teal-700' };
+  if (s === 'ปริ้นแล้ว')          return { label: 'ปริ้นแล้ว',       color: 'bg-sky-100 text-sky-700' };
+  if (s === 'อยู่ระหว่างจัดส่ง')  return { label: '🚚 กำลังจัดส่ง',  color: 'bg-blue-100 text-blue-700' };
+  if (s === 'ไม่มีคนรับ')         return { label: '⚠ ไม่มีคนรับ',    color: 'bg-orange-100 text-orange-700' };
+  if (s === 'ตีกลับ')              return { label: '↩ ตีกลับ',        color: 'bg-yellow-100 text-yellow-700' };
+  if (s === 'ส่งคืน')              return { label: '↩ ส่งคืน',        color: 'bg-red-100 text-red-600' };
   return { label: s || 'รอแพ็ค', color: 'bg-slate-100 text-slate-600' };
 }
 
