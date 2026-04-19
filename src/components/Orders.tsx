@@ -8,7 +8,7 @@ import * as XLSX from 'xlsx';
 const PARCEL_STATUSES = [
   { v: 'อยู่ระหว่างจัดส่ง',  color: 'bg-blue-100 text-blue-700' },
   { v: 'ส่งสำเร็จ',           color: 'bg-green-100 text-green-700' },
-  { v: 'รอจัดส่ง',           color: 'bg-slate-100 text-slate-600' },
+  { v: 'รอจัดส่ง',           color: 'bg-indigo-100 text-indigo-700' },
   { v: 'ค้างอยู่คลัง',        color: 'bg-purple-100 text-purple-700' },
   { v: 'ไม่มีคนรับ',          color: 'bg-orange-100 text-orange-700' },
   { v: 'ตีกลับ',              color: 'bg-yellow-100 text-yellow-700' },
@@ -18,7 +18,7 @@ const PARCEL_STATUSES = [
 
 type TrackRow = {
   id: string; order_no: string; tracking_no: string; customer_name: string;
-  route: string; parcel_status: string; order_date: string;
+  route: string; parcel_status: string; order_date: string; ship_date: string | null;
 };
 
 function ParcelTrackingPanel() {
@@ -200,7 +200,7 @@ function ParcelTrackingPanel() {
   const load = async () => {
     setLoading(true);
     const { data } = await supabase.from('orders')
-      .select('id, order_no, tracking_no, route, parcel_status, order_date, customers(name)')
+      .select('id, order_no, tracking_no, route, parcel_status, order_date, ship_date, customers(name)')
       .order('order_date', { ascending: false });
     if (data) setAllRows(data.map((o: any) => ({
       id: o.id, order_no: o.order_no,
@@ -209,6 +209,7 @@ function ParcelTrackingPanel() {
       route: o.route || '',
       parcel_status: o.parcel_status || 'รอรับพัสดุ',
       order_date: o.order_date || '',
+      ship_date: (o as any).ship_date || null,
     })));
     setLoading(false);
   };
@@ -242,6 +243,8 @@ function ParcelTrackingPanel() {
   const countDone    = allRows.filter(r => r.parcel_status === 'ส่งสำเร็จ').length;
   const countPending = allRows.filter(r => r.parcel_status === 'ไม่มีคนรับ').length;
   const countReturn  = allRows.filter(r => r.parcel_status === 'ตีกลับ' || r.parcel_status === 'ส่งคืน').length;
+  const countWaiting = allRows.filter(r => r.parcel_status === 'รอจัดส่ง').length;
+  const countIssue   = allRows.filter(r => r.parcel_status === 'ปัญหา' || r.parcel_status === 'ค้างอยู่คลัง').length;
 
   const routeLabel = (r: string) => r === 'B' ? 'Flash' : 'ไปรษณีย์';
   const routeColor = (r: string) => r === 'B' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700';
@@ -251,13 +254,15 @@ function ParcelTrackingPanel() {
     <div className="flex flex-col h-full gap-3">
 
       {/* Summary bar */}
-      <div className="shrink-0 grid grid-cols-5 gap-2">
+      <div className="shrink-0 grid grid-cols-7 gap-2">
         {[
-          { label: 'Flash',     count: countFlash,   color: 'bg-orange-50 border-orange-200 text-orange-700' },
-          { label: 'ไปรษณีย์',  count: countPost,    color: 'bg-purple-50 border-purple-200 text-purple-700' },
-          { label: 'ส่งสำเร็จ', count: countDone,    color: 'bg-green-50 border-green-200 text-green-700' },
-          { label: 'ไม่มีคนรับ',count: countPending, color: 'bg-orange-50 border-orange-100 text-orange-600' },
-          { label: 'ตีกลับ/ส่งคืน', count: countReturn, color: 'bg-yellow-50 border-yellow-200 text-yellow-700' },
+          { label: 'Flash',        count: countFlash,   color: 'bg-orange-50 border-orange-200 text-orange-700' },
+          { label: 'ไปรษณีย์',     count: countPost,    color: 'bg-purple-50 border-purple-200 text-purple-700' },
+          { label: 'ส่งสำเร็จ',    count: countDone,    color: 'bg-green-50 border-green-200 text-green-700' },
+          { label: 'ไม่มีคนรับ',   count: countPending, color: 'bg-orange-50 border-orange-100 text-orange-600' },
+          { label: 'ตีกลับ/ส่งคืน',count: countReturn,  color: 'bg-yellow-50 border-yellow-200 text-yellow-700' },
+          { label: 'รอจัดส่ง',     count: countWaiting, color: 'bg-slate-100 border-slate-300 text-slate-700' },
+          { label: 'คลัง/ปัญหา',   count: countIssue,   color: 'bg-red-50 border-red-200 text-red-700' },
         ].map(s => (
           <div key={s.label} className={`border rounded-xl p-3 text-center ${s.color}`}>
             <div className="text-xs font-semibold mb-0.5">{s.label}</div>
@@ -317,8 +322,9 @@ function ParcelTrackingPanel() {
                   </th>
                   <th className="p-3 text-center whitespace-nowrap">ขนส่ง</th>
                   <th className="p-3 text-left whitespace-nowrap">Tracking No.</th>
-                  <th className="p-3 text-left whitespace-nowrap" style={{maxWidth:'140px'}}>ลูกค้า</th>
-                  <th className="p-3 text-center whitespace-nowrap">สถานะออเดอร์</th>
+                  <th className="p-3 text-left whitespace-nowrap" style={{maxWidth:'120px'}}>ลูกค้า</th>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่ส่ง</th>
+                  <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
                 </tr>
               </thead>
               <tbody>
@@ -336,7 +342,10 @@ function ParcelTrackingPanel() {
                       </span>
                     </td>
                     <td className="p-3 font-mono text-xs text-blue-600 whitespace-nowrap font-bold">{r.tracking_no}</td>
-                    <td className="p-3 font-medium whitespace-nowrap">{r.customer_name}</td>
+                    <td className="p-3 font-medium truncate" style={{maxWidth:'120px'}}>{r.customer_name}</td>
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                      {r.ship_date ? String(r.ship_date).split('-').reverse().join('/') : <span className="text-slate-300">-</span>}
+                    </td>
                     <td className="p-3 text-center">
                       {['อยู่ระหว่างจัดส่ง','ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ส่งคืน','รอจัดส่ง','ค้างอยู่คลัง','ปัญหา'].includes(r.parcel_status)
                         ? <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusColor(r.parcel_status)}`}>{r.parcel_status}</span>
