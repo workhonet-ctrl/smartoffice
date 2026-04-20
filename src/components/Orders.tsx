@@ -1025,8 +1025,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                   <input type="date" value={importDate} onChange={e => setImportDate(e.target.value)}
                     className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300"/>
                 </div>
-                <label className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-end">
-                  <Upload size={17}/> นำเข้า Excel
+                <label className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-end">
+                  <Upload size={17}/> ส่งออก Excel
                   <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden"/>
                 </label>
               </div>
