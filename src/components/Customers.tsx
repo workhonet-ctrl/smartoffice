@@ -40,6 +40,14 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [importing, setImporting]   = useState(false);
+  // Flash Import
+  const [showFlashImport, setShowFlashImport] = useState(false);
+  const [flashRows, setFlashRows]             = useState<any[]>([]);
+  const [flashPromoSel, setFlashPromoSel]     = useState<Record<number, string>>({}); // index → promo_id
+  const [flashTotalSel, setFlashTotalSel]     = useState<Record<number, string>>({}); // index → total override
+  const [flashDups, setFlashDups]             = useState<{row: any; existing: any}[]>([]);
+  const [flashSaving, setFlashSaving]         = useState(false);
+  const [flashSearch, setFlashSearch]         = useState('');
   const [importResult, setImportResult] = useState<{
     added: number; updated: number; skipped: number;
     unmapped: {name:string; qty:string}[];
@@ -69,6 +77,132 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
       if (r.tracking) map[r.tracking] = Number(r.total_thb || 0);
     });
     setShipCostMap(map);
+  };
+
+  // ── Flash Import ──────────────────────────────────────────
+  const handleFlashFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const buf = await file.arrayBuffer();
+    const wb  = XLSX.read(buf);
+    const ws  = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+    const dataRows = rows.slice(1).filter(r => r[1] && r[11]); // มี tracking + tel
+
+    // batch โหลด promos ถ้ายังไม่มี
+    if (promoOptions.length === 0) {
+      const { data: promos } = await supabase
+        .from('products_promo').select('id, name, short_name, price_thb, products_master(name)')
+        .eq('active', true).order('id');
+      setPromoOptions((promos||[]).map((p: any) => ({
+        ...p, master_name: p.products_master?.name || '',
+      })));
+    }
+
+    // เช็ค duplicate tracking
+    const trackings = dataRows.map(r => String(r[1]).trim());
+    const { data: existOrders } = await supabase
+      .from('orders').select('id, order_no, tracking_no, customers(name, tel)')
+      .in('tracking_no', trackings);
+    const existMap: Record<string, any> = {};
+    (existOrders||[]).forEach((o: any) => { existMap[o.tracking_no] = o; });
+
+    const dups: {row: any; existing: any}[] = [];
+    dataRows.forEach(r => {
+      const t = String(r[1]).trim();
+      if (existMap[t]) dups.push({ row: r, existing: existMap[t] });
+    });
+
+    setFlashRows(dataRows);
+    setFlashDups(dups);
+    setFlashPromoSel({});
+    setFlashTotalSel({});
+    setFlashSearch('');
+    setShowFlashImport(true);
+    e.target.value = '';
+  };
+
+  const handleFlashImport = async () => {
+    setFlashSaving(true);
+    try {
+      // โหลด existing customers by tel
+      const allTels = [...new Set(flashRows.map(r => String(r[11]).trim()))];
+      const custMap: Record<string, string> = {};
+      for (let i = 0; i < allTels.length; i += 500) {
+        const { data } = await supabase.from('customers').select('id, tel').in('tel', allTels.slice(i, i+500));
+        (data||[]).forEach((c: any) => { custMap[c.tel] = c.id; });
+      }
+
+      // สร้างลูกค้าใหม่
+      const toInsert: any[] = [];
+      const seenTels = new Set<string>();
+      flashRows.forEach(r => {
+        const tel = String(r[11]).trim();
+        if (!custMap[tel] && !seenTels.has(tel)) {
+          seenTels.add(tel);
+          const dp = String(r[13]||'').split(' ');
+          const province = dp[dp.length-1] || '';
+          const district = dp[dp.length-2] || '';
+          toInsert.push({
+            name: String(r[10]||'').trim(),
+            tel,
+            address: String(r[12]||'').trim()||null,
+            district, province,
+            postal_code: String(r[14]||'').trim()||null,
+            channel: 'FLASH',
+            tag: 'ใหม่',
+          });
+        }
+      });
+      for (let i = 0; i < toInsert.length; i += 500) {
+        const { data } = await supabase.from('customers').insert(toInsert.slice(i, i+500)).select('id, tel');
+        (data||[]).forEach((c: any) => { custMap[c.tel] = c.id; });
+      }
+
+      // สร้างออเดอร์
+      let added = 0;
+      for (let idx = 0; idx < flashRows.length; idx++) {
+        const r = flashRows[idx];
+        const tracking = String(r[1]).trim();
+        const tel = String(r[11]).trim();
+        const customerId = custMap[tel];
+        if (!customerId) continue;
+
+        const promoId = flashPromoSel[idx];
+        const totalThb = flashTotalSel[idx] ? Number(flashTotalSel[idx]) : (Number(r[17])||0);
+        const dp = String(r[13]||'').split(' ');
+        const province = dp[dp.length-1] || '';
+
+        // ลบ dup ที่เลือกลบ (ไม่ทำอะไร = ข้าม)
+        const isDup = flashDups.find(d => String(d.row[1]).trim() === tracking);
+        if (isDup) continue; // ข้าม duplicate (ให้ user จัดการเอง)
+
+        const { error } = await supabase.from('orders').insert([{
+          order_no:    `FL-${tracking}`,
+          customer_id: customerId,
+          channel:     'FLASH',
+          order_date:  new Date().toISOString().split('T')[0],
+          tracking_no: tracking,
+          courier:     'FLASH',
+          route:       'B',
+          promo_ids:   promoId ? [promoId] : [],
+          raw_prod:    promoId ? (promoOptions.find(p => p.id === promoId)?.name || '') : '',
+          quantity:    1,
+          quantities:  '1',
+          total_thb:   totalThb,
+          payment_method: 'COD',
+          payment_status: 'รอชำระเงิน',
+          order_status: 'รอแพ็ค',
+        }]);
+        if (!error) added++;
+      }
+
+      showToast(`✓ นำเข้าสำเร็จ · ออเดอร์ใหม่ ${added} รายการ`);
+      setShowFlashImport(false);
+      loadCustomers();
+    } catch (err) {
+      console.error(err);
+      showToast('เกิดข้อผิดพลาด', 'error');
+    } finally { setFlashSaving(false); }
   };
 
   const loadCustomers = async () => {
@@ -825,6 +959,102 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
               >
                 {savingMappings ? 'กำลังบันทึก...' : `✓ บันทึก (${Object.values(mappingSelects).filter(Boolean).length} รายการ)`}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Flash Import ── */}
+      {showFlashImport && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl">
+            <div className="p-5 border-b flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">Flash Import — เลือกสินค้าก่อน import</h3>
+                <p className="text-sm text-slate-500 mt-0.5">{flashRows.length} รายการ {flashDups.length > 0 && <span className="text-orange-500 font-medium ml-2">Tracking ซ้ำ {flashDups.length} รายการ (จะถูกข้าม)</span>}</p>
+              </div>
+              <button onClick={() => setShowFlashImport(false)} className="p-2 hover:bg-slate-100 rounded-xl text-slate-500">✕</button>
+            </div>
+            <div className="px-5 pt-3 pb-2">
+              <input value={flashSearch} onChange={e => setFlashSearch(e.target.value)}
+                placeholder="ค้นหา ชื่อ / เบอร์ / tracking..."
+                className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+            </div>
+            {flashDups.length > 0 && (
+              <div className="mx-5 mb-2 p-3 bg-orange-50 border border-orange-200 rounded-xl text-xs text-orange-700">
+                <div className="font-bold mb-1">Tracking ซ้ำ — จะถูกข้ามไป:</div>
+                {flashDups.map((d: any, i: number) => (
+                  <div key={i} className="ml-2">· {d.row[1]} (ลูกค้า: {d.existing?.customers?.name})</div>
+                ))}
+              </div>
+            )}
+            <div className="flex-1 overflow-auto px-5">
+              <table className="w-full text-sm" style={{minWidth:'900px'}}>
+                <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0">
+                  <tr>
+                    <th className="p-2 text-left">#</th>
+                    <th className="p-2 text-left">Tracking</th>
+                    <th className="p-2 text-left">ชื่อผู้รับ</th>
+                    <th className="p-2 text-left">เบอร์</th>
+                    <th className="p-2 text-left">จังหวัด</th>
+                    <th className="p-2 text-right">COD</th>
+                    <th className="p-2 text-left" style={{minWidth:'280px'}}>สินค้า / โปรโมชั่น</th>
+                    <th className="p-2 text-right">ยอดรวม</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flashRows
+                    .filter((r: any) => !flashSearch ||
+                      String(r[10]||'').includes(flashSearch) ||
+                      String(r[11]||'').includes(flashSearch) ||
+                      String(r[1]||'').includes(flashSearch))
+                    .map((r: any, idx: number) => {
+                      const isDup = flashDups.some((d: any) => String(d.row[1]).trim() === String(r[1]).trim());
+                      const dp = String(r[13]||'').split(' ');
+                      const province = dp[dp.length-1] || '-';
+                      return (
+                        <tr key={idx} className={`border-b text-xs ${isDup ? 'bg-orange-50 opacity-60' : 'hover:bg-slate-50'}`}>
+                          <td className="p-2 text-slate-400">{idx+1}{isDup && ' ⚠'}</td>
+                          <td className="p-2 font-mono text-blue-600 text-[11px]">{String(r[1]||'')}</td>
+                          <td className="p-2 font-medium">{String(r[10]||'')}</td>
+                          <td className="p-2 text-slate-500">{String(r[11]||'')}</td>
+                          <td className="p-2 text-slate-500">{province}</td>
+                          <td className="p-2 text-right font-medium text-emerald-600">฿{Number(r[17]||0).toLocaleString()}</td>
+                          <td className="p-2">
+                            {isDup ? <span className="text-orange-400 text-[11px]">ข้าม (ซ้ำ)</span> : (
+                              <select value={flashPromoSel[idx]||''}
+                                onChange={e => setFlashPromoSel((prev: any) => ({...prev, [idx]: e.target.value}))}
+                                className="w-full border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-yellow-300 bg-white">
+                                <option value="">— เลือกสินค้า —</option>
+                                {promoOptions.map((p: any) => (
+                                  <option key={p.id} value={p.id}>{p.id} · {p.master_name} · {p.name} ฿{Number(p.price_thb).toLocaleString()}</option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
+                          <td className="p-2">
+                            {isDup ? '-' : (
+                              <input type="number"
+                                value={flashTotalSel[idx] !== undefined ? flashTotalSel[idx] : String(Number(r[17])||0)}
+                                onChange={e => setFlashTotalSel((prev: any) => ({...prev, [idx]: e.target.value}))}
+                                className="border rounded px-2 py-1 text-xs w-24 text-right focus:outline-none focus:ring-1 focus:ring-yellow-300"/>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+            <div className="p-4 border-t flex items-center justify-between gap-3 bg-slate-50 rounded-b-2xl">
+              <p className="text-xs text-slate-400">สินค้าที่ไม่เลือก จะบันทึกออเดอร์ว่างเปล่า (แก้ที่หน้าออเดอร์ได้)</p>
+              <div className="flex gap-2">
+                <button onClick={() => setShowFlashImport(false)} className="px-4 py-2 bg-slate-200 rounded-xl text-sm hover:bg-slate-300">ยกเลิก</button>
+                <button onClick={handleFlashImport} disabled={flashSaving}
+                  className="px-6 py-2 bg-yellow-500 text-white rounded-xl text-sm font-semibold hover:bg-yellow-600 disabled:opacity-50">
+                  {flashSaving ? 'กำลัง import...' : `Import ${flashRows.length - flashDups.length} รายการ`}
+                </button>
+              </div>
             </div>
           </div>
         </div>
