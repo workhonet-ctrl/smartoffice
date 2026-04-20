@@ -170,14 +170,14 @@ function ParcelTrackingPanel() {
   // แปลง parcel_status → order_status
   const parcelToOrderStatus = (parcelStatus: string): string | null => {
     if (parcelStatus === 'ส่งสำเร็จ')          return 'ส่งสินค้าแล้ว';
+    if (parcelStatus === 'อยู่ระหว่างจัดส่ง')   return 'อยู่ระหว่างจัดส่ง';
+    if (parcelStatus === 'รอจัดส่ง')            return 'รอจัดส่ง';
     if (parcelStatus === 'ไม่มีคนรับ')          return 'ไม่มีคนรับ';
+    if (parcelStatus === 'ค้างอยู่คลัง')        return 'ค้างอยู่คลัง';
+    if (parcelStatus === 'ปัญหา')               return 'ปัญหา';
     if (parcelStatus === 'ตีกลับ')             return 'ตีกลับ';
     if (parcelStatus === 'ส่งคืน')             return 'ส่งคืน';
-    if (parcelStatus === 'อยู่ระหว่างจัดส่ง')   return 'อยู่ระหว่างจัดส่ง';
-    if (parcelStatus === 'รอจัดส่ง')            return 'กำลังแพ็ค';
-    if (parcelStatus === 'ค้างอยู่คลัง')        return 'อยู่ระหว่างจัดส่ง';
-    if (parcelStatus === 'ปัญหา')               return 'ไม่มีคนรับ';
-    return 'อยู่ระหว่างจัดส่ง';
+    return parcelStatus; // ตรงๆ เลย
   };
   const handleBulkUpdate = async () => {
     const parsed = parseBulkTracking(bulkInput);
