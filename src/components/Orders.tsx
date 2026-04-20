@@ -535,6 +535,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [dateFrom,   setDateFrom]   = useState('');
   const [dateTo,     setDateTo]     = useState('');
   const [importDate, setImportDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   // ข้อ 1: filter เพิ่มเติม
   const [filterRoute,  setFilterRoute]  = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -587,6 +588,35 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     const map: Record<string,number> = {};
     [...(flash||[]), ...(myorder||[])].forEach((r:any) => { if (r.tracking) map[r.tracking] = Number(r.total_thb||0); });
     setShipCostMap(map);
+  };
+
+  const handleExportExcel = () => {
+    const toExport = filtered.filter(o => selectedOrders.size > 0 ? selectedOrders.has(o.id) : true);
+    const rows = toExport.map(o => ({
+      'เลขออเดอร์':     o.order_no || '',
+      'วันที่สั่งซื้อ':  o.order_date || '',
+      'วันที่จัดส่ง':   (o as any).ship_date || '',
+      'ชื่อลูกค้า':     o.customers?.name || '',
+      'เฟสบุ๊ก':        o.customers?.facebook_name || '',
+      'เบอร์โทร':       o.customers?.tel || '',
+      'ที่อยู่':         o.address || '',
+      'จังหวัด':        o.customers?.province || '',
+      'รหัสไปรษณีย์':   o.customers?.postal_code || '',
+      'ช่องทาง':        o.channel || '',
+      'สินค้า':         o.raw_prod || '',
+      'จำนวน':          o.quantity || '',
+      'ขนส่ง':          o.courier || (o.route === 'B' ? 'FLASH' : 'ไปรษณีย์'),
+      'Tracking':       o.tracking_no || '',
+      'ยอดรวม':         o.total_thb || '',
+      'วิธีชำระ':       o.payment_method || '',
+      'สถานะชำระ':      o.payment_status || '',
+      'สถานะออเดอร์':   o.order_status || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Orders');
+    const today = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `orders_${today}.xlsx`);
   };
 
   const updateShipDate = async (orderId: string, date: string) => {
@@ -1025,10 +1055,10 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                   <input type="date" value={importDate} onChange={e => setImportDate(e.target.value)}
                     className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300"/>
                 </div>
-                <label className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center gap-2 cursor-pointer text-sm whitespace-nowrap self-end">
-                  <Upload size={17}/> ส่งออก Excel
-                  <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden"/>
-                </label>
+                <button onClick={handleExportExcel}
+                className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center gap-2 text-sm whitespace-nowrap self-end">
+                  <Upload size={17}/> ส่งออก Excel {selectedOrders.size > 0 ? `(${selectedOrders.size})` : `ทั้งหมด (${filtered.length})`}
+                </button>
               </div>
             )}
           </div>
@@ -1139,6 +1169,12 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         <table className="text-sm" style={{ minWidth: '1100px', width: '100%' }}>
           <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
             <tr>
+              <th className="p-3 w-8">
+                <input type="checkbox"
+                  checked={filtered.length > 0 && filtered.every(o => selectedOrders.has(o.id))}
+                  onChange={e => setSelectedOrders(e.target.checked ? new Set(filtered.map(o => o.id)) : new Set())}
+                  className="rounded"/>
+              </th>
               <th className="p-3 text-left whitespace-nowrap">วันที่สั่งซื้อ</th>
               <th className="p-3 text-left whitespace-nowrap">วันที่จัดส่ง</th>
               <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
@@ -1203,6 +1239,16 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                   <tr key={o.id}
                     ref={el => { rowRefs.current[o.id] = el; }}
                     className={`border-b hover:bg-slate-50 ${isDupTrack ? 'bg-red-50' : ''}`}>
+                    <td className="p-3" onClick={e=>e.stopPropagation()}>
+                      <input type="checkbox"
+                        checked={selectedOrders.has(o.id)}
+                        onChange={() => setSelectedOrders(prev => {
+                          const n = new Set(prev);
+                          n.has(o.id) ? n.delete(o.id) : n.add(o.id);
+                          return n;
+                        })}
+                        className="rounded"/>
+                    </td>
                     {/* วันที่สั่งซื้อ + เวลา */}
                     <td className="p-3 whitespace-nowrap">
                       {o.order_date ? (
