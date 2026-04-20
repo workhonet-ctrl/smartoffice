@@ -958,7 +958,11 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
       if (filterRoute === 'AC') { if (o.route !== 'A' && o.route !== 'C') return false; }
       else if (o.route !== filterRoute) return false;
     }
-    if (filterStatus && o.order_status  !== filterStatus) return false;
+    if (filterStatus) {
+      if (filterStatus === 'มีปัญหา') {
+        if (!['ไม่มีคนรับ','ค้างอยู่คลัง','ปัญหา'].includes(o.order_status || '')) return false;
+      } else if (o.order_status !== filterStatus) return false;
+    }
     if (filterPay    && o.payment_status !== filterPay)   return false;
     return true;
   });
@@ -1093,7 +1097,13 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
               className="border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
               <option value="">สถานะออเดอร์: ทั้งหมด</option>
-              {allStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+              <option value="รอแพ็ค">รอแพ็ค</option>
+              <option value="กำลังแพ็ค">กำลังแพ็ค</option>
+              <option value="แพ็คสินค้า">แพ็คสินค้า</option>
+              <option value="อยู่ระหว่างจัดส่ง">🚚 กำลังจัดส่ง</option>
+              <option value="ส่งสินค้าแล้ว">✓ ส่งสำเร็จ</option>
+              <option value="มีปัญหา">⚠ มีปัญหา</option>
+              <option value="ตีกลับ">↩ ตีกลับ</option>
             </select>
             {/* Payment status */}
             <select value={filterPay} onChange={e => setFilterPay(e.target.value)}
