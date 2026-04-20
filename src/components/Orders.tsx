@@ -501,31 +501,20 @@ function extractQty(promoName: string): number {
 
 function getAutoStatus(order: Order): { label: string; color: string } {
   const s = order.order_status;
-  const p = (order as any).parcel_status;
-
-  // ถ้ามี parcel_status ที่มีความหมาย → override order_status ทุกกรณีเสมอ
-  if (p === 'ส่งสำเร็จ')         return { label: '✓ ส่งสำเร็จ',       color: 'bg-green-100 text-green-700' };
-  if (p === 'ไม่มีคนรับ')         return { label: '⚠ ไม่มีคนรับ',      color: 'bg-orange-100 text-orange-700' };
-  if (p === 'ตีกลับ')             return { label: '↩ ตีกลับ',          color: 'bg-yellow-100 text-yellow-700' };
-  if (p === 'ส่งคืน')             return { label: '↩ ส่งคืน',          color: 'bg-red-100 text-red-600' };
-  if (p === 'อยู่ระหว่างจัดส่ง')  return { label: '🚚 กำลังจัดส่ง',    color: 'bg-blue-100 text-blue-700' };
-  if (p === 'รอจัดส่ง')           return { label: '📦 รอจัดส่ง',       color: 'bg-indigo-100 text-indigo-700' };
-  if (p === 'ค้างอยู่คลัง')       return { label: '🏭 ค้างอยู่คลัง',   color: 'bg-purple-100 text-purple-700' };
-  if (p === 'ปัญหา')              return { label: '⚠ ปัญหา',            color: 'bg-red-200 text-red-800' };
-  if (p === 'รอรับพัสดุ')         return { label: '⏳ รอรับพัสดุ',      color: 'bg-slate-100 text-slate-500' };
-
-  // ใช้ order_status
-  if (s === 'ส่งสินค้าแล้ว' || s === 'ส่งไปรษณีย์') return { label: '📦 ส่งแล้ว', color: 'bg-green-100 text-green-700' };
-  if (s === 'รอคีย์ออเดอร์') return { label: 'รอคีย์ออเดอร์', color: 'bg-blue-100 text-blue-700' };
-  if (s === 'กำลังคีย์')     return { label: 'กำลังคีย์',     color: 'bg-indigo-100 text-indigo-700' };
-  if (s === 'รอแพ็ค')        return { label: 'รอแพ็ค',        color: 'bg-yellow-100 text-yellow-700' };
-  if (s === 'กำลังแพ็ค')     return { label: 'กำลังแพ็ค',     color: 'bg-orange-100 text-orange-700' };
-  if (s === 'แพ็คสินค้า')    return { label: 'แพ็คสินค้า',    color: 'bg-teal-100 text-teal-700' };
-  if (s === 'ปริ้นแล้ว')     return { label: 'ปริ้นแล้ว',     color: 'bg-sky-100 text-sky-700' };
-  if (s === 'ไม่มีคนรับ')    return { label: '⚠ ไม่มีคนรับ',  color: 'bg-orange-100 text-orange-700' };
-  if (s === 'ตีกลับ')        return { label: '↩ ตีกลับ',      color: 'bg-yellow-100 text-yellow-700' };
-  if (s === 'ส่งคืน')        return { label: '↩ ส่งคืน',      color: 'bg-red-100 text-red-600' };
-  return { label: s || 'รอแพ็ค', color: 'bg-slate-100 text-slate-600' };
+  if (s === 'รอแพ็ค')                                return { label: 'รอแพ็ค',          color: 'bg-yellow-100 text-yellow-700' };
+  if (s === 'กำลังแพ็ค')                             return { label: 'กำลังแพ็ค',       color: 'bg-orange-100 text-orange-700' };
+  if (s === 'แพ็คสินค้า')                            return { label: 'แพ็คสินค้า',      color: 'bg-teal-100 text-teal-700' };
+  if (s === 'อยู่ระหว่างจัดส่ง')                     return { label: '🚚 กำลังจัดส่ง',   color: 'bg-blue-100 text-blue-700' };
+  if (s === 'ส่งสินค้าแล้ว' || s === 'ส่งไปรษณีย์') return { label: '✓ ส่งสำเร็จ',     color: 'bg-green-100 text-green-700' };
+  if (s === 'ไม่มีคนรับ')                            return { label: '⚠ ไม่มีคนรับ',    color: 'bg-orange-100 text-orange-700' };
+  if (s === 'ค้างอยู่คลัง')                          return { label: '🏭 ค้างอยู่คลัง', color: 'bg-purple-100 text-purple-700' };
+  if (s === 'ปัญหา')                                 return { label: '⚠ ปัญหา',          color: 'bg-red-200 text-red-800' };
+  if (s === 'ตีกลับ' || s === 'ส่งคืน')             return { label: '↩ ตีกลับ',         color: 'bg-yellow-200 text-yellow-800' };
+  if (s === 'รอคีย์ออเดอร์')                         return { label: 'รอคีย์ออเดอร์',    color: 'bg-slate-100 text-slate-500' };
+  if (s === 'กำลังคีย์')                             return { label: 'กำลังคีย์',        color: 'bg-indigo-100 text-indigo-700' };
+  if (s === 'ปริ้นแล้ว')                             return { label: '🖨 ปริ้นแล้ว',     color: 'bg-sky-100 text-sky-700' };
+  if (s === 'ยกเลิก')                                return { label: '✕ ยกเลิก',          color: 'bg-slate-200 text-slate-600' };
+  return { label: s || 'รอแพ็ค', color: 'bg-slate-100 text-slate-500' };
 }
 
 // ── helper: ขนส่ง label ──
