@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { TOURIST_ZIPS } from '../lib/types';
 import { Search, Users, TrendingUp, ShoppingBag, ChevronDown, ChevronRight, X, Upload, Trash2 } from 'lucide-react';
@@ -66,6 +67,8 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   const [bulkOpenDropdown, setBulkOpenDropdown] = useState(false);
   // NEW: Confirm close modal
   const [showConfirmClose, setShowConfirmClose] = useState(false);
+  // NEW: ตำแหน่ง dropdown ของ combobox ที่ใช้ portal (กันถูก clip ด้วย overflow)
+  const [promoDropdownPos, setPromoDropdownPos] = useState<{top: number; left: number; width: number; openUp: boolean} | null>(null);
   const [importResult, setImportResult] = useState<{
     added: number; updated: number; skipped: number;
     unmapped: {name:string; qty:string}[];
@@ -84,6 +87,19 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   };
 
   useEffect(() => { loadCustomers(); loadShipCosts(); }, []);
+
+  // ปิด combobox dropdown เมื่อ scroll ตารางหรือ resize window (กันตำแหน่งเพี้ยน)
+  useEffect(() => {
+    if (flashOpenPromo === null) return;
+    const close = () => { setFlashOpenPromo(null); setPromoDropdownPos(null); };
+    window.addEventListener('resize', close);
+    // listen scroll ทั้ง capture เพราะ scroll เกิดใน table container
+    document.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('resize', close);
+      document.removeEventListener('scroll', close, true);
+    };
+  }, [flashOpenPromo]);
 
   const loadShipCosts = async () => {
     const [{ data: flash }, { data: myorder }] = await Promise.all([
@@ -1235,9 +1251,11 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                                 {(flashPromoSel[idx] || []).map((item, itemIdx) => {
                                   const promo = promoOptions.find(p => p.id === item.promoId);
                                   return (
-                                    <div key={itemIdx} className="flex items-center gap-1.5 bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1">
-                                      <span className="font-mono text-[10px] text-slate-500 shrink-0">{item.promoId}</span>
-                                      <span className="flex-1 text-[11px] text-slate-700 truncate">{promo?.name || '—'}</span>
+                                    <div key={itemIdx} className="flex items-center gap-1.5 bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1" title={`รหัส: ${item.promoId}`}>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="text-[10px] text-slate-500 leading-tight truncate">{promo?.master_name || '—'}</div>
+                                        <div className="text-[11px] text-slate-800 font-medium leading-tight truncate">{promo?.name || '—'}</div>
+                                      </div>
                                       <input type="number" min="1"
                                         value={item.qty}
                                         onChange={e => {
@@ -1247,7 +1265,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                                             [idx]: (prev[idx]||[]).map((it, i) => i === itemIdx ? {...it, qty} : it)
                                           }));
                                         }}
-                                        className="w-12 border rounded px-1.5 py-0.5 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-yellow-300"/>
+                                        className="w-12 border rounded px-1.5 py-0.5 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-yellow-300 shrink-0"/>
                                       <button
                                         onClick={() => setFlashPromoSel(prev => ({
                                           ...prev,
@@ -1270,9 +1288,30 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                                         onChange={e => {
                                           setFlashPromoSearch(prev => ({...prev, [idx]: e.target.value}));
                                           setFlashOpenPromo(idx);
+                                          // recalc position เมื่อพิมพ์ (กรณี scroll)
+                                          const rect = e.target.getBoundingClientRect();
+                                          const spaceBelow = window.innerHeight - rect.bottom;
+                                          const openUp = spaceBelow < 220; // ถ้าพื้นที่ด้านล่างน้อยกว่า 220px ให้ขึ้นข้างบน
+                                          setPromoDropdownPos({
+                                            top: openUp ? rect.top : rect.bottom,
+                                            left: rect.left,
+                                            width: rect.width,
+                                            openUp,
+                                          });
                                         }}
-                                        onFocus={() => setFlashOpenPromo(idx)}
-                                        placeholder="+ เพิ่มสินค้า (พิมพ์ค้นหา: ชื่อ/รหัส/โปร)"
+                                        onFocus={e => {
+                                          setFlashOpenPromo(idx);
+                                          const rect = e.target.getBoundingClientRect();
+                                          const spaceBelow = window.innerHeight - rect.bottom;
+                                          const openUp = spaceBelow < 220;
+                                          setPromoDropdownPos({
+                                            top: openUp ? rect.top : rect.bottom,
+                                            left: rect.left,
+                                            width: rect.width,
+                                            openUp,
+                                          });
+                                        }}
+                                        placeholder="+ เพิ่มสินค้า (พิมพ์ค้นหา: ชื่อ/โปร)"
                                         className="w-full border rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-yellow-300 bg-white"
                                       />
                                     </div>
@@ -1289,65 +1328,6 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                                       title="จำนวน"
                                     />
                                   </div>
-
-                                  {/* dropdown results */}
-                                  {flashOpenPromo === idx && (
-                                    <>
-                                      {/* backdrop click-outside */}
-                                      <div
-                                        className="fixed inset-0 z-10"
-                                        onClick={() => setFlashOpenPromo(null)}
-                                      />
-                                      <div className="absolute top-full left-0 right-0 mt-0.5 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
-                                        {(() => {
-                                          const q = (flashPromoSearch[idx] || '').toLowerCase().trim();
-                                          const selectedIds = new Set((flashPromoSel[idx]||[]).map(it => it.promoId));
-                                          const results = promoOptions.filter(p => {
-                                            if (selectedIds.has(p.id)) return false; // กันเลือกซ้ำ
-                                            if (!q) return true;
-                                            return (
-                                              p.id.toLowerCase().includes(q) ||
-                                              p.name.toLowerCase().includes(q) ||
-                                              (p.short_name || '').toLowerCase().includes(q) ||
-                                              (p.master_name || '').toLowerCase().includes(q)
-                                            );
-                                          }).slice(0, 30);
-
-                                          if (results.length === 0) {
-                                            return (
-                                              <div className="px-3 py-4 text-center text-[11px] text-slate-400">
-                                                {q ? `ไม่พบ "${q}"` : 'ไม่มีสินค้าที่เหลือให้เพิ่ม'}
-                                              </div>
-                                            );
-                                          }
-
-                                          return results.map(p => (
-                                            <div
-                                              key={p.id}
-                                              onClick={() => {
-                                                const addQty = flashAddQty[idx] ?? 1;
-                                                setFlashPromoSel(prev => ({
-                                                  ...prev,
-                                                  [idx]: [...(prev[idx]||[]), {promoId: p.id, qty: addQty}]
-                                                }));
-                                                setFlashPromoSearch(prev => ({...prev, [idx]: ''}));
-                                                setFlashAddQty(prev => ({...prev, [idx]: 1}));
-                                                setFlashOpenPromo(null);
-                                              }}
-                                              className="px-2 py-1.5 border-b last:border-0 hover:bg-yellow-50 cursor-pointer flex items-center gap-2"
-                                            >
-                                              <span className="font-mono text-[10px] text-slate-400 shrink-0 w-14">{p.id}</span>
-                                              <div className="flex-1 min-w-0">
-                                                <div className="text-[10px] text-slate-400 truncate">{p.master_name}</div>
-                                                <div className="text-[11px] text-slate-700 font-medium truncate">{p.name}</div>
-                                              </div>
-                                              <span className="shrink-0 text-[11px] font-bold text-emerald-600">฿{Number(p.price_thb).toLocaleString()}</span>
-                                            </div>
-                                          ));
-                                        })()}
-                                      </div>
-                                    </>
-                                  )}
                                 </div>
                               </div>
                             )}
@@ -1525,6 +1505,78 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
             </div>
           </div>
         </div>
+      )}
+
+      {/* Portal dropdown ของ combobox สินค้าในแต่ละแถว — render ที่ body เพื่อกันถูก clip */}
+      {flashOpenPromo !== null && promoDropdownPos && createPortal(
+        <>
+          {/* backdrop click-outside */}
+          <div
+            className="fixed inset-0 z-[80]"
+            onClick={() => { setFlashOpenPromo(null); setPromoDropdownPos(null); }}
+          />
+          <div
+            className="fixed bg-white border border-slate-200 rounded-lg shadow-2xl max-h-52 overflow-y-auto z-[90]"
+            style={{
+              top: promoDropdownPos.openUp ? undefined : promoDropdownPos.top + 4,
+              bottom: promoDropdownPos.openUp ? window.innerHeight - promoDropdownPos.top + 4 : undefined,
+              left: promoDropdownPos.left,
+              width: Math.max(promoDropdownPos.width, 280), // อย่างน้อย 280px ให้อ่านง่าย
+            }}
+          >
+            {(() => {
+              const currIdx = flashOpenPromo;
+              if (currIdx === null) return null;
+              const q = (flashPromoSearch[currIdx] || '').toLowerCase().trim();
+              const selectedIds = new Set((flashPromoSel[currIdx]||[]).map(it => it.promoId));
+              const results = promoOptions.filter(p => {
+                if (selectedIds.has(p.id)) return false;
+                if (!q) return true;
+                return (
+                  p.id.toLowerCase().includes(q) ||
+                  p.name.toLowerCase().includes(q) ||
+                  (p.short_name || '').toLowerCase().includes(q) ||
+                  (p.master_name || '').toLowerCase().includes(q)
+                );
+              }).slice(0, 30);
+
+              if (results.length === 0) {
+                return (
+                  <div className="px-3 py-4 text-center text-[11px] text-slate-400">
+                    {q ? `ไม่พบ "${q}"` : 'ไม่มีสินค้าที่เหลือให้เพิ่ม'}
+                  </div>
+                );
+              }
+
+              return results.map(p => (
+                <div
+                  key={p.id}
+                  onMouseDown={(e) => {
+                    // ใช้ onMouseDown แทน onClick เพื่อให้ทำงานก่อน blur input
+                    e.preventDefault();
+                    const addQty = flashAddQty[currIdx] ?? 1;
+                    setFlashPromoSel(prev => ({
+                      ...prev,
+                      [currIdx]: [...(prev[currIdx]||[]), {promoId: p.id, qty: addQty}]
+                    }));
+                    setFlashPromoSearch(prev => ({...prev, [currIdx]: ''}));
+                    setFlashAddQty(prev => ({...prev, [currIdx]: 1}));
+                    setFlashOpenPromo(null);
+                    setPromoDropdownPos(null);
+                  }}
+                  className="px-3 py-2 border-b last:border-0 hover:bg-yellow-50 cursor-pointer flex items-center gap-2"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10px] text-slate-400 truncate">{p.master_name}</div>
+                    <div className="text-xs text-slate-700 font-medium truncate">{p.name}</div>
+                  </div>
+                  <span className="shrink-0 text-xs font-bold text-emerald-600">฿{Number(p.price_thb).toLocaleString()}</span>
+                </div>
+              ));
+            })()}
+          </div>
+        </>,
+        document.body
       )}
 
       {toast && (
