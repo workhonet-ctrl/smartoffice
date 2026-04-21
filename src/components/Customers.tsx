@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { TOURIST_ZIPS } from '../lib/types';
-import { Search, Users, TrendingUp, ShoppingBag, ChevronDown, ChevronRight, X, Upload, Trash2 } from 'lucide-react';
+import { Search, Users, TrendingUp, ShoppingBag, ChevronDown, ChevronRight, X, Upload, Trash2, Edit2, Save } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 type Customer = {
@@ -69,6 +69,18 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   const [showConfirmClose, setShowConfirmClose] = useState(false);
   // NEW: ตำแหน่ง dropdown ของ combobox ที่ใช้ portal (กันถูก clip ด้วย overflow)
   const [promoDropdownPos, setPromoDropdownPos] = useState<{top: number; left: number; width: number; openUp: boolean} | null>(null);
+  // NEW: Edit Customer modal
+  const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
+  const [editCustForm, setEditCustForm] = useState<Partial<Customer>>({});
+  const [editCustSaving, setEditCustSaving] = useState(false);
+  // NEW: Edit Order modal — เก็บ order + รายการสินค้าที่ parse จาก promo_ids + quantities
+  const [editOrder, setEditOrder] = useState<any>(null);
+  const [editOrderItems, setEditOrderItems] = useState<{promoId: string; qty: number}[]>([]);
+  const [editOrderForm, setEditOrderForm] = useState<any>({});
+  const [editOrderSaving, setEditOrderSaving] = useState(false);
+  const [editOrderSearch, setEditOrderSearch] = useState('');
+  const [editOrderAddQty, setEditOrderAddQty] = useState(1);
+  const [editOrderDropdownOpen, setEditOrderDropdownOpen] = useState(false);
   const [importResult, setImportResult] = useState<{
     added: number; updated: number; skipped: number;
     unmapped: {name:string; qty:string}[];
@@ -648,6 +660,156 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
     setBulkOpenDropdown(false);
   };
 
+  // ── Edit Customer ────────────────────────────────────────────
+  const openEditCustomer = (c: Customer) => {
+    setEditCustomer(c);
+    setEditCustForm({
+      name: c.name,
+      facebook_name: c.facebook_name || '',
+      tel: c.tel,
+      address: c.address || '',
+      subdistrict: c.subdistrict || '',
+      district: c.district || '',
+      province: c.province || '',
+      postal_code: c.postal_code || '',
+      channel: c.channel || '',
+      payment_method: c.payment_method || '',
+    });
+  };
+
+  const handleSaveCustomer = async () => {
+    if (!editCustomer) return;
+    if (!editCustForm.name?.trim() || !editCustForm.tel?.trim()) {
+      showToast('กรุณากรอกชื่อและเบอร์โทร', 'error');
+      return;
+    }
+    setEditCustSaving(true);
+    try {
+      const payload = {
+        name:           editCustForm.name?.trim() || '',
+        facebook_name:  editCustForm.facebook_name?.trim() || null,
+        tel:            editCustForm.tel?.trim() || '',
+        address:        editCustForm.address?.trim() || null,
+        subdistrict:    editCustForm.subdistrict?.trim() || null,
+        district:       editCustForm.district?.trim() || null,
+        province:       editCustForm.province?.trim() || null,
+        postal_code:    editCustForm.postal_code?.trim() || null,
+        channel:        editCustForm.channel?.trim() || null,
+        payment_method: editCustForm.payment_method?.trim() || null,
+      };
+      const { error } = await supabase.from('customers').update(payload).eq('id', editCustomer.id);
+      if (error) throw error;
+      // อัพเดต state แบบ optimistic
+      setCustomers(p => p.map(c => c.id === editCustomer.id ? { ...c, ...payload } as Customer : c));
+      showToast('✓ บันทึกข้อมูลลูกค้าแล้ว');
+      setEditCustomer(null);
+      setEditCustForm({});
+    } catch (err: any) {
+      console.error(err);
+      showToast('บันทึกไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setEditCustSaving(false);
+    }
+  };
+
+  // ── Edit Order ───────────────────────────────────────────────
+  const openEditOrder = async (orderId: string) => {
+    // โหลดข้อมูลออเดอร์เต็ม
+    const { data, error } = await supabase.from('orders')
+      .select('*').eq('id', orderId).maybeSingle();
+    if (error || !data) {
+      showToast('โหลดออเดอร์ไม่สำเร็จ', 'error');
+      return;
+    }
+    // โหลด promos ถ้ายังไม่มี
+    if (promoOptions.length === 0) {
+      const { data: promos } = await supabase
+        .from('products_promo').select('id, name, short_name, price_thb, products_master(name)')
+        .eq('active', true).order('id');
+      setPromoOptions((promos||[]).map((p: any) => ({
+        ...p, master_name: p.products_master?.name || '',
+      })));
+    }
+    // parse รายการสินค้าจาก promo_ids + quantities
+    const pids: string[]    = Array.isArray(data.promo_ids) ? data.promo_ids : [];
+    const qtys: string[]    = String(data.quantities || '1').split('|').map((s: string) => s.trim());
+    const items: {promoId: string; qty: number}[] = pids.map((pid, i) => ({
+      promoId: pid,
+      qty: Number(qtys[i]) || 1,
+    }));
+    setEditOrder(data);
+    setEditOrderItems(items);
+    setEditOrderForm({
+      total_thb:      String(data.total_thb || 0),
+      tracking_no:    data.tracking_no || '',
+      courier:        data.courier || '',
+      channel:        data.channel || '',
+      payment_method: data.payment_method || '',
+      payment_status: data.payment_status || 'รอชำระเงิน',
+      order_status:   data.order_status || 'รอแพ็ค',
+      note:           data.note || '',
+    });
+    setEditOrderSearch('');
+    setEditOrderAddQty(1);
+    setEditOrderDropdownOpen(false);
+  };
+
+  const handleSaveOrder = async () => {
+    if (!editOrder) return;
+    setEditOrderSaving(true);
+    try {
+      const promoIds   = editOrderItems.map(it => it.promoId);
+      const quantities = editOrderItems.length > 0
+        ? editOrderItems.map(it => String(it.qty || 1)).join('|')
+        : '1';
+      const qtySum = editOrderItems.length > 0
+        ? editOrderItems.reduce((s, it) => s + (Number(it.qty) || 1), 0)
+        : 1;
+      const rawProd = editOrderItems.length > 0
+        ? editOrderItems.map(it => promoOptions.find(p => p.id === it.promoId)?.name || '').filter(Boolean).join('|')
+        : '';
+
+      const payload = {
+        promo_ids:      promoIds,
+        quantities,
+        quantity:       qtySum,
+        raw_prod:       rawProd,
+        total_thb:      Number(editOrderForm.total_thb) || 0,
+        tracking_no:    editOrderForm.tracking_no?.trim() || null,
+        courier:        editOrderForm.courier?.trim() || null,
+        channel:        editOrderForm.channel?.trim() || null,
+        payment_method: editOrderForm.payment_method?.trim() || null,
+        payment_status: editOrderForm.payment_status?.trim() || 'รอชำระเงิน',
+        order_status:   editOrderForm.order_status?.trim() || 'รอแพ็ค',
+        note:           editOrderForm.note?.trim() || null,
+      };
+      const { error } = await supabase.from('orders').update(payload).eq('id', editOrder.id);
+      if (error) throw error;
+      // reload orders ใน expanded row ถ้าลูกค้ายังเปิดอยู่
+      if (expanded) await loadOrders(expanded);
+      // reload customers (เพราะ total_spent อาจเปลี่ยน ผ่าน trigger)
+      loadCustomers();
+      showToast('✓ บันทึกออเดอร์แล้ว');
+      setEditOrder(null);
+      setEditOrderItems([]);
+      setEditOrderForm({});
+    } catch (err: any) {
+      console.error(err);
+      showToast('บันทึกไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setEditOrderSaving(false);
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string, orderNo: string) => {
+    if (!confirm(`ลบออเดอร์ "${orderNo}"?\nข้อมูลจะหายถาวร`)) return;
+    const { error } = await supabase.from('orders').delete().eq('id', orderId);
+    if (error) { showToast('ลบไม่สำเร็จ: ' + error.message, 'error'); return; }
+    if (expanded) await loadOrders(expanded);
+    loadCustomers();
+    showToast('✓ ลบออเดอร์แล้ว');
+  };
+
   const filtered = customers.filter(c => {
     const matchTag = tagFilter === 'ทั้งหมด' || c.tag === tagFilter;
     const matchSearch = !search || c.name.toLowerCase().includes(search.toLowerCase())
@@ -865,11 +1027,18 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                     </button>
                   </td>
                   <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
-                    <button onClick={e => handleDelete(c, e)}
-                      className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                      title="ลบลูกค้า">
-                      🗑
-                    </button>
+                    <div className="flex items-center justify-center gap-0.5">
+                      <button onClick={() => openEditCustomer(c)}
+                        className="p-1.5 text-slate-300 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition"
+                        title="แก้ไขข้อมูลลูกค้า">
+                        <Edit2 size={14}/>
+                      </button>
+                      <button onClick={e => handleDelete(c, e)}
+                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                        title="ลบลูกค้า">
+                        🗑
+                      </button>
+                    </div>
                   </td>
                 </tr>
 
@@ -922,6 +1091,19 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                                 o.order_status === 'รอแพ็ค' ? 'bg-yellow-100 text-yellow-700' :
                                 'bg-slate-100 text-slate-500'}`}>{o.order_status}</span>
                               {o.tracking_no && <span className="font-mono text-xs text-blue-500 shrink-0">{o.tracking_no}</span>}
+                              {/* ปุ่มจัดการออเดอร์ */}
+                              <div className="flex items-center gap-0.5 shrink-0 ml-auto">
+                                <button onClick={() => openEditOrder(o.id)}
+                                  className="p-1 text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 rounded transition"
+                                  title="แก้ไขออเดอร์">
+                                  <Edit2 size={13}/>
+                                </button>
+                                <button onClick={() => handleDeleteOrder(o.id, o.order_no)}
+                                  className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition"
+                                  title="ลบออเดอร์">
+                                  <Trash2 size={13}/>
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -1501,6 +1683,323 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
               <button onClick={handleConfirmCloseFlash}
                 className="flex-1 py-2.5 bg-red-500 text-white rounded-xl text-sm font-semibold hover:bg-red-600">
                 ปิด (ทิ้งข้อมูล)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: แก้ไขข้อมูลลูกค้า ── */}
+      {editCustomer && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[65] p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl">
+            <div className="p-5 border-b flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">แก้ไขข้อมูลลูกค้า</h3>
+                <p className="text-sm text-slate-500 mt-0.5">{editCustomer.name}</p>
+              </div>
+              <button onClick={() => { setEditCustomer(null); setEditCustForm({}); }}
+                className="p-2 hover:bg-slate-100 rounded-xl text-slate-500"><X size={18}/></button>
+            </div>
+
+            <div className="flex-1 overflow-auto p-5 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อลูกค้า *</label>
+                  <input value={editCustForm.name || ''}
+                    onChange={e => setEditCustForm(p => ({...p, name: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อเฟสบุ๊ก</label>
+                  <input value={editCustForm.facebook_name || ''}
+                    onChange={e => setEditCustForm(p => ({...p, facebook_name: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">เบอร์โทร *</label>
+                  <input value={editCustForm.tel || ''}
+                    onChange={e => setEditCustForm(p => ({...p, tel: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 font-mono"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">ช่องทาง</label>
+                  <input value={editCustForm.channel || ''}
+                    onChange={e => setEditCustForm(p => ({...p, channel: e.target.value}))}
+                    placeholder="Facebook / Lazada / Shopee..."
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">ที่อยู่</label>
+                <input value={editCustForm.address || ''}
+                  onChange={e => setEditCustForm(p => ({...p, address: e.target.value}))}
+                  placeholder="บ้านเลขที่ หมู่ ซอย ถนน..."
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">ตำบล</label>
+                  <input value={editCustForm.subdistrict || ''}
+                    onChange={e => setEditCustForm(p => ({...p, subdistrict: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">อำเภอ</label>
+                  <input value={editCustForm.district || ''}
+                    onChange={e => setEditCustForm(p => ({...p, district: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">จังหวัด</label>
+                  <input value={editCustForm.province || ''}
+                    onChange={e => setEditCustForm(p => ({...p, province: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">รหัสไปรษณีย์</label>
+                  <input value={editCustForm.postal_code || ''}
+                    onChange={e => setEditCustForm(p => ({...p, postal_code: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 font-mono"/>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">วิธีชำระ</label>
+                <input value={editCustForm.payment_method || ''}
+                  onChange={e => setEditCustForm(p => ({...p, payment_method: e.target.value}))}
+                  placeholder="COD / โอน / ..."
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              </div>
+            </div>
+
+            <div className="p-4 border-t bg-slate-50 flex gap-2 rounded-b-2xl">
+              <button onClick={() => { setEditCustomer(null); setEditCustForm({}); }}
+                className="flex-1 py-2.5 bg-slate-200 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-300">
+                ยกเลิก
+              </button>
+              <button onClick={handleSaveCustomer} disabled={editCustSaving}
+                className="flex-1 py-2.5 bg-cyan-500 text-white rounded-xl text-sm font-semibold hover:bg-cyan-600 disabled:opacity-50 flex items-center justify-center gap-2">
+                <Save size={14}/>
+                {editCustSaving ? 'กำลังบันทึก...' : 'บันทึก'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: แก้ไขออเดอร์ ── */}
+      {editOrder && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[65] p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl">
+            <div className="p-5 border-b flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">แก้ไขออเดอร์</h3>
+                <p className="text-sm text-slate-500 mt-0.5 font-mono">{editOrder.order_no}</p>
+              </div>
+              <button onClick={() => { setEditOrder(null); setEditOrderItems([]); setEditOrderForm({}); }}
+                className="p-2 hover:bg-slate-100 rounded-xl text-slate-500"><X size={18}/></button>
+            </div>
+
+            <div className="flex-1 overflow-auto p-5 space-y-4">
+              {/* รายการสินค้า */}
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-2">รายการสินค้า</label>
+                <div className="space-y-1.5">
+                  {editOrderItems.length === 0 && (
+                    <div className="text-center text-xs text-slate-400 py-3 bg-slate-50 rounded-lg">
+                      ยังไม่มีรายการสินค้า
+                    </div>
+                  )}
+                  {editOrderItems.map((item, itemIdx) => {
+                    const promo = promoOptions.find(p => p.id === item.promoId);
+                    return (
+                      <div key={itemIdx} className="flex items-center gap-2 bg-cyan-50 border border-cyan-200 rounded-lg px-3 py-2" title={`รหัส: ${item.promoId}`}>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[10px] text-slate-500 leading-tight truncate">{promo?.master_name || '—'}</div>
+                          <div className="text-xs text-slate-800 font-medium leading-tight truncate">{promo?.name || item.promoId}</div>
+                        </div>
+                        {promo && (
+                          <span className="text-[11px] text-emerald-600 font-semibold shrink-0">฿{Number(promo.price_thb).toLocaleString()}</span>
+                        )}
+                        <input type="number" min="1"
+                          value={item.qty}
+                          onChange={e => {
+                            const qty = Math.max(1, Number(e.target.value)||1);
+                            setEditOrderItems(prev => prev.map((it, i) => i === itemIdx ? {...it, qty} : it));
+                          }}
+                          className="w-14 border rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-cyan-300 shrink-0"/>
+                        <button
+                          onClick={() => setEditOrderItems(prev => prev.filter((_, i) => i !== itemIdx))}
+                          className="text-red-400 hover:text-red-600 shrink-0 w-6 h-6 rounded hover:bg-red-50 flex items-center justify-center"
+                          title="ลบรายการ"
+                        >✕</button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* combobox เพิ่มรายการ */}
+                <div className="flex gap-2 mt-2 relative">
+                  <div className="flex-1 relative">
+                    <input type="text"
+                      value={editOrderSearch}
+                      onChange={e => { setEditOrderSearch(e.target.value); setEditOrderDropdownOpen(true); }}
+                      onFocus={() => setEditOrderDropdownOpen(true)}
+                      placeholder="+ เพิ่มสินค้า (พิมพ์ค้นหา: ชื่อ / โปร)"
+                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+                    {editOrderDropdownOpen && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setEditOrderDropdownOpen(false)}/>
+                        <div className="absolute top-full left-0 right-0 mt-0.5 bg-white border border-slate-200 rounded-lg shadow-xl max-h-56 overflow-y-auto z-20">
+                          {(() => {
+                            const q = editOrderSearch.toLowerCase().trim();
+                            const selectedIds = new Set(editOrderItems.map(it => it.promoId));
+                            const results = promoOptions.filter(p => {
+                              if (selectedIds.has(p.id)) return false;
+                              if (!q) return true;
+                              return (
+                                p.id.toLowerCase().includes(q) ||
+                                p.name.toLowerCase().includes(q) ||
+                                (p.short_name || '').toLowerCase().includes(q) ||
+                                (p.master_name || '').toLowerCase().includes(q)
+                              );
+                            }).slice(0, 30);
+                            if (results.length === 0) {
+                              return <div className="px-3 py-4 text-center text-xs text-slate-400">{q ? `ไม่พบ "${q}"` : 'ไม่มีสินค้าที่เหลือให้เพิ่ม'}</div>;
+                            }
+                            return results.map(p => (
+                              <div key={p.id}
+                                onMouseDown={e => {
+                                  e.preventDefault();
+                                  setEditOrderItems(prev => [...prev, {promoId: p.id, qty: editOrderAddQty}]);
+                                  setEditOrderSearch('');
+                                  setEditOrderAddQty(1);
+                                  setEditOrderDropdownOpen(false);
+                                }}
+                                className="px-3 py-2 border-b last:border-0 hover:bg-cyan-50 cursor-pointer flex items-center gap-2"
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[10px] text-slate-400 truncate">{p.master_name}</div>
+                                  <div className="text-xs text-slate-700 font-medium truncate">{p.name}</div>
+                                </div>
+                                <span className="shrink-0 text-xs font-bold text-emerald-600">฿{Number(p.price_thb).toLocaleString()}</span>
+                              </div>
+                            ));
+                          })()}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <input type="number" min="1"
+                    value={editOrderAddQty}
+                    onChange={e => setEditOrderAddQty(Math.max(1, Number(e.target.value)||1))}
+                    placeholder="จำนวน"
+                    className="w-16 border rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+                </div>
+              </div>
+
+              {/* ข้อมูลอื่นๆ */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t">
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">ยอดรวม (฿) *</label>
+                  <input type="number" value={editOrderForm.total_thb || '0'}
+                    onChange={e => setEditOrderForm((p: any) => ({...p, total_thb: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 font-bold text-emerald-600"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">Tracking No.</label>
+                  <input value={editOrderForm.tracking_no || ''}
+                    onChange={e => setEditOrderForm((p: any) => ({...p, tracking_no: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 font-mono"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">ขนส่ง</label>
+                  <input value={editOrderForm.courier || ''}
+                    onChange={e => setEditOrderForm((p: any) => ({...p, courier: e.target.value}))}
+                    placeholder="FLASH / ไปรษณีย์..."
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">ช่องทาง</label>
+                  <input value={editOrderForm.channel || ''}
+                    onChange={e => setEditOrderForm((p: any) => ({...p, channel: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">วิธีชำระ</label>
+                  <select value={editOrderForm.payment_method || ''}
+                    onChange={e => setEditOrderForm((p: any) => ({...p, payment_method: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
+                    <option value="">— เลือก —</option>
+                    <option>COD</option>
+                    <option>โอน</option>
+                    <option>เงินสด</option>
+                    <option>บัตรเครดิต</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">สถานะชำระ</label>
+                  <select value={editOrderForm.payment_status || 'รอชำระเงิน'}
+                    onChange={e => setEditOrderForm((p: any) => ({...p, payment_status: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
+                    <option>รอชำระเงิน</option>
+                    <option>ชำระแล้ว</option>
+                    <option>ยกเลิก</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">สถานะออเดอร์</label>
+                  <select value={editOrderForm.order_status || 'รอแพ็ค'}
+                    onChange={e => setEditOrderForm((p: any) => ({...p, order_status: e.target.value}))}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
+                    <option>รอคีย์ออเดอร์</option>
+                    <option>รอแพ็ค</option>
+                    <option>แพ็คสินค้า</option>
+                    <option>รอจัดส่ง</option>
+                    <option>อยู่ระหว่างจัดส่ง</option>
+                    <option>ส่งสินค้าแล้ว</option>
+                    <option>ส่งสำเร็จ</option>
+                    <option>ตีกลับ</option>
+                    <option>ยกเลิก</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">หมายเหตุ</label>
+                  <textarea value={editOrderForm.note || ''}
+                    onChange={e => setEditOrderForm((p: any) => ({...p, note: e.target.value}))}
+                    rows={2}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 resize-none"/>
+                </div>
+              </div>
+
+              {/* แจ้งเตือนราคาไม่ตรง */}
+              {(() => {
+                const sum = editOrderItems.reduce((s, it) => {
+                  const p = promoOptions.find(x => x.id === it.promoId);
+                  return s + (p ? Number(p.price_thb) * (it.qty || 1) : 0);
+                }, 0);
+                const total = Number(editOrderForm.total_thb) || 0;
+                if (editOrderItems.length === 0 || Math.abs(sum - total) < 0.01) return null;
+                return (
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 text-xs text-orange-700">
+                    ⚠ ราคาสินค้ารวม ฿{sum.toLocaleString()} {sum > total ? 'มากกว่า' : 'น้อยกว่า'}ยอดรวม ฿{total.toLocaleString()} อยู่ ฿{Math.abs(sum - total).toLocaleString()}
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="p-4 border-t bg-slate-50 flex gap-2 rounded-b-2xl">
+              <button onClick={() => { setEditOrder(null); setEditOrderItems([]); setEditOrderForm({}); }}
+                className="flex-1 py-2.5 bg-slate-200 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-300">
+                ยกเลิก
+              </button>
+              <button onClick={handleSaveOrder} disabled={editOrderSaving}
+                className="flex-1 py-2.5 bg-cyan-500 text-white rounded-xl text-sm font-semibold hover:bg-cyan-600 disabled:opacity-50 flex items-center justify-center gap-2">
+                <Save size={14}/>
+                {editOrderSaving ? 'กำลังบันทึก...' : 'บันทึก'}
               </button>
             </div>
           </div>
