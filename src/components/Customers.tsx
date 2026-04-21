@@ -53,6 +53,19 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   const [flashPromoSearch, setFlashPromoSearch] = useState<Record<number, string>>({});
   const [flashOpenPromo, setFlashOpenPromo]     = useState<number | null>(null);
   const [flashAddQty, setFlashAddQty]           = useState<Record<number, number>>({});
+  // NEW: filter ช่วงราคา COD (min/max)
+  const [flashMinCod, setFlashMinCod] = useState('');
+  const [flashMaxCod, setFlashMaxCod] = useState('');
+  // NEW: เลือกแถวเพื่อ bulk add (key = tracking)
+  const [flashSelectedRows, setFlashSelectedRows] = useState<Set<string>>(new Set());
+  // NEW: Modal bulk add
+  const [showBulkAdd, setShowBulkAdd] = useState(false);
+  const [bulkPromoSearch, setBulkPromoSearch] = useState('');
+  const [bulkPromoId, setBulkPromoId]         = useState<string>('');
+  const [bulkQty, setBulkQty]                 = useState(1);
+  const [bulkOpenDropdown, setBulkOpenDropdown] = useState(false);
+  // NEW: Confirm close modal
+  const [showConfirmClose, setShowConfirmClose] = useState(false);
   const [importResult, setImportResult] = useState<{
     added: number; updated: number; skipped: number;
     unmapped: {name:string; qty:string}[];
@@ -125,6 +138,9 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
     setFlashAddQty({});
     setFlashOpenPromo(null);
     setFlashSearch('');
+    setFlashMinCod('');
+    setFlashMaxCod('');
+    setFlashSelectedRows(new Set());
     setShowFlashImport(true);
     e.target.value = '';
   };
@@ -554,6 +570,66 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
     if (ce) { showToast('ลบลูกค้าไม่สำเร็จ: ' + ce.message, 'error'); return; }
     setCustomers(p => p.filter(x => x.id !== c.id));
     showToast(`✓ ลบ "${c.name}" และออเดอร์ทั้งหมดแล้ว`);
+  };
+
+  // ── Flash Import helpers ────────────────────────────────────
+  // คำนวณราคารวมของสินค้าที่เลือกในแถว idx (promo.price × qty รวมกัน)
+  const calcRowSum = (idx: number) => {
+    const items = flashPromoSel[idx] || [];
+    return items.reduce((sum, it) => {
+      const promo = promoOptions.find(p => p.id === it.promoId);
+      return sum + (promo ? Number(promo.price_thb) * (it.qty || 1) : 0);
+    }, 0);
+  };
+
+  // ดูว่ามีการแก้ไขอะไรบ้างหรือยัง (ใช้เช็คก่อนปิด modal)
+  const hasUnsavedChanges = () => {
+    return Object.values(flashPromoSel).some(items => items && items.length > 0)
+      || Object.keys(flashTotalSel).length > 0;
+  };
+
+  // เมื่อผู้ใช้กดปิด modal — ถ้ามีการแก้ไขแล้วต้องยืนยันก่อน
+  const handleRequestCloseFlash = () => {
+    if (hasUnsavedChanges()) {
+      setShowConfirmClose(true);
+    } else {
+      setShowFlashImport(false);
+    }
+  };
+
+  // ยืนยันปิดจริง ล้าง state ทั้งหมด
+  const handleConfirmCloseFlash = () => {
+    setShowConfirmClose(false);
+    setShowFlashImport(false);
+    setFlashPromoSel({});
+    setFlashTotalSel({});
+    setFlashPromoSearch({});
+    setFlashAddQty({});
+    setFlashSelectedRows(new Set());
+  };
+
+  // Bulk add — เพิ่มสินค้าเดียวกันให้ทุกแถวที่เลือก (ใช้ tracking เป็น key)
+  const handleBulkAdd = () => {
+    if (!bulkPromoId || flashSelectedRows.size === 0) return;
+    const newSel = { ...flashPromoSel };
+    flashRows.forEach((r, idx) => {
+      const tracking = String(r[1] || '').trim();
+      if (!flashSelectedRows.has(tracking)) return;
+      const isDup = flashDups.some(d => String(d.row[1]).trim() === tracking);
+      if (isDup) return; // ข้าม duplicate
+      const curr = newSel[idx] || [];
+      // กันเลือกซ้ำในแถวเดียวกัน
+      if (curr.some(it => it.promoId === bulkPromoId)) return;
+      newSel[idx] = [...curr, { promoId: bulkPromoId, qty: bulkQty }];
+    });
+    setFlashPromoSel(newSel);
+    showToast(`✓ เพิ่มสินค้าให้ ${flashSelectedRows.size} แถวแล้ว`);
+    // ปิด modal bulk + ล้าง
+    setShowBulkAdd(false);
+    setBulkPromoId('');
+    setBulkPromoSearch('');
+    setBulkQty(1);
+    setBulkOpenDropdown(false);
   };
 
   const filtered = customers.filter(c => {
@@ -995,13 +1071,58 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                 <h3 className="text-lg font-bold text-slate-800">Flash Import — เลือกสินค้าก่อน import</h3>
                 <p className="text-sm text-slate-500 mt-0.5">{flashRows.length} รายการ {flashDups.length > 0 && <span className="text-orange-500 font-medium ml-2">Tracking ซ้ำ {flashDups.length} รายการ (จะถูกข้าม)</span>}</p>
               </div>
-              <button onClick={() => setShowFlashImport(false)} className="p-2 hover:bg-slate-100 rounded-xl text-slate-500">✕</button>
+              <button onClick={handleRequestCloseFlash} className="p-2 hover:bg-slate-100 rounded-xl text-slate-500">✕</button>
             </div>
-            <div className="px-5 pt-3 pb-2">
+
+            {/* Filter bar: ค้นหา + ช่วงราคา COD */}
+            <div className="px-5 pt-3 pb-2 flex gap-2 flex-wrap items-center">
               <input value={flashSearch} onChange={e => setFlashSearch(e.target.value)}
                 placeholder="ค้นหา ชื่อ / เบอร์ / tracking..."
-                className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+                className="flex-1 min-w-[200px] border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+              <div className="flex items-center gap-1.5 bg-slate-50 border rounded-xl px-3 py-1.5">
+                <span className="text-xs text-slate-500 shrink-0">COD:</span>
+                <input type="number" min="0" value={flashMinCod}
+                  onChange={e => setFlashMinCod(e.target.value)}
+                  placeholder="ต่ำสุด"
+                  className="w-20 border-0 bg-transparent text-sm focus:outline-none focus:ring-1 focus:ring-yellow-300 rounded px-1 text-right"/>
+                <span className="text-xs text-slate-400">–</span>
+                <input type="number" min="0" value={flashMaxCod}
+                  onChange={e => setFlashMaxCod(e.target.value)}
+                  placeholder="สูงสุด"
+                  className="w-20 border-0 bg-transparent text-sm focus:outline-none focus:ring-1 focus:ring-yellow-300 rounded px-1 text-right"/>
+                {(flashMinCod || flashMaxCod) && (
+                  <button onClick={() => { setFlashMinCod(''); setFlashMaxCod(''); }}
+                    className="text-slate-400 hover:text-red-500 text-xs ml-1" title="ล้าง">✕</button>
+                )}
+              </div>
             </div>
+
+            {/* Bulk action bar — โผล่มาเมื่อเลือกแถว */}
+            {flashSelectedRows.size > 0 && (
+              <div className="mx-5 mb-2 px-4 py-2.5 bg-yellow-50 border border-yellow-300 rounded-xl flex items-center gap-3 flex-wrap">
+                <span className="text-sm font-semibold text-yellow-800">
+                  ☑ เลือก {flashSelectedRows.size} แถว
+                </span>
+                <button
+                  onClick={() => {
+                    setBulkPromoId('');
+                    setBulkPromoSearch('');
+                    setBulkQty(1);
+                    setShowBulkAdd(true);
+                  }}
+                  className="px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-xs font-medium hover:bg-yellow-600 flex items-center gap-1"
+                >
+                  + เพิ่มสินค้าให้ทุกแถวที่เลือก
+                </button>
+                <button
+                  onClick={() => setFlashSelectedRows(new Set())}
+                  className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 bg-white rounded-lg border ml-auto"
+                >
+                  ยกเลิกการเลือก
+                </button>
+              </div>
+            )}
+
             {flashDups.length > 0 && (
               <div className="mx-5 mb-2 p-3 bg-orange-50 border border-orange-200 rounded-xl text-xs text-orange-700">
                 <div className="font-bold mb-1">Tracking ซ้ำ — จะถูกข้ามไป:</div>
@@ -1011,9 +1132,42 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
               </div>
             )}
             <div className="flex-1 overflow-auto px-5">
-              <table className="w-full text-sm" style={{minWidth:'900px'}}>
-                <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0">
+              <table className="w-full text-sm" style={{minWidth:'950px'}}>
+                <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-20">
                   <tr>
+                    <th className="p-2 w-8 text-center">
+                      {/* Select all — เลือกทุกแถวที่ผ่าน filter และไม่ใช่ dup */}
+                      {(() => {
+                        const minCod = flashMinCod ? Number(flashMinCod) : -Infinity;
+                        const maxCod = flashMaxCod ? Number(flashMaxCod) : Infinity;
+                        const visibleTrackings = flashRows.filter((r: any) => {
+                          const tracking = String(r[1]||'').trim();
+                          const isDup = flashDups.some((d: any) => String(d.row[1]).trim() === tracking);
+                          if (isDup) return false;
+                          const cod = Number(r[17] || 0);
+                          if (cod < minCod || cod > maxCod) return false;
+                          if (flashSearch &&
+                              !String(r[10]||'').includes(flashSearch) &&
+                              !String(r[11]||'').includes(flashSearch) &&
+                              !String(r[1]||'').includes(flashSearch)) return false;
+                          return true;
+                        }).map((r: any) => String(r[1]||'').trim());
+                        const allChecked = visibleTrackings.length > 0 && visibleTrackings.every(t => flashSelectedRows.has(t));
+                        return (
+                          <input type="checkbox"
+                            checked={allChecked}
+                            onChange={e => {
+                              const next = new Set(flashSelectedRows);
+                              if (e.target.checked) visibleTrackings.forEach(t => next.add(t));
+                              else visibleTrackings.forEach(t => next.delete(t));
+                              setFlashSelectedRows(next);
+                            }}
+                            className="rounded cursor-pointer"
+                            title="เลือกทั้งหมดที่แสดงอยู่"
+                          />
+                        );
+                      })()}
+                    </th>
                     <th className="p-2 text-left">#</th>
                     <th className="p-2 text-left">Tracking</th>
                     <th className="p-2 text-left">ชื่อผู้รับ</th>
@@ -1026,22 +1180,54 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                 </thead>
                 <tbody>
                   {flashRows
-                    .filter((r: any) => !flashSearch ||
-                      String(r[10]||'').includes(flashSearch) ||
-                      String(r[11]||'').includes(flashSearch) ||
-                      String(r[1]||'').includes(flashSearch))
-                    .map((r: any, idx: number) => {
-                      const isDup = flashDups.some((d: any) => String(d.row[1]).trim() === String(r[1]).trim());
+                    .filter((r: any) => {
+                      // ค้นหา
+                      if (flashSearch &&
+                          !String(r[10]||'').includes(flashSearch) &&
+                          !String(r[11]||'').includes(flashSearch) &&
+                          !String(r[1]||'').includes(flashSearch)) return false;
+                      // ช่วงราคา COD
+                      const cod = Number(r[17] || 0);
+                      if (flashMinCod && cod < Number(flashMinCod)) return false;
+                      if (flashMaxCod && cod > Number(flashMaxCod)) return false;
+                      return true;
+                    })
+                    .map((r: any) => {
+                      // หา index จริงใน flashRows (ไม่ใช่ index หลัง filter)
+                      const idx = flashRows.indexOf(r);
+                      const tracking = String(r[1]||'').trim();
+                      const isDup = flashDups.some((d: any) => String(d.row[1]).trim() === tracking);
                       const dp = String(r[13]||'').split(' ');
                       const province = dp[dp.length-1] || '-';
+                      const cod = Number(r[17]||0);
+                      const productSum = calcRowSum(idx);
+                      const totalVal = flashTotalSel[idx] !== undefined ? Number(flashTotalSel[idx]) : cod;
+                      // แจ้งเตือนราคาไม่ตรง (มีสินค้าเลือกอย่างน้อย 1 รายการ และราคาต่างจากยอดรวม)
+                      const hasItems = (flashPromoSel[idx] || []).length > 0;
+                      const priceDiff = hasItems && Math.abs(productSum - totalVal) > 0.01
+                        ? productSum - totalVal : 0;
+                      const isSelected = flashSelectedRows.has(tracking);
                       return (
-                        <tr key={idx} className={`border-b text-xs ${isDup ? 'bg-orange-50 opacity-60' : 'hover:bg-slate-50'}`}>
+                        <tr key={idx} className={`border-b text-xs ${isDup ? 'bg-orange-50 opacity-60' : isSelected ? 'bg-yellow-50' : 'hover:bg-slate-50'}`}>
+                          <td className="p-2 text-center">
+                            {!isDup && (
+                              <input type="checkbox"
+                                checked={isSelected}
+                                onChange={e => {
+                                  const next = new Set(flashSelectedRows);
+                                  e.target.checked ? next.add(tracking) : next.delete(tracking);
+                                  setFlashSelectedRows(next);
+                                }}
+                                className="rounded cursor-pointer"
+                              />
+                            )}
+                          </td>
                           <td className="p-2 text-slate-400">{idx+1}{isDup && ' ⚠'}</td>
                           <td className="p-2 font-mono text-blue-600 text-[11px]">{String(r[1]||'')}</td>
                           <td className="p-2 font-medium">{String(r[10]||'')}</td>
                           <td className="p-2 text-slate-500">{String(r[11]||'')}</td>
                           <td className="p-2 text-slate-500">{province}</td>
-                          <td className="p-2 text-right font-medium text-emerald-600">฿{Number(r[17]||0).toLocaleString()}</td>
+                          <td className="p-2 text-right font-medium text-emerald-600">฿{cod.toLocaleString()}</td>
                           <td className="p-2 align-top" style={{minWidth:'280px'}}>
                             {isDup ? <span className="text-orange-400 text-[11px]">ข้าม (ซ้ำ)</span> : (
                               <div className="space-y-1.5">
@@ -1168,10 +1354,20 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                           </td>
                           <td className="p-2">
                             {isDup ? '-' : (
-                              <input type="number"
-                                value={flashTotalSel[idx] !== undefined ? flashTotalSel[idx] : String(Number(r[17])||0)}
-                                onChange={e => setFlashTotalSel((prev: any) => ({...prev, [idx]: e.target.value}))}
-                                className="border rounded px-2 py-1 text-xs w-24 text-right focus:outline-none focus:ring-1 focus:ring-yellow-300"/>
+                              <div className="flex items-center gap-1 justify-end">
+                                {priceDiff !== 0 && (
+                                  <span
+                                    className="text-orange-500 cursor-help shrink-0"
+                                    title={`⚠ ราคาสินค้ารวม ฿${productSum.toLocaleString()} ${priceDiff > 0 ? 'มากกว่า' : 'น้อยกว่า'}ยอดรวม ฿${totalVal.toLocaleString()} อยู่ ฿${Math.abs(priceDiff).toLocaleString()}`}
+                                  >
+                                    ⚠
+                                  </span>
+                                )}
+                                <input type="number"
+                                  value={flashTotalSel[idx] !== undefined ? flashTotalSel[idx] : String(cod)}
+                                  onChange={e => setFlashTotalSel((prev: any) => ({...prev, [idx]: e.target.value}))}
+                                  className={`border rounded px-2 py-1 text-xs w-24 text-right focus:outline-none focus:ring-1 focus:ring-yellow-300 ${priceDiff !== 0 ? 'border-orange-300 bg-orange-50' : ''}`}/>
+                              </div>
                             )}
                           </td>
                         </tr>
@@ -1181,14 +1377,151 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
               </table>
             </div>
             <div className="p-4 border-t flex items-center justify-between gap-3 bg-slate-50 rounded-b-2xl">
-              <p className="text-xs text-slate-400">💡 1 ออเดอร์ = เพิ่มได้หลายรายการ · พิมพ์ในช่องเพื่อค้นหาสินค้า · แถวที่ไม่เลือกสินค้าจะบันทึกออเดอร์ว่างเปล่า</p>
+              <p className="text-xs text-slate-400">💡 1 ออเดอร์ = เพิ่มได้หลายรายการ · พิมพ์ในช่องเพื่อค้นหาสินค้า · ⚠ = ราคาสินค้าไม่ตรงยอดรวม</p>
               <div className="flex gap-2">
-                <button onClick={() => setShowFlashImport(false)} className="px-4 py-2 bg-slate-200 rounded-xl text-sm hover:bg-slate-300">ยกเลิก</button>
+                <button onClick={handleRequestCloseFlash} className="px-4 py-2 bg-slate-200 rounded-xl text-sm hover:bg-slate-300">ยกเลิก</button>
                 <button onClick={handleFlashImport} disabled={flashSaving}
                   className="px-6 py-2 bg-yellow-500 text-white rounded-xl text-sm font-semibold hover:bg-yellow-600 disabled:opacity-50">
                   {flashSaving ? 'กำลัง import...' : `Import ${flashRows.length - flashDups.length} รายการ`}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Bulk Add สินค้าให้หลายแถว ── */}
+      {showBulkAdd && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="p-5 border-b flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">เพิ่มสินค้าพร้อมกัน</h3>
+                <p className="text-sm text-slate-500 mt-0.5">เพิ่มให้ {flashSelectedRows.size} แถวที่เลือกไว้</p>
+              </div>
+              <button onClick={() => setShowBulkAdd(false)} className="p-2 hover:bg-slate-100 rounded-xl text-slate-500">✕</button>
+            </div>
+            <div className="p-5 space-y-3">
+              {/* Combobox สินค้า */}
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1.5">สินค้า *</label>
+                <div className="relative">
+                  {bulkPromoId ? (
+                    // แสดงสินค้าที่เลือกแล้ว พร้อมปุ่มเปลี่ยน
+                    (() => {
+                      const selected = promoOptions.find(p => p.id === bulkPromoId);
+                      return (
+                        <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-300 rounded-lg px-3 py-2">
+                          <span className="font-mono text-[11px] text-slate-500 shrink-0">{bulkPromoId}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[10px] text-slate-400 truncate">{selected?.master_name}</div>
+                            <div className="text-xs text-slate-700 font-medium truncate">{selected?.name}</div>
+                          </div>
+                          <span className="shrink-0 text-xs font-bold text-emerald-600">฿{Number(selected?.price_thb || 0).toLocaleString()}</span>
+                          <button onClick={() => { setBulkPromoId(''); setBulkPromoSearch(''); setBulkOpenDropdown(true); }}
+                            className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <input type="text"
+                      value={bulkPromoSearch}
+                      onChange={e => { setBulkPromoSearch(e.target.value); setBulkOpenDropdown(true); }}
+                      onFocus={() => setBulkOpenDropdown(true)}
+                      placeholder="พิมพ์ค้นหา: ชื่อ / รหัส P0001 / ชื่อโปร..."
+                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+                  )}
+
+                  {!bulkPromoId && bulkOpenDropdown && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setBulkOpenDropdown(false)}/>
+                      <div className="absolute top-full left-0 right-0 mt-0.5 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-y-auto z-20">
+                        {(() => {
+                          const q = bulkPromoSearch.toLowerCase().trim();
+                          const results = promoOptions.filter(p => {
+                            if (!q) return true;
+                            return (
+                              p.id.toLowerCase().includes(q) ||
+                              p.name.toLowerCase().includes(q) ||
+                              (p.short_name || '').toLowerCase().includes(q) ||
+                              (p.master_name || '').toLowerCase().includes(q)
+                            );
+                          }).slice(0, 30);
+                          if (results.length === 0) {
+                            return <div className="px-3 py-4 text-center text-xs text-slate-400">ไม่พบ "{q}"</div>;
+                          }
+                          return results.map(p => (
+                            <div key={p.id}
+                              onClick={() => {
+                                setBulkPromoId(p.id);
+                                setBulkPromoSearch('');
+                                setBulkOpenDropdown(false);
+                              }}
+                              className="px-3 py-2 border-b last:border-0 hover:bg-yellow-50 cursor-pointer flex items-center gap-2"
+                            >
+                              <span className="font-mono text-[10px] text-slate-400 shrink-0 w-14">{p.id}</span>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[10px] text-slate-400 truncate">{p.master_name}</div>
+                                <div className="text-xs text-slate-700 font-medium truncate">{p.name}</div>
+                              </div>
+                              <span className="shrink-0 text-xs font-bold text-emerald-600">฿{Number(p.price_thb).toLocaleString()}</span>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* จำนวน */}
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1.5">จำนวน</label>
+                <input type="number" min="1"
+                  value={bulkQty}
+                  onChange={e => setBulkQty(Math.max(1, Number(e.target.value)||1))}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+              </div>
+
+              <div className="text-xs text-slate-400 bg-slate-50 rounded-lg p-2.5 leading-relaxed">
+                💡 ระบบจะข้ามแถวที่มีสินค้านี้อยู่แล้วให้อัตโนมัติ (กันซ้ำ)
+              </div>
+            </div>
+            <div className="p-4 border-t bg-slate-50 flex gap-2 rounded-b-2xl">
+              <button onClick={() => setShowBulkAdd(false)}
+                className="flex-1 py-2 bg-slate-200 rounded-xl text-sm hover:bg-slate-300">ยกเลิก</button>
+              <button onClick={handleBulkAdd}
+                disabled={!bulkPromoId}
+                className="flex-1 py-2.5 bg-yellow-500 text-white rounded-xl text-sm font-semibold hover:bg-yellow-600 disabled:opacity-50">
+                ✓ เพิ่มให้ {flashSelectedRows.size} แถว
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Confirm close (เมื่อมีการแก้ไขค้างอยู่) ── */}
+      {showConfirmClose && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70] p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
+                <span className="text-xl">⚠</span>
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-800">ปิดโดยไม่บันทึก?</h3>
+                <p className="text-sm text-slate-500 mt-1">คุณได้เลือกสินค้าไว้แล้ว ถ้าปิดตอนนี้ข้อมูลที่ใส่ไว้จะหายทั้งหมด</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setShowConfirmClose(false)}
+                className="flex-1 py-2.5 bg-slate-200 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-300">
+                ทำต่อ
+              </button>
+              <button onClick={handleConfirmCloseFlash}
+                className="flex-1 py-2.5 bg-red-500 text-white rounded-xl text-sm font-semibold hover:bg-red-600">
+                ปิด (ทิ้งข้อมูล)
+              </button>
             </div>
           </div>
         </div>
