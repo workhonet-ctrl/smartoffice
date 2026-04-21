@@ -43,11 +43,16 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   // Flash Import
   const [showFlashImport, setShowFlashImport] = useState(false);
   const [flashRows, setFlashRows]             = useState<any[]>([]);
-  const [flashPromoSel, setFlashPromoSel]     = useState<Record<number, string>>({}); // index → promo_id
+  // index → รายการสินค้าที่เลือก (หลายรายการได้)
+  const [flashPromoSel, setFlashPromoSel]     = useState<Record<number, {promoId: string; qty: number}[]>>({});
   const [flashTotalSel, setFlashTotalSel]     = useState<Record<number, string>>({}); // index → total override
   const [flashDups, setFlashDups]             = useState<{row: any; existing: any}[]>([]);
   const [flashSaving, setFlashSaving]         = useState(false);
   const [flashSearch, setFlashSearch]         = useState('');
+  // สถานะของแต่ละแถว: ค้นหาใน combobox + แถวไหนกำลังเปิด dropdown
+  const [flashPromoSearch, setFlashPromoSearch] = useState<Record<number, string>>({});
+  const [flashOpenPromo, setFlashOpenPromo]     = useState<number | null>(null);
+  const [flashAddQty, setFlashAddQty]           = useState<Record<number, number>>({});
   const [importResult, setImportResult] = useState<{
     added: number; updated: number; skipped: number;
     unmapped: {name:string; qty:string}[];
@@ -116,6 +121,9 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
     setFlashDups(dups);
     setFlashPromoSel({});
     setFlashTotalSel({});
+    setFlashPromoSearch({});
+    setFlashAddQty({});
+    setFlashOpenPromo(null);
     setFlashSearch('');
     setShowFlashImport(true);
     e.target.value = '';
@@ -167,14 +175,21 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
         const customerId = custMap[tel];
         if (!customerId) continue;
 
-        const promoId = flashPromoSel[idx];
+        // รายการสินค้าที่ user เลือก (หลายรายการได้)
+        const items = (flashPromoSel[idx] || []).filter(it => it.promoId);
         const totalThb = flashTotalSel[idx] ? Number(flashTotalSel[idx]) : (Number(r[17])||0);
-        const dp = String(r[13]||'').split(' ');
-        const province = dp[dp.length-1] || '';
 
         // ลบ dup ที่เลือกลบ (ไม่ทำอะไร = ข้าม)
         const isDup = flashDups.find(d => String(d.row[1]).trim() === tracking);
         if (isDup) continue; // ข้าม duplicate (ให้ user จัดการเอง)
+
+        // สร้าง promo_ids, quantities, raw_prod จาก items
+        const promoIds   = items.map(it => it.promoId);
+        const quantities = items.length > 0 ? items.map(it => String(it.qty || 1)).join('|') : '1';
+        const qtySum     = items.length > 0 ? items.reduce((s, it) => s + (Number(it.qty) || 1), 0) : 1;
+        const rawProd    = items.length > 0
+          ? items.map(it => promoOptions.find(p => p.id === it.promoId)?.name || '').filter(Boolean).join('|')
+          : '';
 
         const { error } = await supabase.from('orders').insert([{
           order_no:    `FL-${tracking}`,
@@ -184,10 +199,10 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
           tracking_no: tracking,
           courier:     'FLASH',
           route:       'B',
-          promo_ids:   promoId ? [promoId] : [],
-          raw_prod:    promoId ? (promoOptions.find(p => p.id === promoId)?.name || '') : '',
-          quantity:    1,
-          quantities:  '1',
+          promo_ids:   promoIds,
+          raw_prod:    rawProd,
+          quantity:    qtySum,
+          quantities:  quantities,
           total_thb:   totalThb,
           payment_method: 'COD',
           payment_status: 'รอชำระเงิน',
@@ -1027,16 +1042,128 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                           <td className="p-2 text-slate-500">{String(r[11]||'')}</td>
                           <td className="p-2 text-slate-500">{province}</td>
                           <td className="p-2 text-right font-medium text-emerald-600">฿{Number(r[17]||0).toLocaleString()}</td>
-                          <td className="p-2">
+                          <td className="p-2 align-top" style={{minWidth:'280px'}}>
                             {isDup ? <span className="text-orange-400 text-[11px]">ข้าม (ซ้ำ)</span> : (
-                              <select value={flashPromoSel[idx]||''}
-                                onChange={e => setFlashPromoSel((prev: any) => ({...prev, [idx]: e.target.value}))}
-                                className="w-full border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-yellow-300 bg-white">
-                                <option value="">— เลือกสินค้า —</option>
-                                {promoOptions.map((p: any) => (
-                                  <option key={p.id} value={p.id}>{p.id} · {p.master_name} · {p.name} ฿{Number(p.price_thb).toLocaleString()}</option>
-                                ))}
-                              </select>
+                              <div className="space-y-1.5">
+                                {/* list รายการที่เลือกแล้ว */}
+                                {(flashPromoSel[idx] || []).map((item, itemIdx) => {
+                                  const promo = promoOptions.find(p => p.id === item.promoId);
+                                  return (
+                                    <div key={itemIdx} className="flex items-center gap-1.5 bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1">
+                                      <span className="font-mono text-[10px] text-slate-500 shrink-0">{item.promoId}</span>
+                                      <span className="flex-1 text-[11px] text-slate-700 truncate">{promo?.name || '—'}</span>
+                                      <input type="number" min="1"
+                                        value={item.qty}
+                                        onChange={e => {
+                                          const qty = Math.max(1, Number(e.target.value)||1);
+                                          setFlashPromoSel(prev => ({
+                                            ...prev,
+                                            [idx]: (prev[idx]||[]).map((it, i) => i === itemIdx ? {...it, qty} : it)
+                                          }));
+                                        }}
+                                        className="w-12 border rounded px-1.5 py-0.5 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-yellow-300"/>
+                                      <button
+                                        onClick={() => setFlashPromoSel(prev => ({
+                                          ...prev,
+                                          [idx]: (prev[idx]||[]).filter((_, i) => i !== itemIdx)
+                                        }))}
+                                        className="text-red-400 hover:text-red-600 shrink-0 w-5 h-5 rounded hover:bg-red-50 flex items-center justify-center"
+                                        title="ลบรายการนี้"
+                                      >✕</button>
+                                    </div>
+                                  );
+                                })}
+
+                                {/* combobox เพิ่มรายการ */}
+                                <div className="relative">
+                                  <div className="flex gap-1">
+                                    <div className="flex-1 relative">
+                                      <input
+                                        type="text"
+                                        value={flashPromoSearch[idx] || ''}
+                                        onChange={e => {
+                                          setFlashPromoSearch(prev => ({...prev, [idx]: e.target.value}));
+                                          setFlashOpenPromo(idx);
+                                        }}
+                                        onFocus={() => setFlashOpenPromo(idx)}
+                                        placeholder="+ เพิ่มสินค้า (พิมพ์ค้นหา: ชื่อ/รหัส/โปร)"
+                                        className="w-full border rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-yellow-300 bg-white"
+                                      />
+                                    </div>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      value={flashAddQty[idx] ?? 1}
+                                      onChange={e => {
+                                        const qty = Math.max(1, Number(e.target.value)||1);
+                                        setFlashAddQty(prev => ({...prev, [idx]: qty}));
+                                      }}
+                                      placeholder="จำนวน"
+                                      className="w-12 border rounded-lg px-1.5 py-1 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-yellow-300"
+                                      title="จำนวน"
+                                    />
+                                  </div>
+
+                                  {/* dropdown results */}
+                                  {flashOpenPromo === idx && (
+                                    <>
+                                      {/* backdrop click-outside */}
+                                      <div
+                                        className="fixed inset-0 z-10"
+                                        onClick={() => setFlashOpenPromo(null)}
+                                      />
+                                      <div className="absolute top-full left-0 right-0 mt-0.5 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
+                                        {(() => {
+                                          const q = (flashPromoSearch[idx] || '').toLowerCase().trim();
+                                          const selectedIds = new Set((flashPromoSel[idx]||[]).map(it => it.promoId));
+                                          const results = promoOptions.filter(p => {
+                                            if (selectedIds.has(p.id)) return false; // กันเลือกซ้ำ
+                                            if (!q) return true;
+                                            return (
+                                              p.id.toLowerCase().includes(q) ||
+                                              p.name.toLowerCase().includes(q) ||
+                                              (p.short_name || '').toLowerCase().includes(q) ||
+                                              (p.master_name || '').toLowerCase().includes(q)
+                                            );
+                                          }).slice(0, 30);
+
+                                          if (results.length === 0) {
+                                            return (
+                                              <div className="px-3 py-4 text-center text-[11px] text-slate-400">
+                                                {q ? `ไม่พบ "${q}"` : 'ไม่มีสินค้าที่เหลือให้เพิ่ม'}
+                                              </div>
+                                            );
+                                          }
+
+                                          return results.map(p => (
+                                            <div
+                                              key={p.id}
+                                              onClick={() => {
+                                                const addQty = flashAddQty[idx] ?? 1;
+                                                setFlashPromoSel(prev => ({
+                                                  ...prev,
+                                                  [idx]: [...(prev[idx]||[]), {promoId: p.id, qty: addQty}]
+                                                }));
+                                                setFlashPromoSearch(prev => ({...prev, [idx]: ''}));
+                                                setFlashAddQty(prev => ({...prev, [idx]: 1}));
+                                                setFlashOpenPromo(null);
+                                              }}
+                                              className="px-2 py-1.5 border-b last:border-0 hover:bg-yellow-50 cursor-pointer flex items-center gap-2"
+                                            >
+                                              <span className="font-mono text-[10px] text-slate-400 shrink-0 w-14">{p.id}</span>
+                                              <div className="flex-1 min-w-0">
+                                                <div className="text-[10px] text-slate-400 truncate">{p.master_name}</div>
+                                                <div className="text-[11px] text-slate-700 font-medium truncate">{p.name}</div>
+                                              </div>
+                                              <span className="shrink-0 text-[11px] font-bold text-emerald-600">฿{Number(p.price_thb).toLocaleString()}</span>
+                                            </div>
+                                          ));
+                                        })()}
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
                             )}
                           </td>
                           <td className="p-2">
@@ -1054,7 +1181,7 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
               </table>
             </div>
             <div className="p-4 border-t flex items-center justify-between gap-3 bg-slate-50 rounded-b-2xl">
-              <p className="text-xs text-slate-400">สินค้าที่ไม่เลือก จะบันทึกออเดอร์ว่างเปล่า (แก้ที่หน้าออเดอร์ได้)</p>
+              <p className="text-xs text-slate-400">💡 1 ออเดอร์ = เพิ่มได้หลายรายการ · พิมพ์ในช่องเพื่อค้นหาสินค้า · แถวที่ไม่เลือกสินค้าจะบันทึกออเดอร์ว่างเปล่า</p>
               <div className="flex gap-2">
                 <button onClick={() => setShowFlashImport(false)} className="px-4 py-2 bg-slate-200 rounded-xl text-sm hover:bg-slate-300">ยกเลิก</button>
                 <button onClick={handleFlashImport} disabled={flashSaving}
