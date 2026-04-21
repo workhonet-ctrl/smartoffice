@@ -599,6 +599,13 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
             <input type="file" accept=".xlsx,.xls" className="hidden"
               onChange={handleImportExcel} disabled={importing}/>
           </label>
+          {/* ปุ่ม Flash Import */}
+          <label className="px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-semibold cursor-pointer shadow-sm transition bg-yellow-500 text-white hover:bg-yellow-600">
+            <Upload size={16}/>
+            ⚡ นำเข้า Flash
+            <input type="file" accept=".xlsx,.xls" className="hidden"
+              onChange={handleFlashFile}/>
+          </label>
         </div>
       </div>
 
