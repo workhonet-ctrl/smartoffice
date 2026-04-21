@@ -787,8 +787,8 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
       if (error) throw error;
       // reload orders ใน expanded row ถ้าลูกค้ายังเปิดอยู่
       if (expanded) await loadOrders(expanded);
-      // reload customers (เพราะ total_spent อาจเปลี่ยน ผ่าน trigger)
-      loadCustomers();
+      // reload customers (เพราะ total_spent อาจเปลี่ยน ผ่าน trigger) — await ให้ยอดอัพเดตก่อนโชว์ toast
+      await loadCustomers();
       showToast('✓ บันทึกออเดอร์แล้ว');
       setEditOrder(null);
       setEditOrderItems([]);
@@ -803,11 +803,27 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
 
   const handleDeleteOrder = async (orderId: string, orderNo: string) => {
     if (!confirm(`ลบออเดอร์ "${orderNo}"?\nข้อมูลจะหายถาวร`)) return;
+    // หา order ก่อนลบ — เอาไว้ optimistic update customer stats
+    const orderToDelete = custOrders.find(o => o.id === orderId);
+    const customerId = expanded;
     const { error } = await supabase.from('orders').delete().eq('id', orderId);
     if (error) { showToast('ลบไม่สำเร็จ: ' + error.message, 'error'); return; }
-    if (expanded) await loadOrders(expanded);
-    loadCustomers();
+    // Optimistic: ลดยอดใน state ทันที ไม่รอ trigger DB (เห็นผลเร็ว)
+    if (orderToDelete && customerId) {
+      setCustomers(prev => prev.map(c => c.id === customerId
+        ? {
+            ...c,
+            order_count: Math.max(0, c.order_count - 1),
+            total_spent: Math.max(0, Number(c.total_spent) - Number(orderToDelete.total_thb || 0)),
+          }
+        : c
+      ));
+      setCustOrders(prev => prev.filter(o => o.id !== orderId));
+    }
     showToast('✓ ลบออเดอร์แล้ว');
+    // Refresh จาก DB เพื่อให้ตรงกับค่าจริง (หลัง trigger ทำงาน)
+    await loadCustomers();
+    if (customerId) await loadOrders(customerId);
   };
 
   const filtered = customers.filter(c => {
