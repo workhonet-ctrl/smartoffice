@@ -24,7 +24,7 @@ import ProductKPI from './components/ProductKPI';
 
 type PageKey =
   // ฝ่ายขาย
-  | 'sales-admin' | 'sales-customers' | 'sales-crm'
+  | 'sales-admin' | 'sales-customers' | 'sales-customers-problem' | 'sales-crm'
   // ฝ่ายการตลาด
   | 'marketing-graphic' | 'marketing-ads'
   // ฝ่ายสินค้า
@@ -76,7 +76,6 @@ export default function App() {
       case 'stock':          return <Stock onGoToPO={() => setActivePage('purchase-order')} />;
       case 'purchase-order': return <PurchaseOrder />;
       case 'suppliers':      return <Suppliers />;
-      case 'customers':      return <Customers />;
       case 'orders':         return <Orders onImportDone={goToPackaging} />;
       case 'flash-export':   return <FlashExport />;
       case 'myorder-export': return <MyOrderExport />;
@@ -95,6 +94,7 @@ export default function App() {
       // ฝ่ายขาย
       case 'sales-admin':     return <Marketing page="admin" />;
       case 'sales-customers': return <Customers onGoToProducts={() => setActivePage('products')} />;
+      case 'sales-customers-problem': return <Customers onGoToProducts={() => setActivePage('products')} problemOnly />;
       case 'sales-crm':       return <ComingSoon title="CRM" description="ระบบจัดการความสัมพันธ์ลูกค้า" />;
       // ฝ่ายการตลาด
       case 'marketing-graphic': return <Marketing page="graphic" />;
