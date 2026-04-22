@@ -27,8 +27,12 @@ const TAG_COLORS: Record<string, string> = {
 const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 0 });
 const fmt2 = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export default function Customers({ onGoToProducts }: { onGoToProducts?: () => void } = {}) {
+export default function Customers({ onGoToProducts, problemOnly = false }: { onGoToProducts?: () => void; problemOnly?: boolean } = {}) {
   const [customers, setCustomers]   = useState<Customer[]>([]);
+  // ถ้าเป็นหน้าเคสมีปัญหา → เก็บ customer_id ที่มีออเดอร์สถานะปัญหา
+  const [problemCustomerIds, setProblemCustomerIds] = useState<Set<string> | null>(null);
+  // สรุปจำนวนออเดอร์ปัญหาต่อลูกค้า (ใช้แสดงใน badge)
+  const [problemOrderCount, setProblemOrderCount] = useState<Record<string, number>>({});
   const [search, setSearch]         = useState('');
   const [tagFilter, setTagFilter]   = useState('ทั้งหมด');
   const [sortBy, setSortBy]         = useState<'total_spent' | 'order_count' | 'updated_at'>('total_spent');
@@ -99,6 +103,37 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   };
 
   useEffect(() => { loadCustomers(); loadShipCosts(); }, []);
+
+  // เมื่อเป็นหน้า "เคสมีปัญหา" → query ออเดอร์สถานะปัญหาแล้วเก็บ customer_ids
+  useEffect(() => {
+    if (!problemOnly) {
+      setProblemCustomerIds(null);
+      setProblemOrderCount({});
+      return;
+    }
+    const loadProblem = async () => {
+      // สถานะที่ถือว่ามีปัญหา
+      const PROBLEM_STATUSES = ['ค้างอยู่คลัง', 'ไม่มีคนรับ', 'ตีกลับ', 'ส่งคืน', 'ปัญหา'];
+      // query 2 ช่อง: parcel_status + order_status (ส่วนใหญ่เก็บคู่กัน)
+      const { data: byParcel } = await supabase
+        .from('orders').select('customer_id')
+        .in('parcel_status', PROBLEM_STATUSES);
+      const { data: byOrder } = await supabase
+        .from('orders').select('customer_id')
+        .in('order_status', PROBLEM_STATUSES);
+      const counts: Record<string, number> = {};
+      const ids = new Set<string>();
+      [...(byParcel || []), ...(byOrder || [])].forEach((o: any) => {
+        if (o.customer_id) {
+          ids.add(o.customer_id);
+          counts[o.customer_id] = (counts[o.customer_id] || 0) + 1;
+        }
+      });
+      setProblemCustomerIds(ids);
+      setProblemOrderCount(counts);
+    };
+    loadProblem();
+  }, [problemOnly]);
 
   // ปิด combobox dropdown เมื่อ scroll ตารางหรือ resize window (กันตำแหน่งเพี้ยน)
   useEffect(() => {
@@ -827,6 +862,11 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
   };
 
   const filtered = customers.filter(c => {
+    // ถ้าเป็นโหมด problemOnly → แสดงเฉพาะลูกค้าที่มีออเดอร์สถานะปัญหา
+    if (problemOnly) {
+      if (problemCustomerIds === null) return false; // ยังโหลดไม่เสร็จ
+      if (!problemCustomerIds.has(c.id)) return false;
+    }
     const matchTag = tagFilter === 'ทั้งหมด' || c.tag === tagFilter;
     const matchSearch = !search || c.name.toLowerCase().includes(search.toLowerCase())
       || (c.facebook_name || '').toLowerCase().includes(search.toLowerCase())
@@ -855,12 +895,20 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-2xl font-bold text-slate-800">ลูกค้า</h2>
+              <h2 className="text-2xl font-bold text-slate-800">
+                {problemOnly ? '⚠ เคสมีปัญหา' : 'ลูกค้า'}
+              </h2>
             </div>
-            <p className="text-xs text-slate-400">{customers.length} คน · นำเข้า Excel ครั้งเดียว → บันทึกลูกค้า + ออเดอร์พร้อมกัน</p>
+            <p className="text-xs text-slate-400">
+              {problemOnly
+                ? `${filtered.length} ลูกค้าที่มีออเดอร์สถานะปัญหา (ตีกลับ · ไม่มีคนรับ · ค้างอยู่คลัง · ส่งคืน · ปัญหา)`
+                : `${customers.length} คน · นำเข้า Excel ครั้งเดียว → บันทึกลูกค้า + ออเดอร์พร้อมกัน`
+              }
+            </p>
           </div>
         </div>
-        {/* ปุ่ม นำเข้า Excel */}
+        {/* ปุ่ม นำเข้า Excel — ซ่อนเมื่อเป็นหน้าเคสมีปัญหา */}
+        {!problemOnly && (
         <div className="flex items-center gap-3">
           {importResult && (
             <div className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 space-y-0.5">
@@ -892,30 +940,64 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
               onChange={handleFlashFile}/>
           </label>
         </div>
+        )}
       </div>
 
       {/* KPI */}
       <div className="shrink-0 grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <div className="text-xs font-semibold text-amber-600 mb-1">VIP</div>
-          <div className="text-2xl font-bold text-amber-700">{vipCount}</div>
-          <div className="text-xs text-amber-500">10+ ออเดอร์</div>
-        </div>
-        <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-          <div className="text-xs font-semibold text-purple-600 mb-1">ลูกค้าประจำ</div>
-          <div className="text-2xl font-bold text-purple-700">{regularCount}</div>
-          <div className="text-xs text-purple-500">3–9 ออเดอร์</div>
-        </div>
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-          <div className="text-xs font-semibold text-emerald-600 mb-1">ยอดซื้อรวม</div>
-          <div className="text-lg font-bold text-emerald-700">฿{fmt(totalSpent)}</div>
-          <div className="text-xs text-emerald-500">ทุกลูกค้า</div>
-        </div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-          <div className="text-xs font-semibold text-blue-600 mb-1">เพจยอดนิยม</div>
-          <div className="text-sm font-bold text-blue-700 truncate">{topChannel}</div>
-          <div className="text-xs text-blue-500">ช่องทางหลัก</div>
-        </div>
+        {problemOnly ? (
+          <>
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-red-600 mb-1">ลูกค้าที่มีปัญหา</div>
+              <div className="text-2xl font-bold text-red-700">{filtered.length}</div>
+              <div className="text-xs text-red-500">คน</div>
+            </div>
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-orange-600 mb-1">ออเดอร์ที่มีปัญหา</div>
+              <div className="text-2xl font-bold text-orange-700">
+                {Object.values(problemOrderCount).reduce((s, n) => s + n, 0)}
+              </div>
+              <div className="text-xs text-orange-500">รายการ</div>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-amber-600 mb-1">VIP ที่มีปัญหา</div>
+              <div className="text-2xl font-bold text-amber-700">
+                {filtered.filter(c => c.tag === 'VIP').length}
+              </div>
+              <div className="text-xs text-amber-500">คน</div>
+            </div>
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-purple-600 mb-1">ประจำที่มีปัญหา</div>
+              <div className="text-2xl font-bold text-purple-700">
+                {filtered.filter(c => c.tag === 'ประจำ').length}
+              </div>
+              <div className="text-xs text-purple-500">คน</div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-amber-600 mb-1">VIP</div>
+              <div className="text-2xl font-bold text-amber-700">{vipCount}</div>
+              <div className="text-xs text-amber-500">10+ ออเดอร์</div>
+            </div>
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-purple-600 mb-1">ลูกค้าประจำ</div>
+              <div className="text-2xl font-bold text-purple-700">{regularCount}</div>
+              <div className="text-xs text-purple-500">3–9 ออเดอร์</div>
+            </div>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-emerald-600 mb-1">ยอดซื้อรวม</div>
+              <div className="text-lg font-bold text-emerald-700">฿{fmt(totalSpent)}</div>
+              <div className="text-xs text-emerald-500">ทุกลูกค้า</div>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-blue-600 mb-1">เพจยอดนิยม</div>
+              <div className="text-sm font-bold text-blue-700 truncate">{topChannel}</div>
+              <div className="text-xs text-blue-500">ช่องทางหลัก</div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Filter bar */}
@@ -1015,7 +1097,15 @@ export default function Customers({ onGoToProducts }: { onGoToProducts?: () => v
                     {expanded===c.id ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
                   </td>
                   <td className="p-3 whitespace-nowrap" style={{minWidth:'140px'}}>
-                    <div className="font-medium text-slate-800">{c.name}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-slate-800">{c.name}</span>
+                      {problemOnly && problemOrderCount[c.id] > 0 && (
+                        <span className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-bold whitespace-nowrap"
+                          title={`มีออเดอร์สถานะปัญหา ${problemOrderCount[c.id]} รายการ`}>
+                          ⚠ {problemOrderCount[c.id]}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="p-3 text-xs text-blue-600 whitespace-nowrap">
                     {c.facebook_name && c.facebook_name !== c.name && c.facebook_name !== '-'
