@@ -5,11 +5,11 @@ import {
   PackageCheck, FileText, BarChart2, ShoppingBag, Handshake,
   History, TrendingUp, ArrowDownCircle, Search, Target,
   BookOpen, UserPlus, GraduationCap, PieChart, Building2,
-  MessageSquare, Megaphone, Store,
+  MessageSquare, Megaphone, Store, AlertTriangle,
 } from 'lucide-react';
 
 type PageKey =
-  | 'sales-admin' | 'sales-customers' | 'sales-crm'
+  | 'sales-admin' | 'sales-customers' | 'sales-customers-problem' | 'sales-crm'
   | 'marketing-graphic' | 'marketing-ads'
   | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
   | 'orders' | 'flash-export' | 'myorder-export'
@@ -24,7 +24,13 @@ type SidebarProps = {
   setActivePage: (page: PageKey) => void;
 };
 
-type MenuItem = { key: PageKey; label: string; icon: any; built?: boolean };
+type MenuItem = {
+  key: PageKey;
+  label: string;
+  icon: any;
+  built?: boolean;
+  children?: MenuItem[]; // ← sub-menu (3rd level)
+};
 
 // accent สีต่างกันต่อแผนก
 const GROUPS = [
@@ -32,7 +38,11 @@ const GROUPS = [
     key: 'sales', label: 'ฝ่ายขาย', icon: Store,
     accent: '#0ea5e9', bg: '#f0f9ff', dot: '#0ea5e9',
     menus: [
-      { key: 'sales-customers', label: 'ลูกค้า',    icon: Users,         built: true  },
+      { key: 'sales-customers', label: 'ลูกค้า',    icon: Users,         built: true,
+        children: [
+          { key: 'sales-customers-problem', label: 'เคสมีปัญหา', icon: AlertTriangle, built: true },
+        ],
+      },
       { key: 'sales-admin',     label: 'แอดมิน',    icon: UserCog,       built: true  },
       { key: 'sales-crm',       label: 'CRM',        icon: MessageSquare, built: false },
     ] as MenuItem[],
@@ -97,11 +107,27 @@ const GROUPS = [
 ];
 
 export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
+  // helper: เช็คว่า menu หรือ children มี key ตรงกับ activePage ไหม
+  const isMenuActive = (m: MenuItem): boolean => {
+    if (m.key === activePage) return true;
+    return (m.children || []).some(c => isMenuActive(c));
+  };
+
   const initOpen = () => {
-    const g = GROUPS.find(g => g.menus.some(m => m.key === activePage));
+    const g = GROUPS.find(g => g.menus.some(m => isMenuActive(m)));
     return new Set<string>(g ? [g.key] : []);
   };
   const [openGroups, setOpenGroups] = useState<Set<string>>(initOpen);
+
+  // แยก state สำหรับเมนูย่อย (ระดับ 2 ที่ขยายเป็นระดับ 3)
+  const [openSubmenus, setOpenSubmenus] = useState<Set<string>>(() => {
+    // เปิดเมนูย่อยอัตโนมัติถ้า active อยู่ใน children
+    const open = new Set<string>();
+    GROUPS.forEach(g => g.menus.forEach(m => {
+      if (m.children && m.children.some(c => c.key === activePage)) open.add(m.key);
+    }));
+    return open;
+  });
 
   const toggle = (key: string) => {
     setOpenGroups(prev => {
@@ -111,7 +137,13 @@ export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
     });
   };
 
-  const activeGroup = GROUPS.find(g => g.menus.some(m => m.key === activePage));
+  const toggleSubmenu = (key: string) => {
+    setOpenSubmenus(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
 
   return (
     <aside className="w-[220px] h-screen shrink-0 flex flex-col bg-white border-r border-slate-100"
@@ -134,7 +166,7 @@ export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-3 px-2">
         {GROUPS.map(group => {
-          const isGroupActive = group.menus.some(m => m.key === activePage);
+          const isGroupActive = group.menus.some(m => isMenuActive(m));
           const isOpen = openGroups.has(group.key);
           const Icon = group.icon;
 
@@ -175,31 +207,88 @@ export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
                   {group.menus.map(menu => {
                     const MIcon = menu.icon;
                     const active = activePage === menu.key;
+                    const hasChildren = !!(menu.children && menu.children.length > 0);
+                    const submenuOpen = openSubmenus.has(menu.key);
                     return (
-                      <button
-                        key={menu.key}
-                        onClick={() => setActivePage(menu.key)}
-                        className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[12.5px] transition-all"
-                        style={active
-                          ? {
-                              background: group.accent,
-                              color: '#fff',
-                              boxShadow: `0 2px 8px ${group.accent}40`,
-                            }
-                          : {
-                              color: menu.built ? '#475569' : '#94a3b8',
-                            }
-                        }
-                      >
-                        <MIcon size={13} style={{ opacity: menu.built ? 1 : 0.5 }} />
-                        <span className="flex-1 leading-none">{menu.label}</span>
-                        {!menu.built && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full shrink-0"
-                            style={{ background: '#f1f5f9', color: '#94a3b8' }}>
-                            เร็วๆนี้
-                          </span>
+                      <div key={menu.key}>
+                        <div
+                          className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[12.5px] transition-all"
+                          style={active
+                            ? {
+                                background: group.accent,
+                                color: '#fff',
+                                boxShadow: `0 2px 8px ${group.accent}40`,
+                              }
+                            : {
+                                color: menu.built ? '#475569' : '#94a3b8',
+                              }
+                          }
+                        >
+                          {/* คลิกที่ชื่อเมนู = เข้าหน้านั้น */}
+                          <button
+                            onClick={() => setActivePage(menu.key)}
+                            className="flex-1 flex items-center gap-2 min-w-0"
+                          >
+                            <MIcon size={13} style={{ opacity: menu.built ? 1 : 0.5 }} />
+                            <span className="flex-1 leading-none text-left truncate">{menu.label}</span>
+                          </button>
+                          {!menu.built && !hasChildren && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full shrink-0"
+                              style={{ background: '#f1f5f9', color: '#94a3b8' }}>
+                              เร็วๆนี้
+                            </span>
+                          )}
+                          {/* ปุ่มขยาย/ย่อ children (แยกจาก onClick หลัก) */}
+                          {hasChildren && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleSubmenu(menu.key); }}
+                              className="shrink-0 p-0.5 rounded hover:bg-black/5"
+                              title={submenuOpen ? 'ย่อ' : 'ขยาย'}
+                            >
+                              {submenuOpen
+                                ? <ChevronDown size={11} style={{ color: active ? '#fff' : '#94a3b8' }} />
+                                : <ChevronRight size={11} style={{ color: active ? '#fff' : '#94a3b8' }} />}
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Children (ระดับ 3) */}
+                        {hasChildren && submenuOpen && (
+                          <div className="ml-4 mt-0.5 mb-1 pl-3 space-y-0.5"
+                            style={{ borderLeft: `1.5px solid ${group.accent}20` }}>
+                            {menu.children!.map(child => {
+                              const CIcon = child.icon;
+                              const childActive = activePage === child.key;
+                              return (
+                                <button
+                                  key={child.key}
+                                  onClick={() => setActivePage(child.key)}
+                                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-[12px] transition-all"
+                                  style={childActive
+                                    ? {
+                                        background: group.accent,
+                                        color: '#fff',
+                                        boxShadow: `0 2px 6px ${group.accent}30`,
+                                      }
+                                    : {
+                                        color: child.built ? '#64748b' : '#94a3b8',
+                                      }
+                                  }
+                                >
+                                  <CIcon size={11} style={{ opacity: child.built ? 1 : 0.5 }} />
+                                  <span className="flex-1 leading-none truncate">{child.label}</span>
+                                  {!child.built && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full shrink-0"
+                                      style={{ background: '#f1f5f9', color: '#94a3b8' }}>
+                                      เร็วๆนี้
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
                         )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
