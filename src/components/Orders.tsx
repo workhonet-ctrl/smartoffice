@@ -612,11 +612,22 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
 
   const loadOrders = async () => {
     try {
-      const { data, error } = await supabase
-        .from('orders').select('*, customers(*)')
-        .order('imported_at', { ascending: false, nullsFirst: false });
-      if (error) throw error;
-      if (data) setOrders(data);
+      // Supabase default limit = 1,000 rows — loop จนครบ
+      const PAGE = 1000;
+      const all: Order[] = [];
+      let page = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from('orders').select('*, customers(*)')
+          .order('imported_at', { ascending: false, nullsFirst: false })
+          .range(page * PAGE, (page + 1) * PAGE - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < PAGE) break;
+        page++;
+      }
+      setOrders(all);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
   };
