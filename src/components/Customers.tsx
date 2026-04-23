@@ -287,7 +287,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
       showToast(`✓ นำเข้าสำเร็จ · ออเดอร์ใหม่ ${added} รายการ`);
       setShowFlashImport(false);
-      loadCustomers();
+      // รอ trigger DB อัพเดต order_count/total_spent ก่อน reload
+      setTimeout(() => loadCustomers(), 600);
     } catch (err) {
       console.error(err);
       showToast('เกิดข้อผิดพลาด', 'error');
