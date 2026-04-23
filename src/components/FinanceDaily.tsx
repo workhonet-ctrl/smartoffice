@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { extractQty, parseProduct, fmtTHB, fmtDateLong } from '../lib/utils';
 import { RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 
 const VAT_RATE = 0.05;   // 5%
@@ -23,30 +24,11 @@ type DaySummary = {
   profit: number;
 };
 
-const fmt  = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtD = (d: string) => new Date(d).toLocaleDateString('th-TH', { weekday:'short', day:'numeric', month:'short', year:'2-digit' });
-
-function extractPieces(name: string) {
-  const t = name.match(/(\d+)\s*แถม\s*(\d+)/);
-  if (t) return parseInt(t[1]) + parseInt(t[2]);
-  const u = name.match(/\(?\s*(\d+)\s*(?:กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน)/i);
-  if (u) return parseInt(u[1]);
-  return 1;
-}
-
-// แยกชื่อสินค้าและจำนวนจาก raw_prod
-// "ซุปใสรากบัว(1 กระป๋อง)" → { name: "ซุปใสรากบัว", qty: 1 }
-// "ครีม Secret Rose(2 แถม 2)" → { name: "ครีม Secret Rose", qty: 4 }
-function parseProduct(raw: string): { name: string; qty: number } {
-  const qty = extractPieces(raw);
-  // ตัดส่วนจำนวนออก: วงเล็บ หรือ ตัวเลขท้าย
-  let name = raw
-    .replace(/\(\s*\d+\s*(?:แถม\s*\d+|กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน)[^)]*\)/gi, '')
-    .replace(/\s*\d+\s*(?:แถม\s*\d+)/gi, '')
-    .trim();
-  if (!name) name = raw;
-  return { name, qty };
-}
+// alias ให้โค้ดเดิมใช้ได้โดยไม่ต้องแก้ทุกบรรทัด
+const fmt  = fmtTHB;
+const fmtD = fmtDateLong;
+// extractPieces ใช้ extractQty จาก utils แทน (logic เหมือนกัน)
+const extractPieces = (name: string) => extractQty(name);
 
 export default function FinanceDaily() {
   const today = new Date().toISOString().split('T')[0];
