@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { extractQty } from '../lib/utils';
 import { Package, ClipboardList, FileText, AlertCircle, Printer } from 'lucide-react';
 
 type PackOrder = {
@@ -12,14 +13,6 @@ type PackOrder = {
 type PromoDetail = { id: string; name: string; short_name: string | null; qty: number; box_name: string; box_id: string; bubble_name: string; bubble_id: string; };
 type Override = Record<string, { box_id: string; bubble_id: string }>;
 
-function extractQty(name: string): number {
-  const t = name.match(/(\d+)\s*แถม\s*(\d+)/);
-  if (t) return parseInt(t[1]) + parseInt(t[2]);
-  const u = name.match(/\(?\s*(\d+)\s*(?:กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน)/i);
-  if (u) return parseInt(u[1]);
-  const f = name.match(/(\d+)/);
-  return f ? parseInt(f[1]) : 1;
-}
 
 export default function Packaging({
   orderIds, onCreateRequisition,
