@@ -104,9 +104,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const showToast = (msg: string, type: 'success'|'error'|'warning' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 5000);
   };
+  const PAGE_SIZE = 500;
+  const [pageView, setPageView] = useState<'all' | number>(0);
 
   useEffect(() => { loadCustomers(); }, []);
 
+  // reset กลับหน้าแรกเมื่อ filter หรือ search เปลี่ยน
+  useEffect(() => { if (pageView !== 'all') setPageView(0); }, [search, tagFilter, sortBy]);
   // เมื่อเป็นหน้า "เคสมีปัญหา" → query ออเดอร์สถานะปัญหาแล้วเก็บ customer_ids
   useEffect(() => {
     if (!problemOnly) {
@@ -292,8 +296,21 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
   const loadCustomers = async () => {
     setLoading(true);
-    const { data } = await supabase.from('customers').select('*').order(sortBy, { ascending: false });
-    if (data) setCustomers(data);
+    const PAGE = 1000;
+    const all: Customer[] = [];
+    let page = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('*')
+        .order(sortBy, { ascending: false })
+        .range(page * PAGE, (page + 1) * PAGE - 1);
+      if (error || !data || data.length === 0) break;
+      all.push(...data);
+      if (data.length < PAGE) break;
+      page++;
+    }
+    setCustomers(all);
     setLoading(false);
   };
 
@@ -865,6 +882,12 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       || (c.province || '').includes(search);
     return matchTag && matchSearch;
   });
+  // reset หน้าเมื่อ filter เปลี่ยน
+  // (ใช้ใน useEffect ด้านล่าง)
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const pagedCustomers = pageView === 'all'
+    ? filtered
+    : filtered.slice((pageView as number) * PAGE_SIZE, ((pageView as number) + 1) * PAGE_SIZE);
 
   // สถิติสรุป
   const vipCount    = customers.filter(c => c.tag === 'VIP').length;
@@ -1012,6 +1035,26 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           <option value="updated_at">เรียงตามล่าสุด</option>
         </select>
         <span className="text-xs text-slate-400">{filtered.length} คน</span>
+        {/* Pagination buttons */}
+        <div className="flex items-center gap-1 ml-2">
+          {Array.from({ length: totalPages }, (_, i) => (
+            <button key={i} onClick={() => setPageView(i)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                pageView === i ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}>
+              หน้า {i + 1}
+            </button>
+          ))}
+          <button onClick={() => setPageView('all')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+              pageView === 'all' ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}>
+            ALL
+          </button>
+          <span className="text-xs text-slate-400 ml-1">
+            {pageView === 'all' ? `แสดงทั้งหมด` : `แสดง ${pagedCustomers.length} / ${filtered.length}`}
+          </span>
+        </div>
       </div>
 
       {/* Bulk action bar */}
@@ -1069,7 +1112,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           <tbody>
             {loading && <tr><td colSpan={13} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
             {!loading && filtered.length === 0 && <tr><td colSpan={13} className="p-8 text-center text-slate-400">ไม่พบลูกค้า</td></tr>}
-            {filtered.map(c => (
+            {pagedCustomers.map(c => (
               <>
                 <tr key={c.id} onClick={() => toggleExpand(c.id)}
                   className={`border-b cursor-pointer hover:bg-cyan-50 transition ${expanded===c.id?'bg-cyan-50':''}`}>
