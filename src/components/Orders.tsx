@@ -707,12 +707,16 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
       const rawProds = [...new Set(rows.flatMap(o =>
         String(o.raw_prod).split('|').map((s: string) => s.trim()).filter(Boolean)
       ))];
+      // preload mappings ทีเดียว แทน N queries
+      const { data: existMappings } = await supabase
+        .from('product_mappings')
+        .select('raw_name, promo_id')
+        .in('raw_name', rawProds);
       const autoMap: Record<string, string> = {};
       const matched = new Set<string>();
-      for (const rp of rawProds) {
-        const { data: ex } = await supabase.from('product_mappings').select('promo_id').eq('raw_name', rp).maybeSingle();
-        if (ex?.promo_id) { autoMap[rp] = ex.promo_id; matched.add(rp); }
-      }
+      (existMappings || []).forEach((m: any) => {
+        if (m.promo_id) { autoMap[m.raw_name] = m.promo_id; matched.add(m.raw_name); }
+      });
       setMappings(autoMap); setAutoMatched(matched); setShowMapping(true);
     } catch (err) { console.error(err); showToast('เกิดข้อผิดพลาดในการนำเข้าข้อมูล', 'error'); }
   };
@@ -813,15 +817,25 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [missingCustomers, setMissingCustomers] = useState<{idx: number; name: string; tel: string}[]>([]);
 
   const checkMissingCustomers = async (rows: Array<Record<string, unknown>>) => {
-    const missing: typeof missingCustomers = [];
-    for (let i = 0; i < rows.length; i++) {
-      const tel = String(rows[i].tel || '').trim();
-      if (!tel) continue;
-      const { data } = await supabase.from('customers').select('id').eq('tel', tel).maybeSingle();
-      if (!data?.id) {
-        missing.push({ idx: i, name: String(rows[i].customer_name || ''), tel });
-      }
-    }
+    // รวบรวม tel ทั้งหมดแล้ว query ครั้งเดียว แทน N queries แยก
+    const tels = rows
+      .map(r => String(r.tel || '').trim())
+      .filter(Boolean);
+
+    if (tels.length === 0) { setMissingCustomers([]); return; }
+
+    const { data } = await supabase
+      .from('customers')
+      .select('tel')
+      .in('tel', tels);
+
+    const foundTels = new Set((data || []).map((c: any) => c.tel));
+
+    const missing = rows
+      .map((r, i) => ({ r, i, tel: String(r.tel || '').trim() }))
+      .filter(({ tel }) => tel && !foundTels.has(tel))
+      .map(({ r, i, tel }) => ({ idx: i, name: String(r.customer_name || ''), tel }));
+
     setMissingCustomers(missing);
   };
 
@@ -840,92 +854,134 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const handleVerifyComplete = async () => {
     let ok = 0, skip = 0, fail = 0;
     const errors: string[] = [];
+
+    // ── Step A: กรอง orders ที่จะ skip ออกก่อน ──────────────────────────
+    const ordersToProcess = importedOrders.filter((_, idx) => {
+      const isDupOrder = dupOrders.find(d => d.idx === idx);
+      if (isDupOrder && !isDupOrder.confirmed) { skip++; return false; }
+      return true;
+    });
+
+    if (ordersToProcess.length === 0) {
+      showToast(`นำเข้าไม่สำเร็จ — ออเดอร์ซ้ำ ${skip} รายการ`, 'error');
+      setShowVerify(false); setImportedOrders([]); setMappings({}); setAutoMatched(new Set());
+      return;
+    }
+
+    // ── Step B: Preload customers ทีเดียว (1 query แทน N) ────────────────
+    const allTels = [...new Set(ordersToProcess.map(o => String(o.tel || '').trim()).filter(Boolean))];
+    const { data: custRows } = await supabase
+      .from('customers')
+      .select('id, tel')
+      .in('tel', allTels);
+
+    // map tel → { id }
+    const custMap: Record<string, string> = {};
+    (custRows || []).forEach((c: any) => { if (c.tel) custMap[c.tel] = c.id; });
+
+    // ── Step C: Preload product_mappings ทีเดียว (1 query แทน N) ─────────
+    const allRawProds = [...new Set(
+      ordersToProcess.flatMap(o =>
+        String(o.raw_prod || '').split('|').map((s: string) => s.trim()).filter(Boolean)
+      )
+    )];
+    const { data: mappingRows } = await supabase
+      .from('product_mappings')
+      .select('raw_name, promo_id')
+      .in('raw_name', allRawProds);
+
+    const mappingMap: Record<string, string> = {};
+    (mappingRows || []).forEach((m: any) => { if (m.raw_name) mappingMap[m.raw_name] = m.promo_id; });
+
+    // ── Step D: อัพเดต customers ทีละ batch (parallel) ───────────────────
+    const custUpdates = ordersToProcess
+      .filter(o => custMap[String(o.tel || '').trim()])
+      .map(o => supabase.from('customers').update({
+        name: o.customer_name,
+        facebook_name: (o.facebook_name as string) || undefined,
+        address: o.address, subdistrict: o.subdistrict, district: o.district,
+        province: o.province, postal_code: o.postal_code,
+        channel: (o.channel as string) || undefined,
+      }).eq('id', custMap[String(o.tel || '').trim()]));
+
+    await Promise.all(custUpdates);
+
+    // ── Step E: สร้าง rows ที่จะ insert ──────────────────────────────────
+    const ordersToInsert: any[] = [];
+
+    for (const order of ordersToProcess) {
+      const tel = String(order.tel || '').trim();
+      const customerId = custMap[tel];
+
+      if (!customerId) {
+        errors.push(`ไม่พบลูกค้า "${order.customer_name}" (${tel}) — กรุณานำเข้ารายชื่อที่หน้าลูกค้าก่อน`);
+        skip++;
+        continue;
+      }
+
+      const rawProds = String(order.raw_prod || '').split('|').map((s: string) => s.trim()).filter(Boolean);
+      const promoIds = rawProds.map(rp => mappingMap[rp]).filter(Boolean);
+
+      const hasTrack  = order.tracking_no && String(order.tracking_no).length > 3;
+      const isTourist = TOURIST_ZIPS.has(String(order.postal_code));
+      const isPost    = String(order.courier || '').includes('ไปรษณีย์') || String(order.courier || '').includes('EMS');
+      const route     = hasTrack
+        ? (isPost ? (isTourist ? 'C' : 'A') : 'B')
+        : (isTourist ? 'C' : 'B');
+
+      ordersToInsert.push({
+        order_no:       String(order.order_no),
+        customer_id:    customerId,
+        channel:        order.channel,
+        order_date:     order.order_date,
+        order_time:     order.order_time || null,
+        raw_prod:       order.raw_prod,
+        promo_ids:      promoIds,
+        quantity:       order.quantity,
+        quantities:     String(order.quantities || order.quantity || '1'),
+        weight_kg:      order.weight_kg,
+        tracking_no:    hasTrack ? String(order.tracking_no).trim() : null,
+        courier:        order.courier || null,
+        total_thb:      order.total_thb,
+        payment_method: order.payment_method,
+        payment_status: order.payment_status,
+        order_status:   hasTrack ? 'รอแพ็ค' : 'รอคีย์ออเดอร์',
+        route,
+        imported_at:    importDate,
+      });
+    }
+
+    // ── Step F: Batch insert ทีเดียว (แบ่ง chunk 500 กันเกิน limit) ──────
     const newOrderIds: string[] = [];
+    const CHUNK = 500;
+    for (let i = 0; i < ordersToInsert.length; i += CHUNK) {
+      const chunk = ordersToInsert.slice(i, i + CHUNK);
+      const { data: inserted, error: oe } = await supabase
+        .from('orders')
+        .insert(chunk)
+        .select('id, order_no');
 
-    for (let idx = 0; idx < importedOrders.length; idx++) {
-      const order = importedOrders[idx];
-      try {
-        // ── ประเด็นที่ 1: ถ้าซ้ำ (วันที่+ลูกค้า) และยังไม่ confirm → ข้าม ──
-        const isDupOrder = dupOrders.find(d => d.idx === idx);
-        if (isDupOrder && !isDupOrder.confirmed) { skip++; continue; }
-
-        // หาลูกค้าจากเบอร์โทร — ต้องมีในระบบแล้ว (Step 1)
-        let customerId: string | undefined;
-        const { data: cust } = await supabase
-          .from('customers').select('id').eq('tel', String(order.tel)).maybeSingle();
-
-        if (cust?.id) {
-          // มีลูกค้าอยู่แล้ว — อัพเดตที่อยู่
-          customerId = cust.id;
-          await supabase.from('customers').update({
-            name: order.customer_name,
-            facebook_name: order.facebook_name || undefined,
-            address: order.address,
-            subdistrict: order.subdistrict, district: order.district,
-            province: order.province, postal_code: order.postal_code,
-            channel: order.channel || undefined,
-          }).eq('id', cust.id);
+      if (oe) {
+        if (oe.code === '23505') {
+          // duplicate key — นับว่า skip ทั้ง chunk (conservative)
+          skip += chunk.length;
         } else {
-          // ไม่พบลูกค้า → ข้ามและแจ้งเตือน (ต้องนำเข้าลูกค้าก่อน Step 1)
-          errors.push(`ไม่พบลูกค้า "${order.customer_name}" (${order.tel}) — กรุณานำเข้ารายชื่อที่หน้าลูกค้าก่อน`);
-          skip++;
-          continue;
+          errors.push(`insert chunk ${i / CHUNK + 1}: ${oe.message}`);
+          fail += chunk.length;
         }
-
-        // จับคู่สินค้า
-        const rawProds = String(order.raw_prod).split('|').map((s: string) => s.trim()).filter(Boolean);
-        const promoIds: string[] = [];
-        for (const rp of rawProds) {
-          const { data: mp } = await supabase.from('product_mappings').select('promo_id').eq('raw_name', rp).maybeSingle();
-          if (mp?.promo_id) promoIds.push(mp.promo_id);
-        }
-
-        const hasTrack   = order.tracking_no && String(order.tracking_no).length > 3;
-        const isTourist  = TOURIST_ZIPS.has(String(order.postal_code));
-        const isPost     = (order.courier||'').includes('ไปรษณีย์') || (order.courier||'').includes('EMS');
-        const route = hasTrack
-          ? (isPost ? (isTourist ? 'C' : 'A') : 'B')
-          : (isTourist ? 'C' : 'B');
-        const orderStatus = hasTrack ? 'รอแพ็ค' : 'รอคีย์ออเดอร์';
-
-        const { error: oe } = await supabase.from('orders').insert([{
-          order_no: String(order.order_no), customer_id: customerId, channel: order.channel,
-          order_date: order.order_date, order_time: order.order_time || null,
-          raw_prod: order.raw_prod, promo_ids: promoIds,
-          quantity: order.quantity,
-          quantities: String(order.quantities || order.quantity || '1'),
-          weight_kg: order.weight_kg,
-          tracking_no: hasTrack ? String(order.tracking_no).trim() : null,
-          courier: order.courier || null,
-          total_thb: order.total_thb, payment_method: order.payment_method,
-          payment_status: order.payment_status, order_status: orderStatus, route,
-          imported_at: importDate,
-        }]);
-
-        if (oe) {
-          if (oe.code === '23505') { skip++; }
-          else { errors.push(`order ${order.order_no}: ${oe.message}`); fail++; }
-        } else {
-          ok++;
-          // เก็บ id ออเดอร์ใหม่ (ต้อง query กลับมา)
-          const { data: newO } = await supabase.from('orders').select('id').eq('order_no', String(order.order_no)).maybeSingle();
-          if (newO?.id) newOrderIds.push(newO.id);
-        }
-
-      } catch (err: any) {
-        errors.push(`catch: ${err?.message || err}`);
-        fail++;
+      } else {
+        ok += (inserted || []).length;
+        (inserted || []).forEach((r: any) => { if (r.id) newOrderIds.push(r.id); });
       }
     }
 
     console.log('Import errors:', errors);
     const msg = ok > 0
-      ? `✓ นำเข้าสำเร็จ ${ok} ออเดอร์${skip > 0 ? ` · ข้าม ${skip} ซ้ำ` : ''}${fail > 0 ? ` · ล้มเหลว ${fail}` : ''}`
-      : `นำเข้าไม่สำเร็จ — ออเดอร์ซ้ำ ${skip} รายการ${fail > 0 ? ` · error ${fail}` : ''}`;
+      ? `✓ นำเข้าสำเร็จ ${ok} ออเดอร์${skip > 0 ? ` · ข้าม ${skip}` : ''}${fail > 0 ? ` · ล้มเหลว ${fail}` : ''}`
+      : `นำเข้าไม่สำเร็จ — ข้าม ${skip} รายการ${fail > 0 ? ` · error ${fail}` : ''}`;
     showToast(msg, ok > 0 ? 'success' : skip > 0 ? 'success' : 'error');
     setShowVerify(false); setImportedOrders([]); setMappings({}); setAutoMatched(new Set());
 
-    // ถ้า import สำเร็จ → ไปหน้าแพ็คสินค้าอัตโนมัติ
     if (ok > 0 && onImportDone && newOrderIds.length > 0) {
       setTimeout(() => onImportDone(newOrderIds), 1200);
     } else {
@@ -933,16 +989,20 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     }
   };
 
-  // อัพเดต tracking → อัพเดต order_status อัตโนมัติ
+  // อัพเดต tracking → optimistic update แทน refetch ทั้งตาราง
   const updateTracking = async (orderId: string, tracking: string) => {
     const newStatus = tracking.trim().length > 3 ? 'รอแพ็ค' : 'รอคีย์ออเดอร์';
     await supabase.from('orders').update({ tracking_no: tracking.trim() || null, order_status: newStatus }).eq('id', orderId);
-    loadOrders();
+    setOrders(prev => prev.map(o =>
+      o.id === orderId ? { ...o, tracking_no: tracking.trim() || null, order_status: newStatus } : o
+    ));
   };
 
   const updatePaymentStatus = async (orderId: string, val: string) => {
     await supabase.from('orders').update({ payment_status: val }).eq('id', orderId);
-    loadOrders();
+    setOrders(prev => prev.map(o =>
+      o.id === orderId ? { ...o, payment_status: val } : o
+    ));
   };
 
   const handleDeleteOrder = async (order: Order) => {
