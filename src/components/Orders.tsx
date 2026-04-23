@@ -903,7 +903,20 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     await Promise.all(custUpdates);
 
     // ── Step E: สร้าง rows ที่จะ insert ──────────────────────────────────
+    // preload tracking ที่มีในระบบแล้ว เพื่อ skip ก่อน insert
+    const allIncomingTracks = ordersToProcess
+      .map(o => String(o.tracking_no || '').trim())
+      .filter(t => t.length > 3);
+    const existingTrackSet = new Set<string>();
+    if (allIncomingTracks.length > 0) {
+      const { data: existTracks } = await supabase
+        .from('orders').select('tracking_no').in('tracking_no', allIncomingTracks);
+      (existTracks || []).forEach((r: any) => { if (r.tracking_no) existingTrackSet.add(r.tracking_no.trim()); });
+    }
+
     const ordersToInsert: any[] = [];
+    // track ที่เจอในไฟล์ปัจจุบัน (กัน dup ภายในไฟล์เดียวกัน)
+    const seenTracksInFile = new Set<string>();
 
     for (const order of ordersToProcess) {
       const tel = String(order.tel || '').trim();
@@ -913,6 +926,14 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         errors.push(`ไม่พบลูกค้า "${order.customer_name}" (${tel}) — กรุณานำเข้ารายชื่อที่หน้าลูกค้าก่อน`);
         skip++;
         continue;
+      }
+
+      // ── skip tracking ซ้ำ (ทั้งใน DB และในไฟล์เดียวกัน) ──
+      const track = String(order.tracking_no || '').trim();
+      if (track.length > 3) {
+        if (existingTrackSet.has(track)) { skip++; continue; }
+        if (seenTracksInFile.has(track)) { skip++; continue; }
+        seenTracksInFile.add(track);
       }
 
       const rawProds = String(order.raw_prod || '').split('|').map((s: string) => s.trim()).filter(Boolean);
@@ -1211,16 +1232,51 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             </select>
             {/* ข้อ 3: ปุ่ม scroll ไปยัง tracking ซ้ำ */}
             {dupCount > 0 && (
-              <button
-                onClick={() => {
-                  const firstDup = filtered.find(o => dupTrackingSet.has((o.tracking_no||'').trim()));
-                  if (firstDup && rowRefs.current[firstDup.id]) {
-                    rowRefs.current[firstDup.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  }
-                }}
-                className="px-3 py-1.5 bg-red-500 text-white rounded-lg text-xs font-bold hover:bg-red-600 flex items-center gap-1.5">
-                ⚠ ไปที่ Track ซ้ำ ({dupCount})
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => {
+                    const firstDup = filtered.find(o => dupTrackingSet.has((o.tracking_no||'').trim()));
+                    if (firstDup && rowRefs.current[firstDup.id]) {
+                      rowRefs.current[firstDup.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-red-500 text-white rounded-lg text-xs font-bold hover:bg-red-600 flex items-center gap-1.5">
+                  ⚠ Track ซ้ำ ({dupCount})
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!confirm(`ลบออเดอร์ที่มี Tracking ซ้ำ ${dupCount} รายการ?
+(เก็บรายการแรก ลบรายการที่ซ้ำ)`)) return;
+                    // หา id ที่ซ้ำ — เก็บ id แรกของแต่ละ tracking ไว้ ลบที่เหลือ
+                    const keepIds = new Set<string>();
+                    const deleteIds: string[] = [];
+                    [...orders].reverse().forEach(o => {
+                      const t = (o.tracking_no || '').trim();
+                      if (!t || t.length <= 3) return;
+                      if (dupTrackingSet.has(t)) {
+                        if (!keepIds.has(t)) keepIds.set ? keepIds.add(t) : null;
+                      }
+                    });
+                    // เก็บ id แรกต่อ tracking แล้วลบที่เหลือ
+                    const firstPerTrack: Record<string, string> = {};
+                    orders.forEach(o => {
+                      const t = (o.tracking_no || '').trim();
+                      if (!t || t.length <= 3 || !dupTrackingSet.has(t)) return;
+                      if (!firstPerTrack[t]) firstPerTrack[t] = o.id;
+                      else deleteIds.push(o.id);
+                    });
+                    if (deleteIds.length === 0) return;
+                    const CHUNK = 100;
+                    for (let i = 0; i < deleteIds.length; i += CHUNK) {
+                      await supabase.from('orders').delete().in('id', deleteIds.slice(i, i + CHUNK));
+                    }
+                    showToast(`✓ ลบออเดอร์ Track ซ้ำ ${deleteIds.length} รายการแล้ว`);
+                    loadOrders();
+                  }}
+                  className="px-3 py-1.5 bg-red-700 text-white rounded-lg text-xs font-bold hover:bg-red-800 flex items-center gap-1.5">
+                  🗑 ลบ Track ซ้ำ
+                </button>
+              </div>
             )}
             {/* Clear filters */}
             {(filterRoute || filterStatus || filterPay || dateFrom || dateTo || search) && (
