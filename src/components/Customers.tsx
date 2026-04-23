@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { TOURIST_ZIPS } from '../lib/types';
+import { useShipCostMap } from '../lib/useShipCostMap';
+import { fmtTHB, fmtInt } from '../lib/utils';
 import { Search, Users, TrendingUp, ShoppingBag, ChevronDown, ChevronRight, X, Upload, Trash2, Edit2, Save } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -24,8 +26,9 @@ const TAG_COLORS: Record<string, string> = {
   'ใหม่':   'bg-blue-100 text-blue-700',
 };
 
-const fmt = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 0 });
-const fmt2 = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// ใช้ fmtInt และ fmtTHB จาก utils.ts แทน (alias ให้โค้ดเดิมทำงานได้เลย)
+const fmt  = fmtInt;
+const fmt2 = fmtTHB;
 
 export default function Customers({ onGoToProducts, problemOnly = false }: { onGoToProducts?: () => void; problemOnly?: boolean } = {}) {
   const [customers, setCustomers]   = useState<Customer[]>([]);
@@ -39,7 +42,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const [loading, setLoading]       = useState(true);
   const [expanded, setExpanded]     = useState<string | null>(null);
   const [custOrders, setCustOrders] = useState<Order[]>([]);
-  const [shipCostMap, setShipCostMap] = useState<Record<string, number>>({});
+  const { shipCostMap } = useShipCostMap();
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [editTag, setEditTag]       = useState<{id: string; tag: string} | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -102,7 +105,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     setToast({ msg, type }); setTimeout(() => setToast(null), 5000);
   };
 
-  useEffect(() => { loadCustomers(); loadShipCosts(); }, []);
+  useEffect(() => { loadCustomers(); }, []);
 
   // เมื่อเป็นหน้า "เคสมีปัญหา" → query ออเดอร์สถานะปัญหาแล้วเก็บ customer_ids
   useEffect(() => {
@@ -147,18 +150,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       document.removeEventListener('scroll', close, true);
     };
   }, [flashOpenPromo]);
-
-  const loadShipCosts = async () => {
-    const [{ data: flash }, { data: myorder }] = await Promise.all([
-      supabase.from('shipping_flash').select('tracking, total_thb'),
-      supabase.from('shipping_myorder').select('tracking, total_thb'),
-    ]);
-    const map: Record<string, number> = {};
-    [...(flash || []), ...(myorder || [])].forEach((r: any) => {
-      if (r.tracking) map[r.tracking] = Number(r.total_thb || 0);
-    });
-    setShipCostMap(map);
-  };
 
   // ── Flash Import ──────────────────────────────────────────
   const handleFlashFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
