@@ -532,6 +532,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [filterRoute,  setFilterRoute]  = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPay,    setFilterPay]    = useState('');
+  const ORDER_PAGE_SIZE = 500;
+  const [orderPage, setOrderPage] = useState<'all' | number>(0);
   const [importedOrders, setImportedOrders] = useState<Array<Record<string, unknown>>>([]);
   const [showMapping, setShowMapping] = useState(false);
   const [showVerify, setShowVerify] = useState(false);
@@ -560,6 +562,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [checkingDups, setCheckingDups] = useState(false);
 
   useEffect(() => { loadOrders(); loadPromoOptions(); }, []);
+  useEffect(() => { if (orderPage !== 'all') setOrderPage(0); }, [search, dateFrom, dateTo, filterRoute, filterStatus, filterPay]);
 
   // refresh เมื่อ switch กลับมาแท็บ orders
   useEffect(() => {
@@ -1052,6 +1055,10 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
 
   // unique values สำหรับ dropdown filter
   const allStatuses = [...new Set(orders.map(o => o.order_status).filter(Boolean))].sort();
+  const orderTotalPages = Math.ceil(filtered.length / ORDER_PAGE_SIZE);
+  const pagedOrders = orderPage === 'all'
+    ? filtered
+    : filtered.slice((orderPage as number) * ORDER_PAGE_SIZE, ((orderPage as number) + 1) * ORDER_PAGE_SIZE);
   const dupCount = dupTrackingSet.size > 0
     ? orders.filter(o => dupTrackingSet.has((o.tracking_no||'').trim())).length
     : 0;
@@ -1072,11 +1079,29 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               )}
             </div>
             <p className="text-sm text-slate-500 mt-0.5">
-              แสดง {filtered.length} / {orders.length} รายการ
+              แสดง {orderPage === 'all' ? filtered.length : pagedOrders.length} / {orders.length} รายการ
               {dupCount > 0 && (
                 <span className="ml-2 text-red-600 font-bold">· ⚠ Track ซ้ำ {dupCount} รายการ</span>
               )}
             </p>
+            {filtered.length > 0 && (
+              <div className="flex items-center gap-1 mt-1 flex-wrap">
+                {Array.from({ length: orderTotalPages }, (_, i) => (
+                  <button key={i} onClick={() => setOrderPage(i)}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                      orderPage === i ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}>
+                    หน้า {i + 1}
+                  </button>
+                ))}
+                <button onClick={() => setOrderPage('all')}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                    orderPage === 'all' ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}>
+                  ALL
+                </button>
+              </div>
+            )}
           </div>
           {/* Tab + Upload */}
           <div className="flex items-center gap-2">
@@ -1271,7 +1296,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             {filtered.length === 0 && orders.length > 0 && (
               <tr><td colSpan={14} className="p-8 text-center text-slate-400">ไม่พบออเดอร์ที่ตรงกับตัวกรอง</td></tr>
             )}
-              {filtered.map(o => {
+              {pagedOrders.map(o => {
                 const carrier    = getCarrierLabel(o.route);
                 const status     = getAutoStatus(o);
                 const trackVal   = (o.tracking_no || '').trim();
