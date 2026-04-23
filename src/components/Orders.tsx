@@ -999,9 +999,21 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     showToast(msg, ok > 0 ? 'success' : skip > 0 ? 'success' : 'error');
     setShowVerify(false); setImportedOrders([]); setMappings({}); setAutoMatched(new Set());
 
+    if (ok > 0) {
+      // recalculate customer stats สำหรับทุก customer ที่เกี่ยวข้อง
+      // (trigger DB จะจัดการให้อัตโนมัติ — แค่ reload หลัง delay เล็กน้อย)
+      const affectedCustomerIds = [...new Set(
+        ordersToInsert.map((o: any) => o.customer_id).filter(Boolean)
+      )];
+      if (affectedCustomerIds.length > 0) {
+        // trigger ทำงาน async — รอ 500ms แล้ว reload orders เพื่อให้ยอดถูกต้อง
+        setTimeout(() => loadOrders(), 500);
+      }
+    }
+
     if (ok > 0 && onImportDone && newOrderIds.length > 0) {
       setTimeout(() => onImportDone(newOrderIds), 1200);
-    } else {
+    } else if (ok === 0) {
       loadOrders();
     }
   };
@@ -1028,7 +1040,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     const { error } = await supabase.from('orders').delete().eq('id', order.id);
     if (error) { showToast('ลบไม่สำเร็จ: ' + error.message, 'error'); return; }
     showToast(`✓ ลบออเดอร์ ${order.order_no} แล้ว`);
-    loadOrders();
+    // trigger DB จะอัพเดต customer stats อัตโนมัติ
+    setOrders(prev => prev.filter(o => o.id !== order.id));
   };
 
   const uniqueRawProds = [...new Set(importedOrders.flatMap(o =>
