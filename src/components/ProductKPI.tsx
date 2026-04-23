@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
+import { extractQty } from '../lib/utils';
 import { RefreshCw, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -24,14 +25,6 @@ type PromoKPI = {
 const fmt  = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtP = (n: number) => n.toFixed(1) + '%';
 
-function extractQty(name: string): number {
-  const t = name.match(/(\d+)\s*แถม\s*(\d+)/);
-  if (t) return parseInt(t[1]) + parseInt(t[2]);
-  const u = name.match(/\(?\s*(\d+)\s*(?:กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน)/i);
-  if (u) return parseInt(u[1]);
-  const f = name.match(/(\d+)/);
-  return f ? parseInt(f[1]) : 1;
-}
 
 // ── Component ─────────────────────────────────────────────────
 
