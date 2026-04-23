@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { extractQty } from '../lib/utils';
 import { Order } from '../lib/types';
 import { Download, Eye, X, Trash2, Edit2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -14,14 +15,6 @@ type PreviewRow = {
 type OrderItem = { rawProd: string; qty: number; selected: boolean; };
 type OrderSelections = Record<string, OrderItem[]>; // orderId → items
 
-function extractQty(promoName: string): number {
-  const t = promoName.match(/(\d+)\s*แถม\s*(\d+)/);
-  if (t) return parseInt(t[1]) + parseInt(t[2]);
-  const u = promoName.match(/\(?\s*(\d+)\s*(?:กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน)/i);
-  if (u) return parseInt(u[1]);
-  const f = promoName.match(/(\d+)/);
-  return f ? parseInt(f[1]) : 1;
-}
 
 // สร้าง default items จาก order
 function makeItems(order: Order): OrderItem[] {
