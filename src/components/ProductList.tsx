@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
+import { extractQty } from '../lib/utils';
 import { Search, RefreshCw, ChevronDown, ChevronRight, AlertCircle } from 'lucide-react';
 
 type PromoRow = {
@@ -25,15 +26,6 @@ type MasterRow = {
 };
 
 // Extract จำนวนจากชื่อ Promo (เหมือน FlashExport)
-function extractQty(promoName: string): number {
-  const tamMatch = promoName.match(/(\d+)\s*แถม\s*(\d+)/);
-  if (tamMatch) return parseInt(tamMatch[1]) + parseInt(tamMatch[2]);
-  const unitMatch = promoName.match(/\(?\s*(\d+)\s*(?:กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน)/i);
-  if (unitMatch) return parseInt(unitMatch[1]);
-  const firstNum = promoName.match(/(\d+)/);
-  if (firstNum) return parseInt(firstNum[1]);
-  return 1;
-}
 
 export default function ProductList() {
   const [masters, setMasters] = useState<MasterRow[]>([]);
