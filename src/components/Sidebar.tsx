@@ -10,7 +10,7 @@ import {
 
 type PageKey =
   | 'sales-admin' | 'sales-customers' | 'sales-customers-problem' | 'sales-crm'
-  | 'marketing-graphic' | 'marketing-ads'
+  | 'marketing-graphic' | 'marketing-ads' | 'marketing-ads-assign'
   | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
   | 'orders' | 'flash-export' | 'myorder-export'
   | 'pack-products' | 'requisition' | 'pack-history'
@@ -54,7 +54,11 @@ const GROUPS = [
     accent: '#ec4899', bg: '#fdf2f8', dot: '#ec4899',
     menus: [
       { key: 'marketing-graphic', label: 'กราฟฟิก',   icon: Target,    built: true },
-      { key: 'marketing-ads',     label: 'โฆษณา ADS', icon: TrendingUp, built: true },
+      { key: 'marketing-ads', label: 'โฆษณา ADS', icon: TrendingUp, built: true,
+        children: [
+          { key: 'marketing-ads-assign', label: 'ความรับผิดชอบ', icon: Users, built: true },
+        ],
+      },
     ] as MenuItem[],
   },
   {
