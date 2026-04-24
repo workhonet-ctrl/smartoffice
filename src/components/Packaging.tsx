@@ -11,7 +11,7 @@ type PackOrder = {
   promos: PromoDetail[];
 };
 type PromoDetail = { id: string; name: string; short_name: string | null; qty: number; box_name: string; box_id: string; bubble_name: string; bubble_id: string; };
-type Override = Record<string, { box_id: string; bubble_id: string }>;
+type Override = Record<string, { box_id: string; bubble_id: string; box_search?: string; bubble_search?: string }>;
 
 
 export default function Packaging({
@@ -28,6 +28,11 @@ export default function Packaging({
   const [boxes, setBoxes]       = useState<{ id: string; name: string }[]>([]);
   const [bubbles, setBubbles]   = useState<{ id: string; name: string; length_cm: number }[]>([]);
   const [responsible, setResponsible] = useState('');
+  const [selectedMulti, setSelectedMulti] = useState<Set<string>>(new Set()); // bulk assign
+  const [bulkBoxId,     setBulkBoxId]     = useState('');
+  const [bulkBubbleId,  setBulkBubbleId]  = useState('');
+  const [boxSearch,     setBoxSearch]     = useState('');
+  const [bubbleSearch,  setBubbleSearch]  = useState('');
   const [saving, setSaving]     = useState(false);
   const [packDate]              = useState(new Date().toLocaleDateString('th-TH', { day:'2-digit', month:'2-digit', year:'numeric' }));
   const incompleteRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
@@ -409,7 +414,69 @@ export default function Packaging({
         <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
           <table className="text-sm w-full" style={{minWidth:'1000px'}}>
             <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+              {/* Bulk assign bar */}
+              {selectedMulti.size > 0 && (
+                <tr className="bg-cyan-900">
+                  <td colSpan={9} className="px-4 py-2">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="text-xs text-cyan-200 font-medium">เลือก {selectedMulti.size} รายการ</span>
+                      {/* Searchable box */}
+                      <div className="flex flex-col gap-0.5">
+                        <input list="bulk-boxes" value={bulkBoxId ? (boxes.find(b=>b.id===bulkBoxId)?.name||bulkBoxId) : boxSearch}
+                          onChange={e => {
+                            setBoxSearch(e.target.value);
+                            const found = boxes.find(b => b.name === e.target.value);
+                            setBulkBoxId(found ? found.id : '');
+                          }}
+                          placeholder="พิมพ์เพื่อค้นหากล่อง..."
+                          className="border rounded px-2 py-1.5 text-xs w-44 focus:outline-none focus:ring-1 focus:ring-cyan-300 bg-white text-slate-800"/>
+                        <datalist id="bulk-boxes">
+                          {boxes.map(b => <option key={b.id} value={b.name}/>)}
+                        </datalist>
+                      </div>
+                      {/* Searchable bubble */}
+                      <div className="flex flex-col gap-0.5">
+                        <input list="bulk-bubbles" value={bulkBubbleId ? (bubbles.find(b=>b.id===bulkBubbleId) ? `ยาว ${bubbles.find(b=>b.id===bulkBubbleId)!.length_cm} cm` : bubbleSearch) : bubbleSearch}
+                          onChange={e => {
+                            setBubbleSearch(e.target.value);
+                            const found = bubbles.find(b => `ยาว ${b.length_cm} cm` === e.target.value);
+                            setBulkBubbleId(found ? found.id : '');
+                          }}
+                          placeholder="พิมพ์เพื่อค้นหาบั้บเบิ้ล..."
+                          className="border rounded px-2 py-1.5 text-xs w-44 focus:outline-none focus:ring-1 focus:ring-cyan-300 bg-white text-slate-800"/>
+                        <datalist id="bulk-bubbles">
+                          {bubbles.map(b => <option key={b.id} value={`ยาว ${b.length_cm} cm`}/>)}
+                        </datalist>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (!bulkBoxId) { alert('กรุณาเลือกกล่องก่อน'); return; }
+                          setOverride(prev => {
+                            const next = { ...prev };
+                            selectedMulti.forEach(id => {
+                              next[id] = { ...next[id], box_id: bulkBoxId, ...(bulkBubbleId ? { bubble_id: bulkBubbleId } : {}) };
+                            });
+                            return next;
+                          });
+                          setSelectedMulti(new Set());
+                          setBulkBoxId(''); setBulkBubbleId(''); setBoxSearch(''); setBubbleSearch('');
+                        }}
+                        className="px-3 py-1.5 bg-cyan-400 text-slate-900 rounded-lg text-xs font-bold hover:bg-cyan-300 transition">
+                        ✓ ใส่ให้ทั้งหมด
+                      </button>
+                      <button onClick={() => setSelectedMulti(new Set())}
+                        className="text-xs text-cyan-300 hover:text-white ml-auto">ยกเลิก</button>
+                    </div>
+                  </td>
+                </tr>
+              )}
               <tr>
+                <th className="p-3 text-center w-8 whitespace-nowrap">
+                  <input type="checkbox"
+                    checked={multiOrders.length > 0 && multiOrders.every(o => selectedMulti.has(o.id))}
+                    onChange={e => setSelectedMulti(e.target.checked ? new Set(multiOrders.map(o => o.id)) : new Set())}
+                    className="rounded cursor-pointer"/>
+                </th>
                 <th className="p-3 text-center w-10 whitespace-nowrap">#</th>
                 <th className="p-3 text-left whitespace-nowrap">วันที่แพ็ค</th>
                 <th className="p-3 text-left whitespace-nowrap">รายชื่อ</th>
@@ -429,7 +496,18 @@ export default function Packaging({
                 return (
                   <tr key={o.id}
                     ref={el => { if (missingBox) incompleteRefs.current[o.id] = el; }}
-                    className={`border-b align-top hover:bg-cyan-50 ${missingBox ? 'bg-orange-50' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                    className={`border-b align-top hover:bg-cyan-50 ${selectedMulti.has(o.id) ? 'bg-cyan-50' : missingBox ? 'bg-orange-50' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                    <td className="p-3 text-center whitespace-nowrap">
+                      {multi && (
+                        <input type="checkbox" checked={selectedMulti.has(o.id)}
+                          onChange={e => setSelectedMulti(prev => {
+                            const next = new Set(prev);
+                            e.target.checked ? next.add(o.id) : next.delete(o.id);
+                            return next;
+                          })}
+                          className="rounded cursor-pointer"/>
+                      )}
+                    </td>
                     <td className="p-3 text-center font-bold text-slate-500 whitespace-nowrap">{idx + 1}</td>
                     <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{packDate}{o.order_time && <div className="text-slate-400">{o.order_time}</div>}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{o.customers?.name || '-'}</td>
@@ -461,24 +539,36 @@ export default function Packaging({
                     </td>
                     <td className="p-3 whitespace-nowrap">
                       {multi ? (
-                        <select value={override[o.id]?.box_id || ''}
-                          onChange={e => setOverride(p => ({ ...p, [o.id]: { ...p[o.id], box_id: e.target.value } }))}
-                          className={`border rounded px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-1 focus:ring-cyan-300 ${!override[o.id]?.box_id ? 'border-orange-400 bg-orange-50' : ''}`}>
-                          <option value="">เลือกกล่อง... *</option>
-                          {boxes.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                        </select>
+                        <input
+                          list={`boxes-${o.id}`}
+                          value={override[o.id]?.box_id ? (boxes.find(b => b.id === override[o.id].box_id)?.name || '') : (override[o.id]?.box_search || '')}
+                          onChange={e => {
+                            const found = boxes.find(b => b.name === e.target.value);
+                            setOverride(p => ({ ...p, [o.id]: { ...p[o.id], box_id: found?.id || '', box_search: e.target.value } }));
+                          }}
+                          placeholder="พิมพ์ค้นหากล่อง... *"
+                          className={`border rounded px-2 py-1.5 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-cyan-300 ${!override[o.id]?.box_id ? 'border-orange-400 bg-orange-50' : 'border-green-400 bg-green-50'}`}/>
+                        <datalist id={`boxes-${o.id}`}>
+                          {boxes.map(b => <option key={b.id} value={b.name}/>)}
+                        </datalist>
                       ) : (
                         <span className="text-sm text-slate-700">{o.promos[0]?.box_name || '-'}</span>
                       )}
                     </td>
                     <td className="p-3 whitespace-nowrap">
                       {multi ? (
-                        <select value={override[o.id]?.bubble_id || ''}
-                          onChange={e => setOverride(p => ({ ...p, [o.id]: { ...p[o.id], bubble_id: e.target.value } }))}
-                          className="border rounded px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-1 focus:ring-cyan-300">
-                          <option value="">เลือกบั้บเบิ้ล...</option>
-                          {bubbles.map(b => <option key={b.id} value={b.id}>ยาว {Number(b.length_cm)} cm</option>)}
-                        </select>
+                        <input
+                          list={`bubbles-${o.id}`}
+                          value={override[o.id]?.bubble_id ? (bubbles.find(b => b.id === override[o.id].bubble_id) ? `ยาว ${bubbles.find(b => b.id === override[o.id].bubble_id)!.length_cm} cm` : '') : (override[o.id]?.bubble_search || '')}
+                          onChange={e => {
+                            const found = bubbles.find(b => `ยาว ${b.length_cm} cm` === e.target.value);
+                            setOverride(p => ({ ...p, [o.id]: { ...p[o.id], bubble_id: found?.id || '', bubble_search: e.target.value } }));
+                          }}
+                          placeholder="พิมพ์ค้นหาบั้บเบิ้ล..."
+                          className="border rounded px-2 py-1.5 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-cyan-300"/>
+                        <datalist id={`bubbles-${o.id}`}>
+                          {bubbles.map(b => <option key={b.id} value={`ยาว ${b.length_cm} cm`}/>)}
+                        </datalist>
                       ) : (
                         <span className="text-sm text-slate-700">{o.promos[0]?.bubble_name || '-'}</span>
                       )}
