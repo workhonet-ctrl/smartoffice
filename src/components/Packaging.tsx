@@ -266,7 +266,7 @@ export default function Packaging({
         <tr>
           <td class="num">${i + 1}</td>
           <td style="font-weight:500">${r.product}</td>
-          <td>${r.promo ? \`<span class="promo-tag">${r.promo}</span>\` : '<span style="color:#94a3b8">-</span>'}</td>
+          <td>${r.promo ? '<span class="promo-tag">' + r.promo + '</span>' : '<span style="color:#94a3b8">-</span>'}</td>
           <td class="count">${r.count}</td>
           <td style="text-align:center">${r.box}</td>
           <td style="text-align:center;color:#0369a1">${r.bubble}</td>
