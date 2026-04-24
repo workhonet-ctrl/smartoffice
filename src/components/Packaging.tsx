@@ -332,16 +332,16 @@ export default function Packaging({
         // ✅ อัพเดต order_status รอแพ็ค → กำลังแพ็ค + ship_date วันนี้ (ถ้ายังไม่มี)
         const packOrderIds = orders.map(o => o.id);
         const todayDate = new Date().toISOString().split('T')[0];
+        // ✅ รอ update orders ให้เสร็จก่อน แล้วค่อย navigate ไปหน้าใบเบิก
         await Promise.all([
-          // orders ที่ยังไม่มี ship_date → ใส่วันนี้
           supabase.from('orders')
             .update({ order_status: 'กำลังแพ็ค', ship_date: todayDate })
             .in('id', packOrderIds).is('ship_date', null),
-          // orders ที่มี ship_date แล้ว → คงไว้ เปลี่ยนแค่ status
           supabase.from('orders')
             .update({ order_status: 'กำลังแพ็ค' })
             .in('id', packOrderIds).not('ship_date', 'is', null),
         ]);
+        // navigate หลัง DB update เสร็จแน่นอน
         onCreateRequisition(ph?.id || '');
       }
     } catch (err) {
