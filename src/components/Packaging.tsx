@@ -540,15 +540,15 @@ export default function Packaging({
                     <td className="p-3 whitespace-nowrap">
                       {multi ? (
                         <input
-                          list={`boxes-${o.id}`}
+                          list={'boxes-' + o.id}
                           value={override[o.id]?.box_id ? (boxes.find(b => b.id === override[o.id].box_id)?.name || '') : (override[o.id]?.box_search || '')}
                           onChange={e => {
                             const found = boxes.find(b => b.name === e.target.value);
                             setOverride(p => ({ ...p, [o.id]: { ...p[o.id], box_id: found?.id || '', box_search: e.target.value } }));
                           }}
                           placeholder="พิมพ์ค้นหากล่อง... *"
-                          className={`border rounded px-2 py-1.5 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-cyan-300 ${!override[o.id]?.box_id ? 'border-orange-400 bg-orange-50' : 'border-green-400 bg-green-50'}`}/>
-                        <datalist id={`boxes-${o.id}`}>
+                          className={['border rounded px-2 py-1.5 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-cyan-300', !override[o.id]?.box_id ? 'border-orange-400 bg-orange-50' : 'border-green-400 bg-green-50'].join(' ')}/>
+                        <datalist id={'boxes-' + o.id}>
                           {boxes.map(b => <option key={b.id} value={b.name}/>)}
                         </datalist>
                       ) : (
@@ -558,15 +558,20 @@ export default function Packaging({
                     <td className="p-3 whitespace-nowrap">
                       {multi ? (
                         <input
-                          list={`bubbles-${o.id}`}
-                          value={override[o.id]?.bubble_id ? (bubbles.find(b => b.id === override[o.id].bubble_id) ? `ยาว ${bubbles.find(b => b.id === override[o.id].bubble_id)!.length_cm} cm` : '') : (override[o.id]?.bubble_search || '')}
+                          list={'bubbles-' + o.id}
+                          value={(() => {
+                            const bid = override[o.id]?.bubble_id;
+                            if (!bid) return override[o.id]?.bubble_search || '';
+                            const bub = bubbles.find(b => b.id === bid);
+                            return bub ? `ยาว ${bub.length_cm} cm` : '';
+                          })()}
                           onChange={e => {
                             const found = bubbles.find(b => `ยาว ${b.length_cm} cm` === e.target.value);
                             setOverride(p => ({ ...p, [o.id]: { ...p[o.id], bubble_id: found?.id || '', bubble_search: e.target.value } }));
                           }}
                           placeholder="พิมพ์ค้นหาบั้บเบิ้ล..."
                           className="border rounded px-2 py-1.5 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-cyan-300"/>
-                        <datalist id={`bubbles-${o.id}`}>
+                        <datalist id={'bubbles-' + o.id}>
                           {bubbles.map(b => <option key={b.id} value={`ยาว ${b.length_cm} cm`}/>)}
                         </datalist>
                       ) : (
