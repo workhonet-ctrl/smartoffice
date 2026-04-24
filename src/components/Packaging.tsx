@@ -202,36 +202,39 @@ export default function Packaging({
         status: 'printed',
       }]);
     } catch (err) { console.error('print history error:', err); }
-    const rows = [
-      ...summaryGroups.grouped.map(g => {
-        // short_name = ชื่อสินค้า ("ซุปใสพุทรา")
-        // promo_name = จำนวน/โปรโมชั่น ("2 กระป๋อง")
-        const bubble = g.bubble_name && !g.bubble_name.includes('0 cm')
-          ? g.bubble_name
-          : '-';
-        return {
-          product: g.short_name || g.promo_name,  // ชื่อสินค้า
-          promo: g.promo_name || '',               // จำนวน/โปรโมชั่น
-          count: g.count,
-          box: g.box_name,
-          bubble,
-          note: '',
-        };
-      }),
-      ...summaryGroups.multiOrders.map(o => ({
-        product: o.promos.map(p => p.name).join(' + '),
-        promo: o.promos.map(p => `${p.short_name||p.name} ×${p.qty}`).join(', '),
-        count: 1,
-        box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '-',
-        bubble: (() => {
-          const bub = override[o.id]?.bubble_id
-            ? bubbles.find(b => b.id === override[o.id].bubble_id)
-            : null;
-          return bub ? `ยาว ${bub.length_cm} cm` : '-';
-        })(),
-        note: 'แพ็คพิเศษ',
-      })),
-    ];
+    // ── สร้าง rows จากข้อมูลแท็บจัดเตรียมสินค้า ──────────────────────────────
+    // Part A: สินค้าเดี่ยว (grouped แล้ว เหมือนเดิม)
+    const singleRows = summaryGroups.grouped.map(g => {
+      const bubble = g.bubble_name && !g.bubble_name.includes('0 cm') ? g.bubble_name : '-';
+      return {
+        product: g.short_name || g.promo_name,
+        promo:   g.promo_name || '',
+        count:   g.count,
+        box:     g.box_name || '-',
+        bubble,
+        note: '',
+      };
+    });
+
+    // Part B: แพ็คพิเศษ — group orders ที่ product+promo+box+bubble เหมือนกันรวมกัน
+    const multiGroupMap: Record<string, { product: string; promo: string; box: string; bubble: string; count: number }> = {};
+    for (const o of summaryGroups.multiOrders) {
+      const product = o.promos.map((p: any) => p.short_name || p.name).join(' + ');
+      const promo   = o.promos.map((p: any) => (p.short_name || p.name) + ' ×' + p.qty).join(', ');
+      const boxName = boxes.find(b => b.id === override[o.id]?.box_id)?.name || '-';
+      const bubObj  = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
+      const bubble  = bubObj ? 'ยาว ' + bubObj.length_cm + ' cm' : '-';
+      // key รวมทุก field — ถ้าเหมือนกันทั้งหมดให้นับรวม
+      const key = [product, promo, boxName, bubble].join('||');
+      if (multiGroupMap[key]) {
+        multiGroupMap[key].count += 1;
+      } else {
+        multiGroupMap[key] = { product, promo, box: boxName, bubble, count: 1 };
+      }
+    }
+    const multiRows = Object.values(multiGroupMap).map(r => ({ ...r, note: 'แพ็คพิเศษ' }));
+
+    const rows = [...singleRows, ...multiRows];
 
     const html = `<!DOCTYPE html>
 <html>
