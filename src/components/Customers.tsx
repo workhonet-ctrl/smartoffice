@@ -110,7 +110,22 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   useEffect(() => { loadCustomers(); }, []);
 
   // reset กลับหน้าแรกเมื่อ filter หรือ search เปลี่ยน
-  useEffect(() => { if (pageView !== 'all') setPageView(0); }, [search, tagFilter, sortBy]);
+  useEffect(() => { if (pageView !== 'all') setPageView(0); }, [search, tagFilter, sortBy, filterMinOrders, filterChannel, searchProduct]);
+
+  // ── ค้นหาสินค้า: query orders แล้ว collect customer_id ──
+  useEffect(() => {
+    if (!searchProduct.trim()) { setProductMatchIds(null); return; }
+    const q = searchProduct.trim().toLowerCase();
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('orders')
+        .select('customer_id, raw_prod')
+        .ilike('raw_prod', `%${q}%`);
+      const ids = new Set((data || []).map((o: any) => o.customer_id).filter(Boolean));
+      setProductMatchIds(ids);
+    }, 400); // debounce 400ms
+    return () => clearTimeout(timer);
+  }, [searchProduct]);
   // เมื่อเป็นหน้า "เคสมีปัญหา" → query ออเดอร์สถานะปัญหาแล้วเก็บ customer_ids
   useEffect(() => {
     if (!problemOnly) {
@@ -879,16 +894,22 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const filtered = customers.filter(c => {
     // ถ้าเป็นโหมด problemOnly → แสดงเฉพาะลูกค้าที่มีออเดอร์สถานะปัญหา
     if (problemOnly) {
-      if (problemCustomerIds === null) return false; // ยังโหลดไม่เสร็จ
+      if (problemCustomerIds === null) return false;
       if (!problemCustomerIds.has(c.id)) return false;
     }
-    const matchTag = tagFilter === 'ทั้งหมด' || c.tag === tagFilter;
-    const matchSearch = !search || c.name.toLowerCase().includes(search.toLowerCase())
+    const matchTag     = tagFilter === 'ทั้งหมด' || c.tag === tagFilter;
+    const matchOrders  = filterMinOrders === 0 || c.order_count >= filterMinOrders;
+    const matchChannel = !filterChannel || c.channel === filterChannel;
+    const matchProduct = productMatchIds === null || productMatchIds.has(c.id);
+    const matchSearch  = !search || c.name.toLowerCase().includes(search.toLowerCase())
       || (c.facebook_name || '').toLowerCase().includes(search.toLowerCase())
       || c.tel.includes(search)
       || (c.province || '').includes(search);
-    return matchTag && matchSearch;
+    return matchTag && matchOrders && matchChannel && matchProduct && matchSearch;
   });
+
+  // unique channels สำหรับ dropdown
+  const channelOptions = [...new Set(customers.map(c => c.channel).filter(Boolean))].sort() as string[];
   // reset หน้าเมื่อ filter เปลี่ยน
   // (ใช้ใน useEffect ด้านล่าง)
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
@@ -1021,26 +1042,59 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         )}
       </div>
 
-      {/* Filter bar */}
-      <div className="shrink-0 flex gap-2 mb-3 flex-wrap items-center">
+      {/* Filter bar — row 1 */}
+      <div className="shrink-0 flex gap-2 mb-2 flex-wrap items-center">
+        {/* ค้นหาหลัก */}
         <div className="relative flex-1 min-w-[200px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="ค้นหาชื่อ, เฟสบุ๊ก, เบอร์, จังหวัด..."
             className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
         </div>
+        {/* ค้นหาสินค้า */}
+        <div className="relative min-w-[180px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+          <input value={searchProduct} onChange={e => setSearchProduct(e.target.value)}
+            placeholder="ค้นหาสินค้า..."
+            className={`w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 ${searchProduct ? 'border-purple-400 bg-purple-50' : ''}`}/>
+          {searchProduct && (
+            <button onClick={() => setSearchProduct('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs">✕</button>
+          )}
+        </div>
+        {/* Tag filter */}
         <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
           {['ทั้งหมด','VIP','ประจำ','ใหม่'].map(t => (
             <button key={t} onClick={() => setTagFilter(t)}
               className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${tagFilter===t?'bg-white shadow text-slate-800':'text-slate-500'}`}>{t}</button>
           ))}
         </div>
+        {/* ช่องทาง */}
+        <select value={filterChannel} onChange={e => setFilterChannel(e.target.value)}
+          className={`border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 ${filterChannel ? 'border-cyan-400 bg-cyan-50 font-medium' : ''}`}>
+          <option value="">ทุกช่องทาง</option>
+          {channelOptions.map(ch => <option key={ch} value={ch}>{ch}</option>)}
+        </select>
+        {/* จำนวนออเดอร์ขั้นต่ำ */}
+        <select value={filterMinOrders} onChange={e => setFilterMinOrders(Number(e.target.value))}
+          className={`border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 ${filterMinOrders > 0 ? 'border-emerald-400 bg-emerald-50 font-medium' : ''}`}>
+          <option value={0}>ทุกจำนวนออเดอร์</option>
+          {[1,2,3,5,10].map(n => <option key={n} value={n}>สั่ง {n} ครั้งขึ้นไป</option>)}
+        </select>
+        {/* Sort */}
         <select value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)}
           className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300">
           <option value="total_spent">เรียงตามยอดซื้อ</option>
           <option value="order_count">เรียงตามจำนวนครั้ง</option>
           <option value="updated_at">เรียงตามล่าสุด</option>
         </select>
+        {/* ล้าง filter */}
+        {(filterMinOrders > 0 || filterChannel || searchProduct) && (
+          <button onClick={() => { setFilterMinOrders(0); setFilterChannel(''); setSearchProduct(''); }}
+            className="text-xs text-slate-400 hover:text-red-500 px-2 py-1 rounded border hover:border-red-300 transition">
+            ✕ ล้างตัวกรอง
+          </button>
+        )}
         <span className="text-xs text-slate-400">{filtered.length} คน</span>
         {/* Pagination buttons */}
         <div className="flex items-center gap-1 ml-2">
@@ -1174,7 +1228,12 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                       : <span className="text-slate-300 text-xs">-</span>}
                   </td>
                   <td className="p-3 text-center">
-                    <span className="px-2 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-xs font-bold">{c.order_count}</span>
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                      c.order_count >= 10 ? 'bg-amber-100 text-amber-800' :
+                      c.order_count >= 3  ? 'bg-purple-100 text-purple-700' :
+                      c.order_count >= 1  ? 'bg-cyan-100 text-cyan-800' :
+                      'bg-slate-100 text-slate-400'
+                    }`}>{c.order_count}</span>
                   </td>
                   <td className="p-3 text-right font-bold text-emerald-600">฿{fmt2(Number(c.total_spent))}</td>
                   <td className="p-3 text-center">
