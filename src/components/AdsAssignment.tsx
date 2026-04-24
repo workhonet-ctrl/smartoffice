@@ -18,9 +18,11 @@ type AdsPage = {
   status: string | null;
 };
 
-type AdsAdmin = {
+type Employee = {
   id: string;
   name: string;
+  nickname: string | null;
+  employee_code: string | null;
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -34,7 +36,7 @@ const STATUS_COLOR: Record<string, string> = {
 export default function AdsAssignment() {
   const [pages,    setPages]    = useState<AdsPage[]>([]);
   const [accounts, setAccounts] = useState<AdsAccount[]>([]);
-  const [admins,   setAdmins]   = useState<AdsAdmin[]>([]);
+  const [admins,   setAdmins]   = useState<Employee[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [editing,  setEditing]  = useState<string | null>(null); // page id ที่กำลัง edit
   const [draft,    setDraft]    = useState<Partial<AdsPage>>({});
@@ -50,11 +52,18 @@ export default function AdsAssignment() {
     const [{ data: p }, { data: a }, { data: adm }] = await Promise.all([
       supabase.from('ads_pages').select('*').order('name'),
       supabase.from('ads_accounts').select('*').order('name'),
-      supabase.from('ads_admins').select('*').order('name'),
+      supabase.from('employees').select('id,name,nickname,employee_code').eq('status','active').order('name'),
     ]);
     setPages(p || []);
     setAccounts(a || []);
-    setAdmins(adm || []);
+    // admin = พนักงานที่ employee_code ขึ้นต้นด้วย IT หรือ GM (เหมือนหน้า DATA)
+    const allEmp = adm || [];
+    const filteredAdmins = allEmp.filter((e: any) =>
+      (e.employee_code || '').startsWith('IT') ||
+      (e.employee_code || '').startsWith('GM')
+    );
+    // ถ้าไม่มี IT/GM ให้ใช้พนักงานทั้งหมด
+    setAdmins(filteredAdmins.length > 0 ? filteredAdmins : allEmp);
     setLoading(false);
   };
 
@@ -86,7 +95,7 @@ export default function AdsAssignment() {
   };
 
   // ─── helpers ─────────────────────────────────────────────
-  const getAdmin   = (id: string | null) => admins.find(a => a.id === id);
+  const getAdmin   = (id: string | null) => id ? admins.find(a => a.id === id) || null : null;
   const getAccount = (id: string | null) => accounts.find(a => a.id === id);
 
   // ─── filter ──────────────────────────────────────────────
@@ -160,7 +169,7 @@ export default function AdsAssignment() {
                 ? 'bg-slate-800 text-white border-slate-800'
                 : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
             }`}>
-            <span>{adm.name}</span>
+            <span>{adm.nickname || adm.name}</span>
             <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
               filterAdmin === adm.id ? 'bg-white text-slate-800' : 'bg-slate-100 text-slate-500'
             }`}>{adm.pageCount} เพจ</span>
@@ -249,7 +258,7 @@ export default function AdsAssignment() {
                           onChange={e => setDraft(d => ({ ...d, admin_id: e.target.value || null }))}
                           className="w-full pl-2 pr-7 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-400 appearance-none bg-white">
                           <option value="">— ยังไม่มอบหมาย —</option>
-                          {admins.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                          {admins.map(a => <option key={a.id} value={a.id}>{a.nickname || a.name}</option>)}
                         </select>
                         <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"/>
                       </div>
@@ -258,7 +267,7 @@ export default function AdsAssignment() {
                         <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0">
                           {admin.name.charAt(0)}
                         </div>
-                        <span className="text-sm font-medium text-slate-700">{admin.name}</span>
+                        <span className="text-sm font-medium text-slate-700">{admin.nickname || admin.name}</span>
                       </div>
                     ) : (
                       <span className="text-xs text-slate-300 italic">ยังไม่มอบหมาย</span>
