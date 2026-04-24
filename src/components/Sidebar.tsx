@@ -5,7 +5,7 @@ import {
   PackageCheck, FileText, BarChart2, ShoppingBag, Handshake,
   History, TrendingUp, ArrowDownCircle, Search, Target,
   BookOpen, UserPlus, GraduationCap, PieChart, Building2,
-  MessageSquare, Megaphone, Store, AlertTriangle,
+  MessageSquare, Megaphone, Store, AlertTriangle, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 
 type PageKey =
@@ -22,6 +22,8 @@ type PageKey =
 type SidebarProps = {
   activePage: PageKey;
   setActivePage: (page: PageKey) => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 };
 
 type MenuItem = {
@@ -106,7 +108,7 @@ const GROUPS = [
   },
 ];
 
-export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
+export default function Sidebar({ activePage, setActivePage, collapsed = false, onToggleCollapse }: SidebarProps) {
   // helper: เช็คว่า menu หรือ children มี key ตรงกับ activePage ไหม
   const isMenuActive = (m: MenuItem): boolean => {
     if (m.key === activePage) return true;
@@ -146,21 +148,28 @@ export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
   };
 
   return (
-    <aside className="w-[220px] h-screen shrink-0 flex flex-col bg-white border-r border-slate-100"
+    <aside className={`${collapsed ? 'w-[56px]' : 'w-[220px]'} h-screen shrink-0 flex flex-col bg-white border-r border-slate-100 transition-all duration-300 overflow-hidden`}
       style={{ boxShadow: '2px 0 12px 0 rgba(0,0,0,0.04)' }}>
 
-      {/* Logo */}
-      <div className="px-5 py-5 border-b border-slate-100">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold"
+      {/* Logo + Toggle */}
+      <div className={`${collapsed ? 'px-2 py-4' : 'px-5 py-5'} border-b border-slate-100 flex items-center justify-between`}>
+        <div className="flex items-center gap-2.5 overflow-hidden">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold shrink-0"
             style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)' }}>
             S
           </div>
-          <div>
-            <div className="text-sm font-bold text-slate-800 leading-none">SmartOffice</div>
-            <div className="text-[10px] text-slate-400 mt-0.5">E-commerce Portal</div>
-          </div>
+          {!collapsed && (
+            <div className="overflow-hidden whitespace-nowrap">
+              <div className="text-sm font-bold text-slate-800 leading-none">SmartOffice</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">E-commerce Portal</div>
+            </div>
+          )}
         </div>
+        <button onClick={onToggleCollapse}
+          className="hidden lg:flex p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition shrink-0"
+          title={collapsed ? 'ขยาย Sidebar' : 'ย่อ Sidebar'}>
+          {collapsed ? <PanelLeftOpen size={15}/> : <PanelLeftClose size={15}/>}
+        </button>
       </div>
 
       {/* Nav */}
@@ -169,6 +178,28 @@ export default function Sidebar({ activePage, setActivePage }: SidebarProps) {
           const isGroupActive = group.menus.some(m => isMenuActive(m));
           const isOpen = openGroups.has(group.key);
           const Icon = group.icon;
+
+          // ── Collapsed mode: แสดงแค่ icon แต่ละ group ──
+          if (collapsed) {
+            return (
+              <div key={group.key} className="mb-1">
+                <button
+                  onClick={() => { toggle(group.key); if (onToggleCollapse) onToggleCollapse(); }}
+                  title={group.label}
+                  className="w-full flex items-center justify-center py-2.5 rounded-xl transition-all"
+                  style={isGroupActive ? { background: group.bg } : {}}
+                >
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+                    style={isGroupActive
+                      ? { background: group.accent + '20' }
+                      : { background: '#f1f5f9' }
+                    }>
+                    <Icon size={15} style={{ color: isGroupActive ? group.accent : '#94a3b8' }} />
+                  </div>
+                </button>
+              </div>
+            );
+          }
 
           return (
             <div key={group.key} className="mb-0.5">
