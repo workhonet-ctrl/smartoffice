@@ -6,7 +6,6 @@ import Products from './components/Products';
 import ProductList from './components/ProductList';
 import Packaging from './components/Packaging';
 import PackingMaterials from './components/PackingMaterials';
-import PackHistory from './components/PackHistory';
 import Requisition from './components/Requisition';
 import Stock from './components/Stock';
 import PurchaseOrder from './components/PurchaseOrder';
@@ -33,7 +32,7 @@ type PageKey =
   | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
   // ฝ่ายคลังสินค้า
   | 'orders' | 'flash-export' | 'myorder-export'
-  | 'pack-products' | 'requisition' | 'pack-history'
+  | 'pack-products' | 'requisition'
   | 'stock' | 'purchase-order' | 'suppliers'
   // ฝ่ายการเงิน
   | 'finance-daily' | 'finance-monthly' | 'finance-yearly'
@@ -74,7 +73,6 @@ export default function App() {
       case 'product-kpi':    return <ProductKPI />;
       case 'packaging':      return <PackingMaterials />;
       case 'pack-products':  return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} onCreateRequisition={goToRequisition}/>;
-      case 'pack-history':   return <PackHistory />;
       case 'requisition':    return <Requisition packHistoryId={packHistoryId} />;
       case 'stock':          return <Stock onGoToPO={() => setActivePage('purchase-order')} />;
       case 'purchase-order': return <PurchaseOrder />;
