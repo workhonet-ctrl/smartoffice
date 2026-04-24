@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { extractQty } from '../lib/utils';
-import { Package, ClipboardList, FileText, AlertCircle, Printer } from 'lucide-react';
+import { Package, ClipboardList, FileText, AlertCircle, Printer, History, RefreshCw } from 'lucide-react';
 
 type PackOrder = {
   id: string; order_no: string; order_date: string | null; order_time: string | null;
@@ -23,7 +23,10 @@ export default function Packaging({
 }) {
   const [orders, setOrders]     = useState<PackOrder[]>([]);
   const [loading, setLoading]   = useState(true);
-  const [tab, setTab]           = useState<'prep' | 'summary'>('prep');
+  const [tab, setTab]           = useState<'prep' | 'summary' | 'history'>('prep');
+  const [printHistory, setPrintHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
   const [override, setOverride] = useState<Override>({});
   const [boxes, setBoxes]       = useState<{ id: string; name: string }[]>([]);
   const [bubbles, setBubbles]   = useState<{ id: string; name: string; length_cm: number }[]>([]);
@@ -178,6 +181,97 @@ export default function Packaging({
     return { grouped: Object.values(grouped), multiOrders };
   })();
 
+
+  const loadPrintHistory = async () => {
+    setLoadingHistory(true);
+    const { data } = await supabase
+      .from('pack_history')
+      .select('id, pack_date, responsible_person, order_count, status, created_at, summary_snapshot')
+      .eq('status', 'printed')
+      .order('created_at', { ascending: false })
+      .limit(30);
+    setPrintHistory(data || []);
+    setLoadingHistory(false);
+  };
+
+  const handleReprintFromHistory = (item: any) => {
+    const snap = (item.summary_snapshot || []) as any[];
+    const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+    const rows = snap.map((s: any) => ({
+      product: s.short_name || s.name || '-',
+      promo:   s.name || '',
+      count:   s.count || 1,
+      box:     s.box || '-',
+      bubble:  s.bubble || '-',
+      note:    s.type === 'multi' ? 'แพ็คพิเศษ' : '',
+    }));
+    openPrintWindow(rows, today, item.responsible_person || '-', item.order_count || 0);
+  };
+
+  const openPrintWindow = (rows: any[], today: string, resp: string, orderCount: number) => {
+    const tableRows = rows.map((r: any, i: number) => `
+      <tr>
+        <td class="num">${i + 1}</td>
+        <td style="font-weight:500">${r.product}</td>
+        <td>${r.promo ? '<span class="promo-tag">' + r.promo + '</span>' : '<span style="color:#94a3b8">-</span>'}</td>
+        <td class="count">${r.count}</td>
+        <td style="text-align:center">${r.box}</td>
+        <td style="text-align:center;color:#0369a1">${r.bubble !== '-' ? r.bubble : '-'}</td>
+        <td><div class="note-box"></div></td>
+      </tr>`).join('');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>ใบเตรียมสินค้า</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Sarabun', sans-serif; font-size: 13px; color: #1e293b; padding: 24px; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    .meta { font-size: 12px; color: #64748b; margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    th { background: #1e293b; color: white; padding: 9px 12px; text-align: left; font-size: 12px; }
+    td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px; vertical-align: top; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    .num  { text-align: center; }
+    .count { text-align: center; font-weight: 700; font-size: 16px; color: #0e7490; }
+    .promo-tag { display: inline-block; background: #e0f2fe; color: #0369a1; border-radius: 4px; padding: 1px 6px; font-size: 11px; }
+    .note-box { border: 1px solid #cbd5e1; border-radius: 6px; min-height: 32px; width: 100%; }
+    .footer { margin-top: 32px; display: flex; gap: 60px; }
+    .sig { border-top: 1px solid #94a3b8; width: 200px; text-align: center; padding-top: 6px; font-size: 11px; color: #64748b; margin-top: 48px; }
+    @media print { body { padding: 12px; } }
+  </style>
+</head>
+<body>
+  <h1>📋 ใบเตรียมสินค้า</h1>
+  <div class="meta">วันที่: ${today} &nbsp;|&nbsp; จำนวนออเดอร์: ${orderCount} รายการ &nbsp;|&nbsp; ผู้รับผิดชอบ: ${resp}</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:32px">#</th>
+        <th>รายการสินค้า</th>
+        <th>โปรโมชั่น</th>
+        <th style="text-align:center;width:80px">จำนวน (ออเดอร์)</th>
+        <th style="width:80px">กล่อง</th>
+        <th style="width:100px">บับเบิ้ล</th>
+        <th style="width:150px">หมายเหตุ</th>
+      </tr>
+    </thead>
+    <tbody>${tableRows}</tbody>
+  </table>
+  <div class="footer">
+    <div class="sig">ผู้เตรียม: ${resp}</div>
+    <div class="sig">ผู้ตรวจสอบ: ___________________</div>
+  </div>
+  <script>window.onload = () => { window.print(); }</script>
+</body>
+</html>`;
+
+    const w = window.open('', '_blank', 'width=900,height=700');
+    if (w) { w.document.write(html); w.document.close(); }
+  };
+
   const handlePrint = async () => {
     const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
     // ── บันทึกประวัติการปริ้นลง pack_history ──
@@ -298,8 +392,9 @@ export default function Packaging({
 </body>
 </html>`;
 
-    const win = window.open('', '_blank', 'width=800,height=600');
-    if (win) { win.document.write(html); win.document.close(); }
+    openPrintWindow(rows, today, responsible, orders.length);
+    // reload ประวัติปริ้น
+    loadPrintHistory();
   };
 
   const handleCreateRequisition = async () => {
@@ -384,6 +479,11 @@ export default function Packaging({
               ${!canGoToSummary?'opacity-40 cursor-not-allowed text-slate-400':'text-slate-500 hover:text-slate-700'}`}>
             <Package size={15}/> ใบสรุป
             {!canGoToSummary && <AlertCircle size={13} className="text-orange-400"/>}
+          </button>
+          <button
+            onClick={() => { setTab('history'); loadPrintHistory(); }}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 ${tab==='history'?'bg-white shadow text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
+            <History size={15}/> ประวัติปริ้น
           </button>
         </div>
         <button
