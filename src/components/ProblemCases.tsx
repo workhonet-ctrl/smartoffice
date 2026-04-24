@@ -26,7 +26,8 @@ type Followup = {
   created_at: string;
 };
 
-const PROBLEM_STATUSES = ['ค้างอยู่คลัง', 'ไม่มีคนรับ', 'ตีกลับ', 'ส่งคืน', 'ปัญหา'];
+// ตีกลับ และ ส่งคืน ไม่ดึงมา — สินค้ากลับมาแล้ว ติดตามไม่ได้
+const PROBLEM_STATUSES = ['ค้างอยู่คลัง', 'ไม่มีคนรับ', 'ปัญหา'];
 
 const STATUS_STYLE: Record<string, string> = {
   'ตีกลับ':        'bg-red-100 text-red-700',
@@ -194,7 +195,7 @@ export default function ProblemCases() {
             ⚠ เคสมีปัญหา
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            พัสดุที่ยังไม่ได้รับ / ตีกลับ / ค้างคลัง — ติดตามและอัพเดตสถานะได้ที่นี่
+            พัสดุที่ยังไม่ได้รับ / ค้างคลัง / ไม่มีคนรับ — ติดตามและอัพเดตสถานะได้ที่นี่
           </p>
         </div>
         <button onClick={loadOrders} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition">
@@ -247,7 +248,8 @@ export default function ProblemCases() {
           <thead className="sticky top-0 bg-slate-800 text-white z-10">
             <tr>
               <th className="p-3 text-left text-xs font-medium w-8"></th>
-              <th className="p-3 text-left text-xs font-medium">ลูกค้า</th>
+              <th className="p-3 text-left text-xs font-medium">ชื่อลูกค้า</th>
+              <th className="p-3 text-left text-xs font-medium">ชื่อเฟสบุ๊ก</th>
               <th className="p-3 text-left text-xs font-medium">เบอร์โทร</th>
               <th className="p-3 text-left text-xs font-medium">Tracking</th>
               <th className="p-3 text-left text-xs font-medium">สินค้า</th>
@@ -258,10 +260,10 @@ export default function ProblemCases() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={8} className="p-8 text-center text-slate-400 text-sm">กำลังโหลด...</td></tr>
+              <tr><td colSpan={9} className="p-8 text-center text-slate-400 text-sm">กำลังโหลด...</td></tr>
             )}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={8} className="p-8 text-center text-slate-400 text-sm">ไม่พบเคสที่ตรงกัน</td></tr>
+              <tr><td colSpan={9} className="p-8 text-center text-slate-400 text-sm">ไม่พบเคสที่ตรงกัน</td></tr>
             )}
             {filtered.map(order => (
               <>
@@ -273,9 +275,11 @@ export default function ProblemCases() {
                   </td>
                   <td className="p-3">
                     <div className="font-medium text-slate-800 text-sm">{order.customers?.name || '-'}</div>
-                    {order.customers?.facebook_name && order.customers.facebook_name !== order.customers.name && (
-                      <div className="text-xs text-blue-500">{order.customers.facebook_name}</div>
-                    )}
+                  </td>
+                  <td className="p-3">
+                    {order.customers?.facebook_name && order.customers.facebook_name !== order.customers.name
+                      ? <span className="text-xs text-blue-600 font-medium">{order.customers.facebook_name}</span>
+                      : <span className="text-xs text-slate-300">-</span>}
                   </td>
                   <td className="p-3 font-mono text-xs text-slate-600">{order.customers?.tel || '-'}</td>
                   <td className="p-3 font-mono text-xs text-cyan-600">{order.tracking_no || '-'}</td>
@@ -308,7 +312,7 @@ export default function ProblemCases() {
                 {/* ─ Expanded Detail ─ */}
                 {expanded === order.id && (
                   <tr key={`${order.id}-detail`}>
-                    <td colSpan={8} className="bg-cyan-50 border-b">
+                    <td colSpan={9} className="bg-cyan-50 border-b">
                       <div className="px-6 py-4 border-l-4 border-cyan-400">
 
                         {/* Order info */}
