@@ -106,9 +106,9 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
 
   useEffect(() => {
     initDocNo();
-    // โหลดข้อมูลเฉพาะเมื่อมาจากหน้าแพ็คสินค้า (มี packHistoryId)
     if (packHistoryId) {
-      loadAndAggregate();
+      // หน่วง 300ms เพื่อให้ DB commit orders status เสร็จก่อน query
+      setTimeout(() => loadAndAggregate(), 300);
     } else {
       setLoading(false);
     }
@@ -125,7 +125,13 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
   const loadAndAggregate = async () => {
     setLoading(true);
     try {
-      const { data: orders } = await supabase.from('orders').select('id, raw_prod, quantities, quantity, promo_ids').eq('order_status', 'กำลังแพ็ค');
+      let { data: orders } = await supabase.from('orders').select('id, raw_prod, quantities, quantity, promo_ids').eq('order_status', 'กำลังแพ็ค');
+      // retry 1 ครั้งถ้าได้ 0 rows (DB อาจยังไม่ commit)
+      if (!orders || orders.length === 0) {
+        await new Promise(r => setTimeout(r, 800));
+        const retry = await supabase.from('orders').select('id, raw_prod, quantities, quantity, promo_ids').eq('order_status', 'กำลังแพ็ค');
+        orders = retry.data;
+      }
       if (!orders || orders.length === 0) { setItems([]); setOrderCount(0); setLoading(false); return; }
       setOrderCount(orders.length);
 
