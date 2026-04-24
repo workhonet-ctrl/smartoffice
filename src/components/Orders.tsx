@@ -620,6 +620,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         const { data, error } = await supabase
           .from('orders').select('*, customers(*)')
           .order('imported_at', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })  // secondary sort กัน row ทับกันเมื่อ imported_at เท่ากัน
           .range(page * PAGE, (page + 1) * PAGE - 1);
         if (error) throw error;
         if (!data || data.length === 0) break;
@@ -1258,27 +1259,35 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                 </button>
                 <button
                   onClick={async () => {
-                    if (!confirm(`ลบออเดอร์ที่มี Tracking ซ้ำ ${dupCount} รายการ?
-(เก็บรายการแรก ลบรายการที่ซ้ำ)`)) return;
-                    // หา id ที่ซ้ำ — เก็บ id แรกของแต่ละ tracking ไว้ ลบที่เหลือ
-                    const keepIds = new Set<string>();
+                    if (!confirm(`ลบออเดอร์ที่ Tracking ซ้ำ?\n(เก็บรายการแรก ลบรายการที่ซ้ำ)`)) return;
+                    // Query DB โดยตรง — ไม่ใช้ state เพื่อกัน false positive
+                    const { data: allOrders } = await supabase
+                      .from('orders')
+                      .select('id, tracking_no, created_at')
+                      .not('tracking_no', 'is', null)
+                      .order('created_at', { ascending: true });
+
+                    if (!allOrders) return;
+
+                    // นับ tracking ที่ซ้ำจริงใน DB
+                    const seenTrack: Record<string, string> = {}; // tracking → id แรก
                     const deleteIds: string[] = [];
-                    [...orders].reverse().forEach(o => {
+                    allOrders.forEach(o => {
                       const t = (o.tracking_no || '').trim();
                       if (!t || t.length <= 3) return;
-                      if (dupTrackingSet.has(t)) {
-                        if (!keepIds.has(t)) keepIds.set ? keepIds.add(t) : null;
+                      if (!seenTrack[t]) {
+                        seenTrack[t] = o.id; // เก็บ id แรก
+                      } else {
+                        deleteIds.push(o.id); // ซ้ำ → ลบ
                       }
                     });
-                    // เก็บ id แรกต่อ tracking แล้วลบที่เหลือ
-                    const firstPerTrack: Record<string, string> = {};
-                    orders.forEach(o => {
-                      const t = (o.tracking_no || '').trim();
-                      if (!t || t.length <= 3 || !dupTrackingSet.has(t)) return;
-                      if (!firstPerTrack[t]) firstPerTrack[t] = o.id;
-                      else deleteIds.push(o.id);
-                    });
-                    if (deleteIds.length === 0) return;
+
+                    if (deleteIds.length === 0) {
+                      showToast('ไม่พบ Tracking ซ้ำใน DB', 'warning');
+                      loadOrders();
+                      return;
+                    }
+
                     const CHUNK = 100;
                     for (let i = 0; i < deleteIds.length; i += CHUNK) {
                       await supabase.from('orders').delete().in('id', deleteIds.slice(i, i + CHUNK));
