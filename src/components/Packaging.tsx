@@ -199,17 +199,24 @@ export default function Packaging({
     } catch (err) { console.error('print history error:', err); }
     const rows = [
       ...summaryGroups.grouped.map(g => ({
-        name: g.short_name || g.promo_name,
+        product: g.promo_name,          // ชื่อสินค้าหลัก
+        promo: g.short_name || '',      // โปรโมชั่น / แพ็คเกจ
         count: g.count,
         box: g.box_name,
-        bubble: '',
-        note: `${g.count} ออเดอร์`,
+        bubble: g.bubble_name || '-',
+        note: '',
       })),
       ...summaryGroups.multiOrders.map(o => ({
-        name: o.promos.map(p => `${p.short_name||p.name} ×${p.qty}`).join(' + '),
+        product: o.promos.map(p => p.name).join(' + '),
+        promo: o.promos.map(p => `${p.short_name||p.name} ×${p.qty}`).join(', '),
         count: 1,
         box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '-',
-        bubble: '',
+        bubble: (() => {
+          const bub = override[o.id]?.bubble_id
+            ? bubbles.find(b => b.id === override[o.id].bubble_id)
+            : null;
+          return bub ? `ยาว ${bub.length_cm} cm` : '-';
+        })(),
         note: 'แพ็คพิเศษ',
       })),
     ];
@@ -218,50 +225,59 @@ export default function Packaging({
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>ใบเบิกสินค้า</title>
+  <title>ใบเตรียมสินค้า</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Sarabun', sans-serif; font-size: 13px; color: #1e293b; padding: 24px; }
-    h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
-    .meta { font-size: 12px; color: #64748b; margin-bottom: 16px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    th { background: #1e293b; color: white; padding: 8px 10px; text-align: left; font-size: 12px; }
-    td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; font-size: 12px; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    .meta { font-size: 12px; color: #64748b; margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    th { background: #1e293b; color: white; padding: 9px 12px; text-align: left; font-size: 12px; }
+    td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px; vertical-align: top; }
     tr:nth-child(even) td { background: #f8fafc; }
-    .count { text-align: center; font-weight: 700; font-size: 14px; }
-    .footer { margin-top: 24px; display: flex; gap: 60px; }
-    .sig { border-top: 1px solid #94a3b8; width: 180px; text-align: center; padding-top: 4px; font-size: 11px; color: #64748b; margin-top: 40px; }
+    .num  { text-align: center; }
+    .count { text-align: center; font-weight: 700; font-size: 16px; color: #0e7490; }
+    .promo-tag { display: inline-block; background: #e0f2fe; color: #0369a1; border-radius: 4px; padding: 1px 6px; font-size: 11px; margin: 1px; }
+    .note-box { border: 1px solid #cbd5e1; border-radius: 6px; min-height: 32px; width: 100%; }
+    .footer { margin-top: 32px; display: flex; gap: 60px; }
+    .sig { border-top: 1px solid #94a3b8; width: 200px; text-align: center; padding-top: 6px; font-size: 11px; color: #64748b; margin-top: 48px; }
     @media print { body { padding: 12px; } }
   </style>
 </head>
 <body>
-  <h1>📦 ใบเบิกสินค้า</h1>
-  <div class="meta">วันที่: ${today} &nbsp;|&nbsp; จำนวนออเดอร์: ${orders.length} รายการ &nbsp;|&nbsp; ผู้รับผิดชอบ: ${responsible}</div>
+  <h1>📋 ใบเตรียมสินค้า</h1>
+  <div class="meta">
+    วันที่: ${today} &nbsp;|&nbsp; จำนวนออเดอร์: ${orders.length} รายการ &nbsp;|&nbsp; ผู้รับผิดชอบ: ${responsible}
+  </div>
   <table>
     <thead>
       <tr>
-        <th>#</th>
+        <th style="width:32px">#</th>
         <th>รายการสินค้า</th>
-        <th style="text-align:center">จำนวน (ออเดอร์)</th>
-        <th>กล่อง</th>
-        <th>หมายเหตุ</th>
+        <th>โปรโมชั่น</th>
+        <th style="text-align:center;width:80px">จำนวน (ออเดอร์)</th>
+        <th style="width:80px">กล่อง</th>
+        <th style="width:100px">บับเบิ้ล</th>
+        <th style="width:150px">หมายเหตุ</th>
       </tr>
     </thead>
     <tbody>
       ${rows.map((r, i) => `
         <tr>
-          <td>${i + 1}</td>
-          <td>${r.name}</td>
+          <td class="num">${i + 1}</td>
+          <td style="font-weight:500">${r.product}</td>
+          <td>${r.promo ? \`<span class="promo-tag">${r.promo}</span>\` : '<span style="color:#94a3b8">-</span>'}</td>
           <td class="count">${r.count}</td>
-          <td>${r.box}</td>
-          <td style="color:#64748b">${r.note}</td>
+          <td style="text-align:center">${r.box}</td>
+          <td style="text-align:center;color:#0369a1">${r.bubble}</td>
+          <td><div class="note-box"></div></td>
         </tr>
       `).join('')}
     </tbody>
   </table>
   <div class="footer">
-    <div class="sig">ผู้เบิก: ${responsible}</div>
-    <div class="sig">ผู้อนุมัติ: ___________________</div>
+    <div class="sig">ผู้เตรียม: ${responsible}</div>
+    <div class="sig">ผู้ตรวจสอบ: ___________________</div>
   </div>
   <script>window.onload = () => { window.print(); }</script>
 </body>
