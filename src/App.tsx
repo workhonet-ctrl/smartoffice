@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import ProblemCases from './components/ProblemCases';
 import Sidebar from './components/Sidebar';
 import Products from './components/Products';
 import ProductList from './components/ProductList';
@@ -94,7 +95,7 @@ export default function App() {
       // ฝ่ายขาย
       case 'sales-admin':     return <Marketing page="admin" />;
       case 'sales-customers': return <Customers onGoToProducts={() => setActivePage('products')} />;
-      case 'sales-customers-problem': return <Customers onGoToProducts={() => setActivePage('products')} problemOnly />;
+      case 'sales-customers-problem': return <ProblemCases />;
       case 'sales-crm':       return <ComingSoon title="CRM" description="ระบบจัดการความสัมพันธ์ลูกค้า" />;
       // ฝ่ายการตลาด
       case 'marketing-graphic': return <Marketing page="graphic" />;
