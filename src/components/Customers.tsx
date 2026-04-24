@@ -612,17 +612,22 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    const hasOrders = filtered.filter(c => selectedIds.has(c.id) && c.order_count > 0);
+    // ดึงข้อมูลจาก customers ที่ถูกเลือก (ค้นจาก filtered ทั้งหมดได้เลย)
+    const selectedList = customers.filter(c => selectedIds.has(c.id));
+    const hasOrders = selectedList.filter(c => c.order_count > 0);
     const msg = hasOrders.length > 0
       ? `ลบลูกค้า ${selectedIds.size} คน\n⚠ ${hasOrders.length} คน มีออเดอร์ — ออเดอร์จะถูกลบด้วย\nยืนยัน?`
       : `ลบลูกค้า ${selectedIds.size} คน ยืนยัน?`;
     if (!confirm(msg)) return;
     setBulkDeleting(true);
     const ids = Array.from(selectedIds);
-    // ลบออเดอร์ก่อน
-    await supabase.from('orders').delete().in('customer_id', ids);
-    // ลบลูกค้า
-    await supabase.from('customers').delete().in('id', ids);
+    // แบ่ง chunk 200 กัน timeout เมื่อ ids เยอะ
+    const CHUNK = 200;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      await supabase.from('orders').delete().in('customer_id', chunk);
+      await supabase.from('customers').delete().in('id', chunk);
+    }
     setSelectedIds(new Set());
     showToast(`✓ ลบลูกค้า ${ids.length} คนแล้ว`);
     setBulkDeleting(false);
@@ -1061,9 +1066,15 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
-        <div className="shrink-0 flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-2">
+        <div className="shrink-0 flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 mb-2 flex-wrap">
           <span className="text-sm font-medium text-red-700">
             เลือก {selectedIds.size} คน
+            {selectedIds.size < filtered.length && (
+              <button onClick={() => setSelectedIds(new Set(filtered.map(c => c.id)))}
+                className="ml-2 text-xs text-red-500 underline hover:text-red-700">
+                เลือกทั้งหมด {filtered.length} คน
+              </button>
+            )}
           </span>
           <button
             onClick={() => setSelectedIds(new Set())}
@@ -1091,7 +1102,11 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
               <th className="p-3 w-8">
                 <input type="checkbox"
                   checked={filtered.length > 0 && filtered.every(c => selectedIds.has(c.id))}
+                  ref={el => {
+                    if (el) el.indeterminate = selectedIds.size > 0 && !filtered.every(c => selectedIds.has(c.id));
+                  }}
                   onChange={e => {
+                    // เลือก/ยกเลิก ทั้งหมดใน filtered (ไม่ใช่แค่หน้าปัจจุบัน)
                     if (e.target.checked) setSelectedIds(new Set(filtered.map(c => c.id)));
                     else setSelectedIds(new Set());
                   }}
