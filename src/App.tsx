@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import ProblemCases from './components/ProblemCases';
+import AdsAssignment from './components/AdsAssignment';
 import Sidebar from './components/Sidebar';
 import Products from './components/Products';
 import ProductList from './components/ProductList';
@@ -27,7 +28,7 @@ type PageKey =
   // ฝ่ายขาย
   | 'sales-admin' | 'sales-customers' | 'sales-customers-problem' | 'sales-crm'
   // ฝ่ายการตลาด
-  | 'marketing-graphic' | 'marketing-ads'
+  | 'marketing-graphic' | 'marketing-ads' | 'marketing-ads-assign'
   // ฝ่ายสินค้า
   | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
   // ฝ่ายคลังสินค้า
@@ -100,6 +101,7 @@ export default function App() {
       case 'sales-crm':       return <ComingSoon title="CRM" description="ระบบจัดการความสัมพันธ์ลูกค้า" />;
       // ฝ่ายการตลาด
       case 'marketing-graphic': return <Marketing page="graphic" />;
+      case 'marketing-ads-assign': return <AdsAssignment />;
       case 'marketing-ads':     return <Marketing page="ads" />;
       default:               return <Products />;
     }
