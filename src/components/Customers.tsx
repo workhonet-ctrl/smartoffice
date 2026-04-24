@@ -305,6 +305,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         .from('customers')
         .select('*')
         .order(sortBy, { ascending: false })
+        .order('created_at', { ascending: false })  // secondary sort กัน row ทับกัน
         .range(page * PAGE, (page + 1) * PAGE - 1);
       if (error || !data || data.length === 0) break;
       all.push(...data);
