@@ -43,6 +43,7 @@ type PageKey =
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>('orders');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // ปิด sidebar อัตโนมัติเมื่อเปลี่ยนหน้าบนมือถือ
   const handlePageChange = (page: PageKey) => {
@@ -116,11 +117,13 @@ export default function App() {
 
       {/* Sidebar — ซ่อนบนมือถือ, แสดงเมื่อกด hamburger */}
       <div className={`
-        fixed inset-y-0 left-0 z-40 transform transition-transform duration-300 ease-in-out
+        fixed inset-y-0 left-0 z-40 transform transition-all duration-300 ease-in-out shrink-0
         lg:relative lg:translate-x-0 lg:z-auto
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        ${sidebarCollapsed ? 'lg:w-[56px]' : 'lg:w-[220px]'}
       `}>
-        <Sidebar activePage={activePage} setActivePage={handlePageChange} />
+        <Sidebar activePage={activePage} setActivePage={handlePageChange}
+          collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(c => !c)} />
       </div>
 
       {/* Main content */}
