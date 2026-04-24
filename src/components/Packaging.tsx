@@ -199,17 +199,14 @@ export default function Packaging({
     } catch (err) { console.error('print history error:', err); }
     const rows = [
       ...summaryGroups.grouped.map(g => {
-        // ตัด short_name ออกจาก promo_name เพื่อได้ชื่อสินค้าอย่างเดียว
-        // "ซุปใสพุทรา 2 กระป๋อง" + short_name "2 กระป๋อง" → product "ซุปใสพุทรา"
-        const product = g.short_name
-          ? g.promo_name.replace(g.short_name, '').trim()
-          : g.promo_name;
+        // short_name = ชื่อสินค้า ("ซุปใสพุทรา")
+        // promo_name = จำนวน/โปรโมชั่น ("2 กระป๋อง")
         const bubble = g.bubble_name && !g.bubble_name.includes('0 cm')
           ? g.bubble_name
           : '-';
         return {
-          product: product || g.promo_name,
-          promo: g.short_name || '',
+          product: g.short_name || g.promo_name,  // ชื่อสินค้า
+          promo: g.promo_name || '',               // จำนวน/โปรโมชั่น
           count: g.count,
           box: g.box_name,
           bubble,
