@@ -13,7 +13,7 @@ type PageKey =
   | 'marketing-graphic' | 'marketing-ads' | 'marketing-ads-assign'
   | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
   | 'orders' | 'flash-export' | 'myorder-export'
-  | 'pack-products' | 'requisition' | 'pack-history'
+  | 'pack-products' | 'requisition'
   | 'stock' | 'purchase-order' | 'suppliers'
   | 'finance-daily' | 'finance-monthly' | 'finance-yearly'
   | 'finance-expenses' | 'finance-income' | 'finance-cost'
@@ -81,7 +81,6 @@ const GROUPS = [
       { key: 'myorder-export', label: 'MyOrder Export',    icon: FileSpreadsheet, built: true },
       { key: 'pack-products',  label: 'แพ็คสินค้า',        icon: PackageCheck,    built: true },
       { key: 'requisition',    label: 'ใบเบิกสินค้า',      icon: FileText,        built: true },
-      { key: 'pack-history',   label: 'ประวัติแพ็คสินค้า', icon: History,         built: true },
       { key: 'stock',          label: 'จัดการสต็อก',        icon: BarChart2,       built: true },
       { key: 'purchase-order', label: 'ใบสั่งซื้อ (PO)',    icon: ShoppingBag,     built: true },
       { key: 'suppliers',      label: 'จัดการผู้ขาย',        icon: Handshake,       built: true },
