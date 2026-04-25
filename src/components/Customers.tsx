@@ -932,7 +932,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   })();
 
   return (
-    <div className="flex flex-col h-screen p-6 pb-2">
+    <div className="flex flex-col h-screen p-3 sm:p-6 pb-2">
       {/* Header */}
       <div className="shrink-0 mb-4 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
@@ -941,7 +941,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-2xl font-bold text-slate-800">
+              <h2 className="text-lg sm:text-2xl font-bold text-slate-800">
                 {problemOnly ? '⚠ เคสมีปัญหา' : 'ลูกค้า'}
               </h2>
             </div>
@@ -995,26 +995,26 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           <>
             <div className="bg-red-50 border border-red-200 rounded-xl p-4">
               <div className="text-xs font-semibold text-red-600 mb-1">ลูกค้าที่มีปัญหา</div>
-              <div className="text-2xl font-bold text-red-700">{filtered.length}</div>
+              <div className="text-lg sm:text-2xl font-bold text-red-700">{filtered.length}</div>
               <div className="text-xs text-red-500">คน</div>
             </div>
             <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
               <div className="text-xs font-semibold text-orange-600 mb-1">ออเดอร์ที่มีปัญหา</div>
-              <div className="text-2xl font-bold text-orange-700">
+              <div className="text-lg sm:text-2xl font-bold text-orange-700">
                 {Object.values(problemOrderCount).reduce((s, n) => s + n, 0)}
               </div>
               <div className="text-xs text-orange-500">รายการ</div>
             </div>
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <div className="text-xs font-semibold text-amber-600 mb-1">VIP ที่มีปัญหา</div>
-              <div className="text-2xl font-bold text-amber-700">
+              <div className="text-lg sm:text-2xl font-bold text-amber-700">
                 {filtered.filter(c => c.tag === 'VIP').length}
               </div>
               <div className="text-xs text-amber-500">คน</div>
             </div>
             <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
               <div className="text-xs font-semibold text-purple-600 mb-1">ประจำที่มีปัญหา</div>
-              <div className="text-2xl font-bold text-purple-700">
+              <div className="text-lg sm:text-2xl font-bold text-purple-700">
                 {filtered.filter(c => c.tag === 'ประจำ').length}
               </div>
               <div className="text-xs text-purple-500">คน</div>
@@ -1024,12 +1024,12 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           <>
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <div className="text-xs font-semibold text-amber-600 mb-1">VIP</div>
-              <div className="text-2xl font-bold text-amber-700">{vipCount}</div>
+              <div className="text-lg sm:text-2xl font-bold text-amber-700">{vipCount}</div>
               <div className="text-xs text-amber-500">10+ ออเดอร์</div>
             </div>
             <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
               <div className="text-xs font-semibold text-purple-600 mb-1">ลูกค้าประจำ</div>
-              <div className="text-2xl font-bold text-purple-700">{regularCount}</div>
+              <div className="text-lg sm:text-2xl font-bold text-purple-700">{regularCount}</div>
               <div className="text-xs text-purple-500">3–9 ออเดอร์</div>
             </div>
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
@@ -1153,7 +1153,82 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       )}
 
       {/* Table */}
-      <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+
+      {/* ─── Mobile Card View (< lg) ────────────────── */}
+      <div className="lg:hidden flex-1 overflow-auto min-h-0 space-y-2 pb-4">
+        {filtered.map(c => {
+          const tagColor = TAG_COLORS[c.tag||'ใหม่'] || 'bg-slate-100 text-slate-600';
+          const isSelected = selectedIds.has(c.id);
+          return (
+            <div key={c.id}
+              className={`bg-white rounded-xl border shadow-sm p-3 transition ${isSelected ? 'border-cyan-400 bg-cyan-50/30' : 'border-slate-200'}`}>
+              <div className="flex items-start gap-2">
+                <input type="checkbox"
+                  checked={isSelected}
+                  onChange={e => {
+                    setSelectedIds(prev => {
+                      const next = new Set(prev);
+                      e.target.checked ? next.add(c.id) : next.delete(c.id);
+                      return next;
+                    });
+                  }}
+                  className="rounded mt-1 cursor-pointer shrink-0"/>
+                <div className="flex-1 min-w-0">
+                  {/* Row 1: ชื่อ + tag */}
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-slate-800 truncate">{c.name}</div>
+                      {c.facebook_name && c.facebook_name !== c.name && (
+                        <div className="text-xs text-blue-600 truncate">{c.facebook_name}</div>
+                      )}
+                    </div>
+                    <button onClick={() => setEditTag({id:c.id, tag:c.tag||'ใหม่'})}
+                      className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold ${tagColor}`}>
+                      {c.tag || 'ใหม่'}
+                    </button>
+                  </div>
+                  {/* Row 2: เบอร์ + จังหวัด */}
+                  <div className="flex items-center gap-3 text-xs text-slate-500 mb-2">
+                    <span className="font-mono">{c.tel}</span>
+                    {c.province && <span>· {c.province}</span>}
+                  </div>
+                  {/* Row 3: stats */}
+                  <div className="flex items-center gap-3 text-xs">
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400">ออเดอร์</span>
+                      <span className={`px-2 py-0.5 rounded-full font-bold ${
+                        c.order_count >= 10 ? 'bg-amber-100 text-amber-800' :
+                        c.order_count >= 3  ? 'bg-purple-100 text-purple-700' :
+                        c.order_count >= 1  ? 'bg-cyan-100 text-cyan-800' :
+                        'bg-slate-100 text-slate-400'
+                      }`}>{c.order_count}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400">·</span>
+                      <span className="font-bold text-emerald-600">฿{fmt2(Number(c.total_spent))}</span>
+                    </div>
+                    {c.channel && (
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded truncate max-w-[80px]">
+                        {c.channel}
+                      </span>
+                    )}
+                  </div>
+                  {/* Action: ดูออเดอร์ */}
+                  <button onClick={() => setExpanded(expanded === c.id ? null : c.id)}
+                    className="mt-2 w-full text-xs py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition flex items-center justify-center gap-1">
+                    {expanded === c.id ? '▲ ซ่อนออเดอร์' : `▼ ดูออเดอร์ (${c.order_count})`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div className="bg-white rounded-xl p-8 text-center text-slate-400 text-sm">ไม่พบลูกค้าที่ตรงกัน</div>
+        )}
+      </div>
+
+      <div className="hidden lg:flex flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
         <table className="text-sm w-full" style={{minWidth:'1000px'}}>
           <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
             <tr>
