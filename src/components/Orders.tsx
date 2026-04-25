@@ -1110,13 +1110,13 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     : 0;
 
   return (
-    <div className="flex flex-col h-screen p-6 pb-2">
+    <div className="flex flex-col h-screen p-3 sm:p-6 pb-2">
       {/* Header */}
       <div className="shrink-0 mb-3">
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between mb-3">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-2xl font-bold text-slate-800">จัดการออเดอร์</h2>
+              <h2 className="text-lg sm:text-2xl font-bold text-slate-800">จัดการออเดอร์</h2>
               <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">Step 2</span>
               {customerCount !== null && (
                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${customerCount > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-600'}`}>
