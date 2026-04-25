@@ -180,7 +180,7 @@ export default function ProblemCases() {
 
   // ─── Render ───────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-screen p-6 pb-2 gap-4">
+    <div className="flex flex-col h-screen p-3 sm:p-6 pb-2 gap-4">
       {/* Toast */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm font-medium shadow-lg ${toast.ok ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
@@ -242,8 +242,101 @@ export default function ProblemCases() {
         <span className="text-xs text-slate-400 ml-1">{filtered.length} เคส</span>
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto rounded-2xl border border-slate-200">
+
+      {/* ─── Mobile Card View ────────────────── */}
+      <div className="lg:hidden flex-1 overflow-auto space-y-2 pb-4">
+        {loading && <div className="bg-white rounded-xl p-8 text-center text-slate-400 text-sm">กำลังโหลด...</div>}
+        {!loading && filtered.length === 0 && (
+          <div className="bg-white rounded-xl p-8 text-center text-slate-400 text-sm">ไม่พบเคสที่ตรงกัน</div>
+        )}
+        {!loading && filtered.map(order => (
+          <div key={order.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div onClick={() => handleExpand(order.id)} className="p-3 cursor-pointer">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-slate-800 truncate">{order.customers?.name || '-'}</div>
+                  {order.customers?.facebook_name && order.customers.facebook_name !== order.customers.name && (
+                    <div className="text-xs text-blue-600 truncate">{order.customers.facebook_name}</div>
+                  )}
+                  <div className="text-xs text-slate-500 font-mono mt-0.5">{order.customers?.tel || '-'}</div>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${STATUS_STYLE[order.parcel_status || order.order_status || ''] || 'bg-slate-100 text-slate-500'}`}>
+                    {order.parcel_status || order.order_status}
+                  </span>
+                  {order.followed_at ? (
+                    <span className="flex items-center gap-1 text-[10px] text-emerald-600">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"/>ตามแล้ว
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-300"/>ยังไม่ตาม
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-mono text-cyan-600 truncate flex-1">{order.tracking_no || '-'}</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${TAG_STYLE[order.customers?.tag || ''] || 'bg-slate-100 text-slate-500'}`}>
+                  {order.customers?.tag || 'ใหม่'}
+                </span>
+              </div>
+              <div className="text-xs text-slate-500 mt-1 truncate">{order.raw_prod || '-'}</div>
+            </div>
+
+            {/* Expanded actions */}
+            {expanded === order.id && (
+              <div className="border-t bg-cyan-50/50 px-3 py-3 space-y-3">
+                {/* Followups */}
+                <div>
+                  <div className="text-[10px] font-semibold text-slate-600 mb-1.5">ประวัติการติดตาม</div>
+                  <div className="space-y-1.5 max-h-32 overflow-auto mb-2">
+                    {(followups[order.id] || []).length === 0 && (
+                      <div className="text-xs text-slate-400 italic">ยังไม่มีบันทึก</div>
+                    )}
+                    {(followups[order.id] || []).map(f => (
+                      <div key={f.id} className="bg-white rounded px-2 py-1.5 border border-slate-100">
+                        <div className="text-[9px] text-slate-400">{fmtDT(f.created_at)}</div>
+                        <div className="text-xs text-slate-700">{f.note}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-1.5">
+                    <input
+                      value={noteInput[order.id] || ''}
+                      onChange={e => setNoteInput(prev => ({ ...prev, [order.id]: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleAddNote(order)}
+                      placeholder="พิมพ์บันทึก..."
+                      className="flex-1 px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-400 bg-white"/>
+                    <button onClick={() => handleAddNote(order)} disabled={saving === order.id}
+                      className="px-3 py-1.5 bg-cyan-600 text-white rounded-lg text-xs font-medium hover:bg-cyan-700 disabled:opacity-50">
+                      <Send size={11}/>
+                    </button>
+                  </div>
+                </div>
+                {/* Action buttons */}
+                <div className="flex gap-1.5">
+                  <button onClick={() => handleUpdateStatus(order, 'received')} disabled={!!saving}
+                    className="flex-1 flex items-center justify-center gap-1 px-2 py-2 bg-green-600 text-white rounded-lg text-[11px] font-medium hover:bg-green-700 disabled:opacity-50">
+                    <CheckCircle size={12}/> รับแล้ว
+                  </button>
+                  <button onClick={() => handleUpdateStatus(order, 'returned')} disabled={!!saving}
+                    className="flex-1 flex items-center justify-center gap-1 px-2 py-2 bg-red-600 text-white rounded-lg text-[11px] font-medium hover:bg-red-700 disabled:opacity-50">
+                    <RotateCcw size={12}/> ตีกลับ
+                  </button>
+                  <button onClick={() => handleUpdateStatus(order, 'reschedule')} disabled={!!saving}
+                    className="flex-1 flex items-center justify-center gap-1 px-2 py-2 bg-blue-600 text-white rounded-lg text-[11px] font-medium hover:bg-blue-700 disabled:opacity-50">
+                    <Truck size={12}/> ส่งใหม่
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Table — Desktop only */}
+      <div className="hidden lg:flex flex-1 overflow-auto rounded-2xl border border-slate-200">
         <table className="w-full border-collapse">
           <thead className="sticky top-0 bg-slate-800 text-white z-10">
             <tr>
