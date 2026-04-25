@@ -45,7 +45,7 @@ export default function Marketing({ page }: { page: MarketingPage }) {
   if (page === 'graphic') return <GraphicModule />;
   if (page === 'ads')     return <AdsModule />;
   return (
-    <div className="flex flex-col h-screen p-6 pb-2">
+    <div className="flex flex-col h-screen p-3 sm:p-6 pb-2">
       <Placeholder title="แอดมิน" />
     </div>
   );
@@ -54,13 +54,29 @@ export default function Marketing({ page }: { page: MarketingPage }) {
 // ── ADS Module ────────────────────────────────────────────────────────────
 function AdsModule() {
   const [sub, setSub] = useState<AdsSub>('board');
+  const [subOpen, setSubOpen] = useState(false); // mobile drawer
 
   const groups = ['', 'สินค้า', 'ลงค่าโฆษณา', 'จัดการข้อมูล'];
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      {/* Sidebar */}
-      <div className="w-52 shrink-0 bg-slate-900 flex flex-col py-4">
+    <div className="flex h-screen overflow-hidden relative">
+      {/* Mobile sub-sidebar toggle button */}
+      <button onClick={() => setSubOpen(true)}
+        className="lg:hidden fixed top-3 right-3 z-30 bg-purple-500 text-white px-3 py-2 rounded-lg shadow-lg text-xs font-medium flex items-center gap-1.5">
+        ☰ เมนูโฆษณา
+      </button>
+
+      {/* Mobile overlay */}
+      {subOpen && (
+        <div className="lg:hidden fixed inset-0 bg-black/40 z-30" onClick={() => setSubOpen(false)}/>
+      )}
+
+      {/* Sidebar — drawer บนมือถือ, fixed บน desktop */}
+      <div className={`
+        fixed lg:relative inset-y-0 left-0 z-40 w-52 shrink-0 bg-slate-900 flex flex-col py-4
+        transition-transform duration-300 ease-in-out
+        ${subOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
         <div className="px-4 mb-4">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-purple-500 flex items-center justify-center text-white font-bold text-sm">A</div>
@@ -80,7 +96,7 @@ function AdsModule() {
                   <div className="px-2 mb-1 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{group}</div>
                 )}
                 {items.map(item => (
-                  <button key={item.key} onClick={() => setSub(item.key)}
+                  <button key={item.key} onClick={() => { setSub(item.key); setSubOpen(false); }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition mb-0.5 text-left
                       ${sub === item.key
                         ? 'bg-purple-600 text-white'
@@ -96,7 +112,7 @@ function AdsModule() {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-6 pb-2">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-3 sm:p-6 pb-2 pt-14 lg:pt-6">
         {sub === 'board'           && <MarketingAds />}
         {sub === 'report'          && <AdsReport />}
         {sub === 'add-product'     && <Products />}
@@ -481,7 +497,7 @@ function AdsExpenseDaily() {
       {/* KPI */}
       <div className="shrink-0 bg-red-50 border border-red-100 rounded-xl p-3 mb-3">
         <div className="text-xs text-red-500 font-semibold mb-1">ค่าโฆษณารวม</div>
-        <div className="text-2xl font-bold text-red-600">฿{totSpend.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+        <div className="text-lg sm:text-2xl font-bold text-red-600">฿{totSpend.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
       </div>
 
       {/* Table */}
@@ -937,11 +953,11 @@ function AdsData() {
 function GraphicModule() {
   const [sub, setSub] = useState<GraphicSub>('board');
   return (
-    <div className="flex flex-col h-screen p-6 pb-2">
+    <div className="flex flex-col h-screen p-3 sm:p-6 pb-2">
       <div className="shrink-0 mb-4 flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl bg-pink-500 flex items-center justify-center text-white font-bold text-lg">G</div>
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">ฝ่ายการตลาด / กราฟฟิก</h2>
+          <h2 className="text-lg sm:text-2xl font-bold text-slate-800">ฝ่ายการตลาด / กราฟฟิก</h2>
           <p className="text-xs text-slate-400">จัดการงานกราฟฟิก · Brief · Assets</p>
         </div>
       </div>
