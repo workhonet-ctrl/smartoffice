@@ -118,7 +118,7 @@ export default function AdsAssignment() {
   }));
 
   return (
-    <div className="flex flex-col h-screen p-6 pb-2 gap-4">
+    <div className="flex flex-col h-screen p-3 sm:p-6 pb-2 gap-4">
 
       {/* Toast */}
       {toast && (
@@ -142,19 +142,19 @@ export default function AdsAssignment() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
           <div className="text-xs text-slate-400 mb-1">เพจทั้งหมด</div>
-          <div className="text-2xl font-bold text-slate-700">{pages.length}</div>
+          <div className="text-lg sm:text-2xl font-bold text-slate-700">{pages.length}</div>
         </div>
         <div className="bg-emerald-50 rounded-2xl border border-emerald-100 p-4">
           <div className="text-xs text-emerald-600 mb-1">กำลังยิงโฆษณา</div>
-          <div className="text-2xl font-bold text-emerald-600">{firing}</div>
+          <div className="text-lg sm:text-2xl font-bold text-emerald-600">{firing}</div>
         </div>
         <div className="bg-blue-50 rounded-2xl border border-blue-100 p-4">
           <div className="text-xs text-blue-600 mb-1">มอบหมายแล้ว</div>
-          <div className="text-2xl font-bold text-blue-600">{assigned}</div>
+          <div className="text-lg sm:text-2xl font-bold text-blue-600">{assigned}</div>
         </div>
         <div className="bg-amber-50 rounded-2xl border border-amber-100 p-4">
           <div className="text-xs text-amber-600 mb-1">ยังไม่มอบหมาย</div>
-          <div className="text-2xl font-bold text-amber-600">{unassigned}</div>
+          <div className="text-lg sm:text-2xl font-bold text-amber-600">{unassigned}</div>
         </div>
       </div>
 
@@ -195,8 +195,113 @@ export default function AdsAssignment() {
         )}
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+
+      {/* ─── Mobile Card View ────────────────── */}
+      <div className="lg:hidden flex-1 overflow-auto space-y-2 pb-4">
+        {loading && <div className="bg-white rounded-xl p-8 text-center text-slate-400 text-sm">กำลังโหลด...</div>}
+        {!loading && filtered.length === 0 && (
+          <div className="bg-white rounded-xl p-8 text-center text-slate-400 text-sm">ไม่พบข้อมูล</div>
+        )}
+        {!loading && filtered.map((page, idx) => {
+          const admin   = getAdmin(page.admin_id);
+          const account = getAccount(page.account_id);
+          const isEdit  = editing === page.id;
+          return (
+            <div key={page.id} className={`rounded-xl border shadow-sm p-3 ${isEdit ? 'border-cyan-400 bg-cyan-50/30' : 'border-slate-200 bg-white'}`}>
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs text-slate-400">#{idx + 1}</div>
+                  <div className="font-semibold text-slate-800 truncate">{page.name}</div>
+                </div>
+                {!isEdit && (
+                  <button onClick={() => startEdit(page)}
+                    className="shrink-0 p-1.5 text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition">
+                    <Edit2 size={14}/>
+                  </button>
+                )}
+              </div>
+
+              {isEdit ? (
+                <div className="space-y-2">
+                  <div>
+                    <div className="text-[10px] text-slate-500 mb-0.5">สถานะเพจ</div>
+                    <select value={draft.status || page.status || ''}
+                      onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}
+                      className="w-full px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-400">
+                      <option>ยิงโฆษณา</option>
+                      <option>ไม่ได้ยิงโฆษณา</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-500 mb-0.5">แอดมิน</div>
+                    <select value={draft.admin_id || ''}
+                      onChange={e => setDraft(d => ({ ...d, admin_id: e.target.value || null }))}
+                      className="w-full px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-400">
+                      <option value="">— ยังไม่มอบหมาย —</option>
+                      {admins.map(a => <option key={a.id} value={a.id}>{a.nickname || a.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-500 mb-0.5">บัญชีโฆษณา</div>
+                    <select value={draft.account_id || ''}
+                      onChange={e => setDraft(d => ({ ...d, account_id: e.target.value || null }))}
+                      className="w-full px-2 py-1.5 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-400">
+                      <option value="">— ยังไม่กำหนด —</option>
+                      {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex gap-1.5 pt-1">
+                    <button onClick={() => saveEdit(page)} disabled={saving}
+                      className="flex-1 flex items-center justify-center gap-1 py-2 bg-cyan-600 text-white rounded-lg text-xs font-medium hover:bg-cyan-700 disabled:opacity-50">
+                      <Save size={12}/> บันทึก
+                    </button>
+                    <button onClick={cancelEdit}
+                      className="flex-1 flex items-center justify-center gap-1 py-2 bg-slate-100 text-slate-600 rounded-lg text-xs font-medium hover:bg-slate-200">
+                      <X size={12}/> ยกเลิก
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">สถานะ</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${STATUS_COLOR[page.status || ''] || 'bg-slate-100 text-slate-400 border-slate-200'}`}>
+                      {page.status || '-'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">แอดมิน</span>
+                    {admin ? (
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-5 h-5 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center text-white text-[9px] font-bold">
+                          {(admin.nickname || admin.name).charAt(0)}
+                        </div>
+                        <span className="font-medium">{admin.nickname || admin.name}</span>
+                      </div>
+                    ) : (
+                      <span className="text-slate-300 italic">ยังไม่มอบหมาย</span>
+                    )}
+                  </div>
+                  <div className="flex items-start justify-between">
+                    <span className="text-slate-400 shrink-0">บัญชี</span>
+                    {account ? (
+                      <div className="text-right min-w-0 ml-2">
+                        <div className="font-medium truncate">{account.name}</div>
+                        <div className="text-[9px] text-slate-400 font-mono truncate">{account.account_id}</div>
+                      </div>
+                    ) : (
+                      <span className="text-slate-300 italic">ยังไม่กำหนด</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Table — Desktop only */}
+      <div className="hidden lg:flex flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full border-collapse">
           <thead className="sticky top-0 bg-slate-800 text-white z-10">
             <tr>
