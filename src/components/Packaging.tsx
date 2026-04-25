@@ -454,10 +454,10 @@ export default function Packaging({
   if (loading) return <div className="p-6 flex items-center gap-2 text-slate-500"><Package size={18} className="animate-bounce"/> กำลังโหลด...</div>;
 
   return (
-    <div className="flex flex-col h-screen p-6 pb-2">
+    <div className="flex flex-col h-screen p-3 sm:p-6 pb-2">
       {/* Header — ไม่มีปุ่ม สร้างใบเบิก / เสร็จสิ้น ที่นี่ */}
       <div className="shrink-0 mb-4">
-        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+        <h2 className="text-lg sm:text-2xl font-bold text-slate-800 flex items-center gap-2">
           <Package size={24} className="text-cyan-600"/> แพ็คสินค้า
         </h2>
         <p className="text-sm text-slate-500 mt-0.5">วันที่ {packDate} · {orders.length} ออเดอร์</p>
