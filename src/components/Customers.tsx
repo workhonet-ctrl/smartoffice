@@ -356,9 +356,21 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const promoIds   = items.map(it => it.promoId);
         const quantities = items.length > 0 ? items.map(it => String(it.qty || 1)).join('|') : '1';
         const qtySum     = items.length > 0 ? items.reduce((s, it) => s + (Number(it.qty) || 1), 0) : 1;
+        // raw_prod = ชื่อสินค้า + โปรโมชั่น (เช่น "ซุปใสรากบัว 2 กระป๋อง")
         const rawProd    = items.length > 0
-          ? items.map(it => promoOptions.find(p => p.id === it.promoId)?.name || '').filter(Boolean).join('|')
+          ? items.map(it => {
+              const p = promoOptions.find(p => p.id === it.promoId);
+              if (!p) return '';
+              const productName = (p.short_name || '').trim();
+              const promoName   = (p.name || '').trim();
+              if (productName && promoName) return `${productName} ${promoName}`;
+              return productName || promoName;
+            }).filter(Boolean).join('|')
           : '';
+
+        // วิธีชำระ: ดูจาก column R (ค่า COD) — > 0 = COD, = 0 = BANK
+        const codAmount  = Number(row[17] || 0);
+        const paymentMethod = codAmount > 0 ? 'COD' : 'BANK';
 
         const { error } = await supabase.from('orders').insert([{
           order_no:    `FL-${tracking}`,
@@ -373,8 +385,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           quantity:    qtySum,
           quantities:  quantities,
           total_thb:   totalThb,
-          payment_method: 'COD',
-          payment_status: 'รอชำระเงิน',
+          payment_method: paymentMethod,
+          payment_status: paymentMethod === 'COD' ? 'รอชำระเงิน' : 'ชำระแล้ว',
           order_status: 'รอแพ็ค',
         }]);
         if (!error) added++;
