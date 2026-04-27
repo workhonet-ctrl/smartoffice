@@ -275,27 +275,44 @@ export default function Packaging({
   const handlePrint = async () => {
     const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
     // ── บันทึกประวัติการปริ้นลง pack_history ──
-    try {
-      const summarySnapshot = [
-        ...summaryGroups.grouped.map(g => ({ name: g.short_name||g.promo_name, count: g.count, box: g.box_name, type:'single' })),
-        ...summaryGroups.multiOrders.map(o => ({
-          name: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
-          count: 1, box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '', type:'multi'
-        })),
-      ];
-      const ordersSnapshot = orders.map(o => ({
-        order_no: o.order_no, customer: o.customers?.name,
-        promos: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
-      }));
-      await supabase.from('pack_history').insert([{
-        pack_date: new Date().toISOString().split('T')[0],
-        responsible_person: responsible || 'ไม่ระบุ',
-        order_count: orders.length,
-        orders_snapshot: ordersSnapshot,
-        summary_snapshot: summarySnapshot,
-        status: 'printed',
-      }]);
-    } catch (err) { console.error('print history error:', err); }
+    const summarySnapshot = [
+      ...summaryGroups.grouped.map(g => ({
+        name: g.promo_name || g.short_name,
+        short_name: g.short_name || g.promo_name,
+        count: g.count,
+        box: g.box_name,
+        bubble: g.bubble_name && !g.bubble_name.includes('0 cm') ? g.bubble_name : '-',
+        type:'single'
+      })),
+      ...summaryGroups.multiOrders.map(o => ({
+        name: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
+        short_name: o.promos.map(p => p.short_name || p.name).join(' + '),
+        count: 1,
+        box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '',
+        bubble: (() => {
+          const b = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
+          return b ? `ยาว ${b.length_cm} cm` : '-';
+        })(),
+        type:'multi'
+      })),
+    ];
+    const ordersSnapshot = orders.map(o => ({
+      order_no: o.order_no, customer: o.customers?.name,
+      promos: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
+    }));
+
+    const { error: phError } = await supabase.from('pack_history').insert([{
+      pack_date: new Date().toISOString().split('T')[0],
+      responsible_person: responsible || 'ไม่ระบุ',
+      order_count: orders.length,
+      orders_snapshot: ordersSnapshot,
+      summary_snapshot: summarySnapshot,
+      status: 'printed',
+    }]);
+    if (phError) {
+      console.error('[pack_history insert error]', phError);
+      alert('บันทึกประวัติปริ้นไม่สำเร็จ: ' + phError.message);
+    }
     // ── สร้าง rows จากข้อมูลแท็บจัดเตรียมสินค้า ──────────────────────────────
     // Part A: สินค้าเดี่ยว (grouped แล้ว เหมือนเดิม)
     const singleRows = summaryGroups.grouped.map(g => {
@@ -393,8 +410,9 @@ export default function Packaging({
 </html>`;
 
     openPrintWindow(rows, today, responsible, orders.length);
-    // reload ประวัติปริ้น
-    loadPrintHistory();
+    // เปิดแท็บประวัติปริ้น + reload
+    setTab('history');
+    setTimeout(() => loadPrintHistory(), 300);
   };
 
   const handleCreateRequisition = async () => {
