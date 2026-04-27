@@ -386,19 +386,24 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           quantities:  quantities,
           total_thb:   totalThb,
           payment_method: paymentMethod,
-          payment_status: paymentMethod === 'COD' ? 'รอชำระเงิน' : 'ชำระแล้ว',
+          payment_status: paymentMethod === 'COD' ? 'รอชำระเงิน' : 'ชำระเงินแล้ว',
           order_status: 'รอแพ็ค',
         }]);
-        if (!error) added++;
+        if (error) {
+          console.error('[Flash insert error] order:', `FL-${tracking}`, error);
+          throw error;
+        }
+        added++;
       }
 
       showToast(`✓ นำเข้าสำเร็จ · ออเดอร์ใหม่ ${added} รายการ`);
       setShowFlashImport(false);
       // รอ trigger DB อัพเดต order_count/total_spent ก่อน reload
       setTimeout(() => loadCustomers(), 600);
-    } catch (err) {
-      console.error(err);
-      showToast('เกิดข้อผิดพลาด', 'error');
+    } catch (err: any) {
+      console.error('[Flash Import Error]', err);
+      const msg = err?.message || err?.error_description || JSON.stringify(err) || 'unknown';
+      showToast('เกิดข้อผิดพลาด: ' + msg, 'error');
     } finally { setFlashSaving(false); }
   };
 
