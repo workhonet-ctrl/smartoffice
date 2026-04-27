@@ -369,7 +369,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           : '';
 
         // วิธีชำระ: ดูจาก column R (ค่า COD) — > 0 = COD, = 0 = BANK
-        const codAmount  = Number(row[17] || 0);
+        const codAmount  = Number(r[17] || 0);
         const paymentMethod = codAmount > 0 ? 'COD' : 'BANK';
 
         const { error } = await supabase.from('orders').insert([{
