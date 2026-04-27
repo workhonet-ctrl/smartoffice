@@ -207,9 +207,76 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       if (existMap[t]) dups.push({ row: r, existing: existMap[t] });
     });
 
+    // ── Auto-match สินค้าจาก column AB (รายการสินค้า) ──
+    // 1. รวบรวม raw product names (split ด้วย | ถ้ามีหลายชิ้น)
+    const rawProdSet = new Set<string>();
+    dataRows.forEach(r => {
+      const raw = String(r[27] || '').trim();
+      if (!raw) return;
+      raw.split('|').forEach(p => {
+        const t = p.trim();
+        if (t) rawProdSet.add(t);
+      });
+    });
+
+    const autoMap: Record<string, string> = {}; // raw_name → promo_id
+
+    if (rawProdSet.size > 0) {
+      // 2. โหลด mapping จาก product_mappings table
+      const { data: mappings } = await supabase
+        .from('product_mappings')
+        .select('raw_name, promo_id')
+        .in('raw_name', [...rawProdSet]);
+      (mappings || []).forEach((m: any) => { autoMap[m.raw_name] = m.promo_id; });
+
+      // 3. สำหรับ raw ที่ยังไม่มี mapping → fuzzy match กับ promo names
+      // โหลด promos ทั้งหมดถ้ายังไม่ได้
+      let promosForMatch = promoOptions;
+      if (promosForMatch.length === 0) {
+        const { data: promos } = await supabase
+          .from('products_promo').select('id, name, short_name')
+          .eq('active', true);
+        promosForMatch = (promos || []) as any;
+      }
+
+      const norm = (s: string) => s.toLowerCase().replace(/[\s()\u0e00-\u0e7f]+/g, m => m.replace(/\s/g, '')).trim();
+      [...rawProdSet].forEach(raw => {
+        if (autoMap[raw]) return;
+        const rawNorm = norm(raw);
+        // exact match (ignore spaces)
+        const exact = promosForMatch.find((p: any) =>
+          norm(p.name) === rawNorm || norm(p.short_name || '') === rawNorm
+        );
+        if (exact) { autoMap[raw] = exact.id; return; }
+        // contains match (raw contains promo name หรือ promo name contains raw)
+        const contains = promosForMatch.find((p: any) => {
+          const pn = norm(p.name);
+          const sn = norm(p.short_name || '');
+          return (pn && (rawNorm.includes(pn) || pn.includes(rawNorm)))
+              || (sn && (rawNorm.includes(sn) || sn.includes(rawNorm)));
+        });
+        if (contains) autoMap[raw] = contains.id;
+      });
+    }
+
+    // 4. แปลง autoMap → flashPromoSel เริ่มต้น (auto fill ออเดอร์ที่ match ได้)
+    const initialSel: Record<number, {promoId: string; qty: number}[]> = {};
+    dataRows.forEach((r, idx) => {
+      const raw = String(r[27] || '').trim();
+      if (!raw) return;
+      const items: {promoId: string; qty: number}[] = [];
+      raw.split('|').forEach(p => {
+        const t = p.trim();
+        if (t && autoMap[t]) {
+          items.push({ promoId: autoMap[t], qty: 1 });
+        }
+      });
+      if (items.length > 0) initialSel[idx] = items;
+    });
+
     setFlashRows(dataRows);
     setFlashDups(dups);
-    setFlashPromoSel({});
+    setFlashPromoSel(initialSel);  // ✅ pre-fill จาก auto-match
     setFlashTotalSel({});
     setFlashPromoSearch({});
     setFlashAddQty({});
@@ -219,6 +286,15 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     setFlashMaxCod('');
     setFlashSelectedRows(new Set());
     setShowFlashImport(true);
+
+    // แสดงสรุปการ match
+    const matchedCount = Object.keys(initialSel).length;
+    if (rawProdSet.size > 0) {
+      const matchedRaw = [...rawProdSet].filter(r => autoMap[r]).length;
+      setTimeout(() => showToast(
+        `🎯 จับคู่อัตโนมัติ ${matchedRaw}/${rawProdSet.size} สินค้า · ${matchedCount}/${dataRows.length} ออเดอร์`
+      ), 100);
+    }
     e.target.value = '';
   };
 
