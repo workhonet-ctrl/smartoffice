@@ -43,7 +43,7 @@ export default function FlashExport() {
   const [searchProduct, setSearchProduct]   = useState('');
   const [searchExported, setSearchExported] = useState('');
   // upload tracking file
-  const [uploadResult, setUploadResult] = useState<{ matched: number; notFound: number; conflicts: number } | null>(null);
+  const [uploadResult, setUploadResult] = useState<{ matched: number; notFound: number; conflicts: number; duplicate?: number } | null>(null);
   const [uploading, setUploading] = useState(false);
 
   // ── Conflict resolution ──────────────────────────────────────────────
@@ -248,6 +248,7 @@ export default function FlashExport() {
       const rows: any[] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
       let matched = 0; let notFound = 0; let conflictCount = 0;
+      let duplicateTracking = 0;
       const newConflicts: ConflictItem[] = [];
 
       // โหลดออเดอร์ route B ที่ยังไม่มี tracking
@@ -256,6 +257,24 @@ export default function FlashExport() {
         .select('id, order_date, order_status, total_thb, raw_prod, customers(name, tel)')
         .eq('route', 'B')
         .or('tracking_no.is.null,tracking_no.eq.');
+
+      // ── Pre-check: โหลด tracking ทั้งหมดที่มีในระบบ เพื่อตรวจซ้ำก่อน assign ──
+      const trackingsInFile = rows.slice(1)
+        .map(r => String(r[1] || '').trim())
+        .filter(Boolean);
+      const existingTrackSet = new Set<string>();
+      if (trackingsInFile.length > 0) {
+        const CHUNK = 500;
+        for (let i = 0; i < trackingsInFile.length; i += CHUNK) {
+          const chunk = trackingsInFile.slice(i, i + CHUNK);
+          const { data: existing } = await supabase
+            .from('orders').select('tracking_no')
+            .in('tracking_no', chunk);
+          (existing || []).forEach((o: any) => {
+            if (o.tracking_no) existingTrackSet.add(o.tracking_no);
+          });
+        }
+      }
 
       for (let i = 1; i < rows.length; i++) {
         const row      = rows[i];
@@ -267,6 +286,12 @@ export default function FlashExport() {
         const time     = String(row[0] || '').substring(0, 16);
 
         if (!tracking || (!name && !tel)) continue;
+
+        // ⚠ ข้าม tracking ที่มีอยู่แล้วในระบบ (ป้องกัน 409 unique violation)
+        if (existingTrackSet.has(tracking)) {
+          duplicateTracking++;
+          continue;
+        }
 
         // หา orders ที่ตรงกับ name หรือ tel ทั้งหมด
         const matches = (allOrders || []).filter((o: any) => {
@@ -299,7 +324,7 @@ export default function FlashExport() {
         }
       }
 
-      setUploadResult({ matched, notFound, conflicts: conflictCount });
+      setUploadResult({ matched, notFound, conflicts: conflictCount, duplicate: duplicateTracking });
       if (newConflicts.length > 0) {
         setConflicts(newConflicts);
         setShowConflict(true);
@@ -596,6 +621,7 @@ export default function FlashExport() {
                 ${uploadResult.conflicts > 0 ? 'bg-orange-50 text-orange-700' : uploadResult.matched > 0 ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
                 <span>✓ จับคู่สำเร็จ <strong>{uploadResult.matched}</strong> ออเดอร์</span>
                 {uploadResult.notFound > 0 && <span className="text-slate-500">· ไม่พบ {uploadResult.notFound} รายการ</span>}
+                {uploadResult.duplicate && uploadResult.duplicate > 0 && <span className="text-amber-600">· Tracking ซ้ำ {uploadResult.duplicate} รายการ (ข้าม)</span>}
                 {uploadResult.conflicts > 0 && (
                   <span className="flex items-center gap-2">
                     · ⚠ ชื่อ+เบอร์ซ้ำ <strong>{uploadResult.conflicts}</strong> รายการ
