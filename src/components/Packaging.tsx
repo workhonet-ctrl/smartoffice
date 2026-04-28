@@ -821,6 +821,76 @@ export default function Packaging({
           </div>
         </>
       )}
+
+      {/* ── แท็บ ประวัติปริ้น ── */}
+      {tab === 'history' && (
+        <div className="flex-1 overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between px-5 py-4 border-b">
+            <div>
+              <h3 className="font-semibold text-slate-800">ประวัติการปริ้นใบเตรียมสินค้า</h3>
+              <p className="text-xs text-slate-400 mt-0.5">กดปุ่มปริ้นซ้ำเพื่อพิมพ์อีกครั้ง</p>
+            </div>
+            <button onClick={loadPrintHistory} disabled={loadingHistory}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs border rounded-lg hover:bg-slate-50 transition disabled:opacity-50">
+              <RefreshCw size={13} className={loadingHistory ? 'animate-spin' : ''}/> รีเฟรช
+            </button>
+          </div>
+          {loadingHistory && (
+            <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด...</div>
+          )}
+          {!loadingHistory && printHistory.length === 0 && (
+            <div className="p-8 text-center text-slate-400 text-sm">ยังไม่มีประวัติการปริ้น</div>
+          )}
+          {!loadingHistory && printHistory.length > 0 && (
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-slate-50 sticky top-0">
+                <tr>
+                  <th className="p-3 text-left text-xs font-medium text-slate-500">วันที่ปริ้น</th>
+                  <th className="p-3 text-left text-xs font-medium text-slate-500">ผู้รับผิดชอบ</th>
+                  <th className="p-3 text-center text-xs font-medium text-slate-500">จำนวนออเดอร์</th>
+                  <th className="p-3 text-center text-xs font-medium text-slate-500">รายการสินค้า</th>
+                  <th className="p-3 text-center text-xs font-medium text-slate-500">ปริ้นซ้ำ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {printHistory.map((item, idx) => {
+                  const snap = (item.summary_snapshot || []) as any[];
+                  const printedAt = new Date(item.created_at).toLocaleString('th-TH', {
+                    day: '2-digit', month: '2-digit', year: '2-digit',
+                    hour: '2-digit', minute: '2-digit',
+                  });
+                  return (
+                    <tr key={item.id} className={'border-b hover:bg-slate-50 transition ' + (idx % 2 === 0 ? '' : 'bg-slate-50/50')}>
+                      <td className="p-3 text-slate-700">{printedAt}</td>
+                      <td className="p-3 font-medium text-slate-800">{item.responsible_person || '-'}</td>
+                      <td className="p-3 text-center">
+                        <span className="px-2 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-xs font-bold">{item.order_count}</span>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex flex-col gap-0.5 max-h-20 overflow-auto">
+                          {snap.slice(0, 3).map((s: any, i: number) => (
+                            <div key={i} className="text-xs text-slate-600">
+                              {s.short_name || s.name} — <span className="font-medium">{s.count} ออเดอร์</span>
+                            </div>
+                          ))}
+                          {snap.length > 3 && <div className="text-xs text-slate-400">+{snap.length - 3} รายการ</div>}
+                        </div>
+                      </td>
+                      <td className="p-3 text-center">
+                        <button
+                          onClick={() => handleReprintFromHistory(item)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-medium hover:bg-slate-700 transition mx-auto">
+                          <Printer size={12}/> ปริ้นซ้ำ
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
   );
 }
