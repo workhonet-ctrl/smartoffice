@@ -259,31 +259,22 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
 
       showToast('✅ อนุมัติใบเบิกและตัดสต็อกสำเร็จ เลขที่ ' + docNo);
 
-      // อัพเดต pack_history ถ้ามาจากหน้าแพ็คสินค้า
-      if (packHistoryId) {
-        // ดึง orders_snapshot จาก pack_history
-        const { data: ph } = await supabase
-          .from('pack_history')
-          .select('orders_snapshot')
-          .eq('id', packHistoryId)
-          .maybeSingle();
-
-        // อัพเดต status = approved + link req_doc_no
-        await supabase.from('pack_history')
-          .update({ status: 'approved', req_doc_no: docNo })
-          .eq('id', packHistoryId);
-
-        // อัพเดต order_status = 'แพ็คสินค้า' สำหรับออเดอร์ทั้งหมดในชุดนี้
-        if (ph?.orders_snapshot?.length > 0) {
-          const orderNos = (ph.orders_snapshot as any[]).map((o: any) => o.order_no).filter(Boolean);
-          if (orderNos.length > 0) {
-            await supabase.from('orders')
-              .update({ order_status: 'แพ็คสินค้า' })
-              .in('order_no', orderNos)
-              .eq('order_status', 'กำลังแพ็ค');
-          }
-        }
+      // ── อัพเดต orders ทั้งหมดที่ 'กำลังแพ็ค' → 'แพ็คสินค้า' (เพราะ approve แล้ว) ──
+      // ใช้วิธีนี้แทน orders_snapshot เพราะ loadAndAggregate ใช้ status='กำลังแพ็ค' เป็นเกณฑ์
+      // (ไม่ได้ filter ด้วย packHistoryId) ดังนั้น approve = อนุมัติ batch ทั้งหมดที่กำลังแพ็คอยู่
+      const { error: updErr } = await supabase.from('orders')
+        .update({ order_status: 'แพ็คสินค้า' })
+        .eq('order_status', 'กำลังแพ็ค');
+      if (updErr) {
+        console.error('[approve] update orders error:', updErr);
+        showToast('⚠ อัพเดตสถานะออเดอร์ไม่สำเร็จ: ' + updErr.message, 'error');
       }
+
+      // อัพเดต pack_history ทุกตัวที่ยัง pending หรือ printed → approved
+      const { error: phErr } = await supabase.from('pack_history')
+        .update({ status: 'approved', req_doc_no: docNo })
+        .in('status', ['printed', 'pending']);
+      if (phErr) console.error('[approve] update pack_history error:', phErr);
 
       // ── Reset ทุกอย่าง — ไม่โหลดออเดอร์ใหม่ ──
       setItems([]);
