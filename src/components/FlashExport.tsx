@@ -91,6 +91,14 @@ export default function FlashExport() {
   };
 
   // ส่งสำเร็จ = ส่งสินค้าแล้ว (มี tracking + ยืนยันส่ง), ทุก route
+  // helper: bulk update เป็น chunk ป้องกัน URL เกิน limit
+  const bulkUpdate = async (ids: string[], payload: Record<string, string>) => {
+    const CHUNK = 200;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      await supabase.from('orders').update(payload).in('id', ids.slice(i, i + CHUNK));
+    }
+  };
+
   const loadExportedOrders = async () => {
     const { data } = await supabase.from('orders').select('*, customers(*)')
       .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งสินค้าแล้ว'])
@@ -175,7 +183,7 @@ export default function FlashExport() {
     URL.revokeObjectURL(url);
     if (updateStatus) {
       const ids = targetOrders.map(o => o.id);
-      await supabase.from('orders').update({ order_status: 'รอแพ็ค' }).in('id', ids);
+      await bulkUpdate(ids, { order_status: 'รอแพ็ค' });
       setOrders([]); setSelectedPending(new Set());
       await Promise.all([loadOrders(), loadPackReady()]);
     }
@@ -213,7 +221,7 @@ export default function FlashExport() {
   // ลบ = reset กลับเป็น รอแพ็ค
   const handleDeleteExported = async (ids: string[]) => {
     if (!confirm(`ยืนยันลบ ${ids.length} รายการออกจากส่งออกแล้ว?`)) return;
-    await supabase.from('orders').update({ order_status: 'รอคีย์ออเดอร์' }).in('id', ids);
+    await bulkUpdate(ids, { order_status: 'รอคีย์ออเดอร์' });
     setSelectedExported(new Set());
     await Promise.all([loadOrders(), loadExportedOrders()]);
   };
@@ -230,7 +238,7 @@ export default function FlashExport() {
     try {
       await supabase.from('orders')
         .update({ route: 'A', order_status: 'รอคีย์ออเดอร์' })
-        .in('id', targets.map(o => o.id).filter(Boolean));
+
       setSelectedPrinted(new Set());
       await Promise.all([loadOrders(), loadExportedOrders(), loadPrintedOrders()]);
     } finally { setMovingToMyOrder(false); }
@@ -642,9 +650,14 @@ export default function FlashExport() {
                 onClick={async () => {
                   const withTracking = printedOrders.filter(o => (o as any).tracking_no);
                   if (!confirm(`ยืนยันส่งแล้ว ${withTracking.length} ออเดอร์ที่มี Tracking?\nจะย้ายไปแท็บ ส่งสำเร็จ`)) return;
-                  await supabase.from('orders')
-                    .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง' })
-                    .in('id', withTracking.map(o => o.id).filter(Boolean));
+                  // แบ่ง chunk 200 ป้องกัน URL เกิน limit
+                  const ids = withTracking.map(o => o.id).filter(Boolean);
+                  const CHUNK = 200;
+                  for (let i = 0; i < ids.length; i += CHUNK) {
+                    await supabase.from('orders')
+                      .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง' })
+                      .in('id', ids.slice(i, i + CHUNK));
+                  }
                   await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
                 }}
                 className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm font-medium flex items-center gap-2">
