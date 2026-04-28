@@ -526,6 +526,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   // ข้อ 2: เริ่มต้นเห็นทั้งหมด (ไม่ filter วันที่)
   const [dateFrom,   setDateFrom]   = useState('');
   const [dateTo,     setDateTo]     = useState('');
+  const [dateField,  setDateField]  = useState<'order_date' | 'ship_date'>('order_date');
   const [importDate, setImportDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   // ข้อ 1: filter เพิ่มเติม
@@ -562,7 +563,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [checkingDups, setCheckingDups] = useState(false);
 
   useEffect(() => { loadOrders(); loadPromoOptions(); }, []);
-  useEffect(() => { if (orderPage !== 'all') setOrderPage(0); }, [search, dateFrom, dateTo, filterRoute, filterStatus, filterPay]);
+  useEffect(() => { if (orderPage !== 'all') setOrderPage(0); }, [search, dateFrom, dateTo, dateField, filterRoute, filterStatus, filterPay]);
 
   // refresh เมื่อ switch กลับมาแท็บ orders
   useEffect(() => {
@@ -1061,9 +1062,12 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         o.raw_prod?.toLowerCase().includes(q);
       if (!matchSearch) return false;
     }
-    const orderDay = o.order_date || o.created_at?.split('T')[0];
-    if (dateFrom && orderDay && orderDay < dateFrom) return false;
-    if (dateTo   && orderDay && orderDay > dateTo)   return false;
+    // กรองตามฟิลด์วันที่ที่เลือก: order_date (วันสั่งซื้อ) หรือ ship_date (วันจัดส่ง)
+    const filterDay = dateField === 'ship_date'
+      ? (o as any).ship_date
+      : (o.order_date || o.created_at?.split('T')[0]);
+    if (dateFrom && (!filterDay || filterDay < dateFrom)) return false;
+    if (dateTo   && (!filterDay || filterDay > dateTo))   return false;
     if (filterRoute) {
       if (filterRoute === 'AC') { if (o.route !== 'A' && o.route !== 'C') return false; }
       else if (o.route !== filterRoute) return false;
@@ -1163,11 +1167,6 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             </div>
             {activeTab === 'orders' && (
               <div className="flex items-center gap-2">
-                <div className="flex flex-col">
-                  <label className="text-[10px] text-slate-400 mb-0.5 font-medium">วันที่นำเข้า</label>
-                  <input type="date" value={importDate} onChange={e => setImportDate(e.target.value)}
-                    className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300"/>
-                </div>
                 <button onClick={handleExportExcel}
                 className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center gap-2 text-sm whitespace-nowrap self-end">
                   <Upload size={17}/> ส่งออก Excel {selectedOrders.size > 0 ? `(${selectedOrders.size})` : `ทั้งหมด (${filtered.length})`}
@@ -1189,7 +1188,11 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                 className="pl-8 pr-4 py-1.5 border rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
             </div>
             <div className="flex items-center gap-1.5 text-sm">
-              <span className="text-slate-500 whitespace-nowrap">วันที่</span>
+              <select value={dateField} onChange={e => setDateField(e.target.value as 'order_date' | 'ship_date')}
+                className={`border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 ${dateField === 'ship_date' ? 'bg-cyan-50 border-cyan-300 font-medium' : ''}`}>
+                <option value="order_date">วันที่สั่ง</option>
+                <option value="ship_date">วันที่จัดส่ง</option>
+              </select>
               <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
                 className="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
               <span className="text-slate-400">—</span>
