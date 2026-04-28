@@ -230,7 +230,7 @@ export default function FlashExport() {
     try {
       await supabase.from('orders')
         .update({ route: 'A', order_status: 'รอคีย์ออเดอร์' })
-        .in('id', targets.map(o => o.id));
+        .in('id', targets.map(o => o.id).filter(Boolean));
       setSelectedPrinted(new Set());
       await Promise.all([loadOrders(), loadExportedOrders(), loadPrintedOrders()]);
     } finally { setMovingToMyOrder(false); }
@@ -644,7 +644,7 @@ export default function FlashExport() {
                   if (!confirm(`ยืนยันส่งแล้ว ${withTracking.length} ออเดอร์ที่มี Tracking?\nจะย้ายไปแท็บ ส่งสำเร็จ`)) return;
                   await supabase.from('orders')
                     .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง' })
-                    .in('id', withTracking.map(o => o.id));
+                    .in('id', withTracking.map(o => o.id).filter(Boolean));
                   await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
                 }}
                 className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm font-medium flex items-center gap-2">
