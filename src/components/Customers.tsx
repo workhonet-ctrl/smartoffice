@@ -388,6 +388,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           payment_method: paymentMethod,
           payment_status: paymentMethod === 'COD' ? 'รอชำระเงิน' : 'ชำระเงินแล้ว',
           order_status: 'รอแพ็ค',
+          imported_at: new Date().toISOString().split('T')[0],
         }]);
         if (error) {
           console.error('[Flash insert error] order:', `FL-${tracking}`, error);
