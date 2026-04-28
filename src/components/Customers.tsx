@@ -326,6 +326,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
             district, province,
             postal_code: String(r[14]||'').trim()||null,
             channel: 'FLASH',
+            payment_method: Number(r[17] || 0) > 0 ? 'COD' : 'BANK',
             tag: 'ใหม่',
           });
         }
