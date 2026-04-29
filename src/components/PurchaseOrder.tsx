@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   ShoppingBag, Plus, Trash2, Search, X, ChevronDown,
-  CheckCircle, FileText, RefreshCw, User
+  CheckCircle, FileText, RefreshCw, User, Save, Pencil
 } from 'lucide-react';
 
 type Supplier = { id: string; name: string; tel: string | null; address: string | null; note: string | null };
@@ -91,6 +91,7 @@ export default function PurchaseOrder() {
   const [newSup, setNewSup]     = useState({ name:'', tel:'', address:'', note:'' });
 
   const [toast, setToast]       = useState<{ msg: string; type: 'success'|'error' } | null>(null);
+  const [editingPO, setEditingPO] = useState<PO | null>(null); // PO ที่กำลัง edit
   const [editSup, setEditSup]   = useState<Supplier | null>(null);
   const [supSearch, setSupSearch] = useState('');
   const [showSupListModal, setShowSupListModal] = useState(false);
@@ -159,6 +160,55 @@ export default function PurchaseOrder() {
     await supabase.from('suppliers').update({ active: false }).eq('id', id);
     setSuppliers(p => p.filter(s => s.id !== id));
     showToast('✓ ลบผู้ขายแล้ว');
+  };
+
+  // ── load PO เข้า form สำหรับแก้ไข ──────────────────────────────────
+  const startEditPO = (po: PO) => {
+    setEditingPO(po);
+    setPoDate(po.po_date || new Date().toISOString().split('T')[0]);
+    setPoNo(po.po_no || '');
+    setSupplierId(po.supplier_id || '');
+    setSupplierName(po.supplier_name || '');
+    setNote(po.note || '');
+    const items = (po.items as POItem[]) || [];
+    setPoItems(items.length > 0
+      ? items.map((it, i) => ({ ...it, key: String(i+1) }))
+      : [{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]
+    );
+    setTab('create');
+  };
+
+  const cancelEditPO = () => {
+    setEditingPO(null);
+    setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
+    setSupplierId(''); setSupplierName(''); setNote('');
+    setTab('list');
+  };
+
+  const handleUpdatePO = async () => {
+    if (!editingPO) return;
+    const validItems = poItems.filter(it => it.name.trim() && it.qty > 0);
+    if (!validItems.length) { showToast('กรุณาเพิ่มรายการสินค้า', 'error'); return; }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('purchase_orders').update({
+        po_date:       poDate,
+        supplier_id:   supplierId || null,
+        supplier_name: supplierName || null,
+        items:         validItems,
+        total_thb:     total,
+        note:          note || null,
+      }).eq('id', editingPO.id).neq('status', 'approved'); // ป้องกันแก้ PO ที่อนุมัติแล้ว
+      if (error) throw error;
+      showToast('✓ บันทึกการแก้ไขสำเร็จ');
+      setEditingPO(null);
+      setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
+      setSupplierId(''); setSupplierName(''); setNote('');
+      await Promise.all([initPoNo(), loadData()]);
+      setTab('list');
+    } catch (err: any) {
+      showToast('❌ ' + (err.message||'เกิดข้อผิดพลาด'), 'error');
+    } finally { setSaving(false); }
   };
 
   const handleApprove = async () => {
@@ -275,6 +325,16 @@ export default function PurchaseOrder() {
       {/* ── Tab: สร้างใบสั่งซื้อ ── */}
       {tab === 'create' && (
         <div className="flex-1 overflow-auto min-h-0 space-y-4">
+          {/* banner เมื่อ edit mode */}
+          {editingPO && (
+            <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+              <Pencil size={15}/>
+              <span>กำลังแก้ไข <strong>{editingPO.po_no}</strong> — กดบันทึกการแก้ไขเมื่อเสร็จสิ้น</span>
+              <button onClick={cancelEditPO} className="ml-auto text-xs text-amber-500 hover:text-amber-700 flex items-center gap-1">
+                <X size={12}/> ยกเลิก
+              </button>
+            </div>
+          )}
           {/* Info Card */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -405,14 +465,29 @@ export default function PurchaseOrder() {
 
           {/* Actions */}
           <div className="flex justify-end gap-3 pb-4">
-            <button onClick={handleDraft} disabled={saving}
-              className="px-5 py-2.5 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 font-medium flex items-center gap-2 disabled:opacity-50">
-              <FileText size={16}/> บันทึกร่าง
-            </button>
-            <button onClick={handleApprove} disabled={saving}
-              className="px-6 py-2.5 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 font-semibold flex items-center gap-2 disabled:opacity-50 shadow">
-              <CheckCircle size={18}/> {saving ? 'กำลังบันทึก...' : 'อนุมัติ → รับเข้าสต็อก'}
-            </button>
+            {editingPO ? (
+              <>
+                <button onClick={cancelEditPO} disabled={saving}
+                  className="px-5 py-2.5 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 font-medium flex items-center gap-2 disabled:opacity-50">
+                  <X size={16}/> ยกเลิก
+                </button>
+                <button onClick={handleUpdatePO} disabled={saving}
+                  className="px-6 py-2.5 bg-amber-500 text-white rounded-xl hover:bg-amber-600 font-semibold flex items-center gap-2 disabled:opacity-50 shadow">
+                  <Save size={18}/> {saving ? 'กำลังบันทึก...' : 'บันทึกการแก้ไข'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={handleDraft} disabled={saving}
+                  className="px-5 py-2.5 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 font-medium flex items-center gap-2 disabled:opacity-50">
+                  <FileText size={16}/> บันทึกร่าง
+                </button>
+                <button onClick={handleApprove} disabled={saving}
+                  className="px-6 py-2.5 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 font-semibold flex items-center gap-2 disabled:opacity-50 shadow">
+                  <CheckCircle size={18}/> {saving ? 'กำลังบันทึก...' : 'อนุมัติ → รับเข้าสต็อก'}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -454,12 +529,20 @@ export default function PurchaseOrder() {
                   </td>
                   <td className="p-3 text-center">{statusBadge(po.status)}</td>
                   <td className="p-3 text-center">
-                    {po.status === 'draft' && (
-                      <button onClick={() => handleApproveDraft(po)}
-                        className="px-3 py-1 bg-green-500 text-white rounded-lg text-xs hover:bg-green-600 font-medium">
-                        อนุมัติ
-                      </button>
-                    )}
+                    <div className="flex items-center justify-center gap-1.5">
+                      {po.status !== 'approved' && (
+                        <button onClick={() => startEditPO(po)}
+                          className="flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs hover:bg-amber-200 font-medium">
+                          <Pencil size={11}/> แก้ไข
+                        </button>
+                      )}
+                      {po.status === 'draft' && (
+                        <button onClick={() => handleApproveDraft(po)}
+                          className="px-3 py-1 bg-green-500 text-white rounded-lg text-xs hover:bg-green-600 font-medium">
+                          อนุมัติ
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
