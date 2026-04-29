@@ -50,6 +50,13 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [rcvDate,   setRcvDate]   = useState(new Date().toISOString().split('T')[0]);
   const [saving, setSaving]       = useState(false);
 
+  // Popup รับสต็อกเริ่มต้น
+  const [showInitStock, setShowInitStock] = useState(false);
+  const [initTab, setInitTab]   = useState<'box'|'bubble'|'product'>('box');
+  const [initRows, setInitRows] = useState<Record<string, { qty: number; price: number; selected: boolean }>>({});
+  const [bulkPrice, setBulkPrice] = useState('');
+  const [initSaving, setInitSaving] = useState(false);
+
   // เพิ่มรายการใหม่
   const [showAddItem, setShowAddItem] = useState(false);
   const [newName, setNewName]   = useState('');
@@ -159,6 +166,43 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     } finally { setSaving(false); }
   };
 
+  // ── เปิด popup รับสต็อกเริ่มต้น ──────────────────────────────
+  const handleOpenInitStock = () => {
+    // init rows จาก items ทั้งหมด
+    const rows: Record<string, { qty: number; price: number; selected: boolean }> = {};
+    items.forEach(it => { rows[it.id] = { qty: 0, price: 0, selected: false }; });
+    setInitRows(rows);
+    setBulkPrice('');
+    setInitTab('box');
+    setShowInitStock(true);
+  };
+
+  const handleSaveInitStock = async () => {
+    const toInsert = items
+      .filter(it => initRows[it.id]?.selected && (initRows[it.id]?.qty || 0) > 0)
+      .map(it => ({
+        stock_item_id: it.id,
+        txn_type: 'in',
+        qty: initRows[it.id].qty,
+        ref_type: 'initial',
+        ref_id: 'initial_stock',
+        note: `สต็อกเริ่มต้น${initRows[it.id].price > 0 ? ` ราคา ฿${initRows[it.id].price}/หน่วย` : ''}`,
+      }));
+
+    if (toInsert.length === 0) { showToast('กรุณาเลือกรายการและกรอกจำนวน', 'error'); return; }
+
+    setInitSaving(true);
+    try {
+      const { error } = await supabase.from('stock_transactions').insert(toInsert);
+      if (error) throw error;
+      showToast(`✓ บันทึกสต็อกเริ่มต้น ${toInsert.length} รายการแล้ว`);
+      setShowInitStock(false);
+      await loadItems();
+    } catch (err: any) {
+      showToast('❌ ' + (err.message || 'unknown'), 'error');
+    } finally { setInitSaving(false); }
+  };
+
   const handleUpdateMin = async (id: string, min: number) => {
     await supabase.from('stock_items').update({ min_qty: min }).eq('id', id);
     setItems(p => p.map(i => i.id === id ? { ...i, min_qty: min } : i));
@@ -221,6 +265,10 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
           <button onClick={onGoToPO}
             className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-2 text-sm">
             <ShoppingBag size={13}/> ใบสั่งซื้อ (PO)
+          </button>
+          <button onClick={handleOpenInitStock}
+            className="px-3 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 flex items-center gap-2 text-sm">
+            <PackagePlus size={13}/> รับสต็อกเริ่มต้น
           </button>
           <button onClick={() => setShowAddItem(true)}
             className="px-3 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 flex items-center gap-2 text-sm">
@@ -414,6 +462,168 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
       )}
 
       {/* Modal เพิ่มรายการ */}
+
+      {/* ── Modal: รับสต็อกเริ่มต้น ─────────────────────────────────── */}
+      {showInitStock && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <PackagePlus size={20} className="text-emerald-600"/> รับสต็อกเริ่มต้น
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  เลือกรายการ กรอกจำนวน และราคา — ถ้าราคาเท่ากันใช้ "ใส่ราคาทีเดียว"
+                </p>
+              </div>
+              <button onClick={() => setShowInitStock(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X size={18}/>
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex gap-1 px-6 pt-4 shrink-0">
+              {(['box','bubble','product'] as const).map(t => {
+                const labels = { box: '📦 กล่อง', bubble: '🫧 บั้บเบิ้ล', product: '🧴 สินค้า' };
+                const cnt = items.filter(it => it.type === t && initRows[it.id]?.selected).length;
+                return (
+                  <button key={t} onClick={() => setInitTab(t)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5
+                      ${initTab === t ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                    {labels[t]}
+                    {cnt > 0 && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${initTab===t?'bg-white text-emerald-700':'bg-emerald-100 text-emerald-700'}`}>{cnt}</span>}
+                  </button>
+                );
+              })}
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-xs text-slate-500">ราคาเดียวกัน:</span>
+                <input type="number" min={0} step={0.1}
+                  value={bulkPrice}
+                  onChange={e => setBulkPrice(e.target.value)}
+                  placeholder="ราคา/หน่วย"
+                  className="border rounded-lg px-2 py-1.5 text-xs w-28 focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
+                <button
+                  onClick={() => {
+                    const price = parseFloat(bulkPrice) || 0;
+                    const tabItems = items.filter(it => it.type === initTab && initRows[it.id]?.selected);
+                    if (tabItems.length === 0) { showToast('เลือกรายการก่อน', 'error'); return; }
+                    setInitRows(prev => {
+                      const next = { ...prev };
+                      tabItems.forEach(it => { next[it.id] = { ...next[it.id], price }; });
+                      return next;
+                    });
+                  }}
+                  className="px-3 py-1.5 bg-slate-700 text-white rounded-lg text-xs hover:bg-slate-800 whitespace-nowrap">
+                  ใส่ให้ที่เลือก
+                </button>
+              </div>
+            </div>
+
+            {/* Select all */}
+            <div className="px-6 py-2 shrink-0 flex items-center gap-3 border-b">
+              <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none">
+                <input type="checkbox"
+                  checked={items.filter(it => it.type === initTab).every(it => initRows[it.id]?.selected)}
+                  onChange={e => {
+                    const tabItems = items.filter(it => it.type === initTab);
+                    setInitRows(prev => {
+                      const next = { ...prev };
+                      tabItems.forEach(it => { next[it.id] = { ...next[it.id], selected: e.target.checked }; });
+                      return next;
+                    });
+                  }}
+                  className="rounded cursor-pointer"/>
+                เลือกทั้งหมดใน tab นี้
+              </label>
+              <span className="text-xs text-slate-400">
+                เลือกแล้ว {Object.values(initRows).filter(r => r.selected).length} รายการ
+                จากทั้งหมด {items.length} รายการ
+              </span>
+            </div>
+
+            {/* Table */}
+            <div className="flex-1 overflow-auto px-6 py-2">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white border-b">
+                  <tr>
+                    <th className="py-2 w-8"/>
+                    <th className="py-2 text-left text-xs text-slate-500 font-medium">ชื่อ</th>
+                    <th className="py-2 text-center text-xs text-slate-500 font-medium w-24">หน่วย</th>
+                    <th className="py-2 text-center text-xs text-slate-500 font-medium w-32">จำนวน *</th>
+                    <th className="py-2 text-center text-xs text-slate-500 font-medium w-36">ราคา/หน่วย (฿)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items
+                    .filter(it => it.type === initTab)
+                    .map(it => {
+                      const row = initRows[it.id] || { qty: 0, price: 0, selected: false };
+                      return (
+                        <tr key={it.id} className={`border-b transition ${row.selected ? 'bg-emerald-50/60' : 'hover:bg-slate-50'}`}>
+                          <td className="py-2 text-center">
+                            <input type="checkbox" checked={row.selected}
+                              onChange={e => setInitRows(prev => ({
+                                ...prev,
+                                [it.id]: { ...prev[it.id], selected: e.target.checked }
+                              }))}
+                              className="rounded cursor-pointer"/>
+                          </td>
+                          <td className="py-2 font-medium text-slate-800">{it.name}</td>
+                          <td className="py-2 text-center text-slate-500 text-xs">{it.unit}</td>
+                          <td className="py-2 text-center">
+                            <input type="number" min={0}
+                              value={row.qty || ''}
+                              onChange={e => setInitRows(prev => ({
+                                ...prev,
+                                [it.id]: { ...prev[it.id], qty: Number(e.target.value) || 0, selected: Number(e.target.value) > 0 ? true : prev[it.id].selected }
+                              }))}
+                              placeholder="0"
+                              className={`border rounded-lg px-2 py-1 text-center text-sm w-24 focus:outline-none focus:ring-2 focus:ring-emerald-300
+                                ${row.selected && !row.qty ? 'border-red-300 bg-red-50' : ''}`}/>
+                          </td>
+                          <td className="py-2 text-center">
+                            <input type="number" min={0} step={0.01}
+                              value={row.price || ''}
+                              onChange={e => setInitRows(prev => ({
+                                ...prev,
+                                [it.id]: { ...prev[it.id], price: parseFloat(e.target.value) || 0 }
+                              }))}
+                              placeholder="0.00"
+                              className="border rounded-lg px-2 py-1 text-center text-sm w-28 focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  }
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t flex items-center justify-between shrink-0">
+              <div className="text-sm text-slate-500">
+                รายการที่กรอกจำนวนแล้ว:{' '}
+                <span className="font-bold text-emerald-600">
+                  {Object.values(initRows).filter(r => r.selected && r.qty > 0).length} รายการ
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setShowInitStock(false)}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-medium">
+                  ยกเลิก
+                </button>
+                <button onClick={handleSaveInitStock} disabled={initSaving}
+                  className="px-6 py-2 bg-emerald-500 text-white rounded-xl hover:bg-emerald-600 text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+                  <PackagePlus size={16}/>
+                  {initSaving ? 'กำลังบันทึก...' : 'บันทึกสต็อกเริ่มต้น'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAddItem && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-md w-full">
