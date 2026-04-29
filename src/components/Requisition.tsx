@@ -220,42 +220,30 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
     if (!docNo) return;
     setSaving(true);
     try {
-      const validItems = items.filter(it => it.name.trim());
-      const { error } = await supabase.from('requisitions').insert([{
-        doc_no: docNo, doc_date: docDate, items: validItems, note: note || null,
-        created_by: createdBy || null, approved_by: approvedBy || null,
-      }]);
-      if (error) throw error;
+      const validItems = items.filter(it => it.name.trim()).map(it => ({
+        ...it,
+        // แก้ชื่อซ้ำ "กล่อง กล่อง X" → "กล่อง X" ก่อน save
+        name: it.name.replace(/^(กล่อง) \1\s+/, '$1 ').trim(),
+      }));
 
-      for (const item of validItems) {
-        const itemName = item.name.trim();
-        let stockId: string | null = null;
-
-        // หา stock_item ที่ชื่อตรงกัน (exact หรือ ilike)
+      // resolve stock_item_id สำหรับทุก item ก่อน insert
+      const itemsWithStockId = await Promise.all(validItems.map(async (item) => {
         const { data: si } = await supabase
           .from('stock_items').select('id')
-          .or(`name.eq.${itemName},name.ilike.%${itemName}%`)
+          .eq('name', item.name)
           .maybeSingle();
+        return { ...item, stock_item_id: si?.id || null };
+      }));
 
-        if (si?.id) {
-          stockId = si.id;
-        } else {
-          // ถ้าไม่มีใน stock_items → สร้างใหม่อัตโนมัติ
-          const unit = item.unit || 'ชิ้น';
-          const type = item.type === 'box' ? 'box' : item.type === 'bubble' ? 'bubble' : 'product';
-          const { data: newItem } = await supabase
-            .from('stock_items').insert([{ name: itemName, unit, type, min_qty: 0 }])
-            .select('id').single();
-          stockId = newItem?.id || null;
-        }
-
-        if (stockId) {
-          await supabase.from('stock_transactions').insert([{
-            stock_item_id: stockId, txn_type: 'out', qty: item.qty,
-            ref_type: 'requisition', ref_id: docNo, note: `ใบเบิก ${docNo}`,
-          }]);
-        }
-      }
+      // insert requisition → trigger จะตัดสต็อกอัตโนมัติ
+      const { error } = await supabase.from('requisitions').insert([{
+        doc_no: docNo, doc_date: docDate,
+        items: itemsWithStockId,
+        note: note || null,
+        created_by: createdBy || null,
+        approved_by: approvedBy || null,
+      }]);
+      if (error) throw error;
 
       showToast('✅ อนุมัติใบเบิกและตัดสต็อกสำเร็จ เลขที่ ' + docNo);
 
