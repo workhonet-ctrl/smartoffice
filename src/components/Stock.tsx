@@ -50,12 +50,25 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [rcvDate,   setRcvDate]   = useState(new Date().toISOString().split('T')[0]);
   const [saving, setSaving]       = useState(false);
 
-  // Popup รับสต็อกเริ่มต้น
+  // Popup รับสต็อกเริ่มต้น (order-based)
   const [showInitStock, setShowInitStock] = useState(false);
+  const [initSaving, setInitSaving] = useState(false);
+  const [initOrders, setInitOrders] = useState<any[]>([]);
+  const [initLoadingOrders, setInitLoadingOrders] = useState(false);
+  // packRows: orderId → { boxId, bubbleId, boxSearch, bubbleSearch }
+  const [packRows, setPackRows] = useState<Record<string, {
+    boxId: string; bubbleId: string;
+    boxSearch: string; bubbleSearch: string;
+    selected: boolean;
+  }>>({});
+  const [bulkBoxId, setBulkBoxId] = useState('');
+  const [bulkBubbleId, setBulkBubbleId] = useState('');
+  const [bulkBoxSearch, setBulkBoxSearch] = useState('');
+  const [bulkBubbleSearch, setBulkBubbleSearch] = useState('');
+  // legacy refs (คงไว้ป้องกัน ref error)
   const [initTab, setInitTab]   = useState<'box'|'bubble'|'product'>('product');
   const [initRows, setInitRows] = useState<Record<string, { qty: number; price: number; selected: boolean }>>({});
   const [bulkPrice, setBulkPrice] = useState('');
-  const [initSaving, setInitSaving] = useState(false);
 
   // เพิ่มรายการใหม่
   const [showAddItem, setShowAddItem] = useState(false);
@@ -168,71 +181,57 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
 
   // ── เปิด popup รับสต็อกเริ่มต้น ──────────────────────────────
   const handleOpenInitStock = async () => {
-    // ดึง promo quantities จาก orders เพื่อ pre-fill จำนวน
-    const rows: Record<string, { qty: number; price: number; selected: boolean }> = {};
-    items.forEach(it => { rows[it.id] = { qty: 0, price: 0, selected: false }; });
-
-    try {
-      // นับจาก orders แพ็คแล้วทั้งหมด via products_promo → stock_items
-      const { data: promos } = await supabase
-        .from('products_promo')
-        .select('id, short_name')
-        .eq('active', true);
-
-      // นับ order_count ต่อ promo_id จาก orders
-      const { data: orders } = await supabase
-        .from('orders')
-        .select('promo_ids, quantities')
-        .in('order_status', ['แพ็คสินค้า', 'ส่งสินค้าแล้ว']);
-
-      // สร้าง map: short_name → total qty ที่เบิกออกไปแล้ว
-      const promoQtyMap: Record<string, number> = {};
-      (orders || []).forEach((o: any) => {
-        const ids = o.promo_ids || [];
-        const qtys = String(o.quantities || '').split('|').map((q: string) => Number(q) || 1);
-        ids.forEach((pid: string, i: number) => {
-          promoQtyMap[pid] = (promoQtyMap[pid] || 0) + (qtys[i] || 1);
-        });
-      });
-
-      // map promo → stock_item via short_name
-      (promos || []).forEach((p: any) => {
-        const si = items.find(it => it.type === 'product' && it.name === p.short_name);
-        if (si && promoQtyMap[p.id]) {
-          rows[si.id] = {
-            ...rows[si.id],
-            qty: (rows[si.id].qty || 0) + promoQtyMap[p.id],
-            selected: true,
-          };
-        }
-      });
-    } catch (e) { /* ignore — ยังคงเปิด popup ได้ */ }
-
-    setInitRows(rows);
-    setBulkPrice('');
-    setInitTab('product'); // เริ่มที่ tab สินค้าก่อนเพราะมี data
+    setInitLoadingOrders(true);
     setShowInitStock(true);
+    try {
+      const { data } = await supabase
+        .from('orders')
+        .select('id, order_no, raw_prod, quantities, customers(name)')
+        .in('order_status', ['แพ็คสินค้า', 'ส่งสินค้าแล้ว'])
+        .order('created_at', { ascending: false });
+      setInitOrders(data || []);
+      // init packRows
+      const rows: typeof packRows = {};
+      (data || []).forEach((o: any) => {
+        rows[o.id] = { boxId: '', bubbleId: '', boxSearch: '', bubbleSearch: '', selected: false };
+      });
+      setPackRows(rows);
+    } finally { setInitLoadingOrders(false); }
   };
 
   const handleSaveInitStock = async () => {
-    const toInsert = items
-      .filter(it => initRows[it.id]?.selected && (initRows[it.id]?.qty || 0) > 0)
-      .map(it => ({
-        stock_item_id: it.id,
-        txn_type: 'in',
-        qty: initRows[it.id].qty,
-        ref_type: 'initial',
-        ref_id: 'initial_stock',
-        note: `สต็อกเริ่มต้น${initRows[it.id].price > 0 ? ` ราคา ฿${initRows[it.id].price}/หน่วย` : ''}`,
-      }));
-
-    if (toInsert.length === 0) { showToast('กรุณาเลือกรายการและกรอกจำนวน', 'error'); return; }
-
+    const selected = initOrders.filter(o => {
+      const r = packRows[o.id];
+      return r?.selected && (r.boxId || r.bubbleId);
+    });
+    if (selected.length === 0) {
+      showToast('กรุณาเลือกออเดอร์และเลือกกล่อง/บั้บเบิ้ล', 'error'); return;
+    }
     setInitSaving(true);
     try {
+      const toInsert: any[] = [];
+      selected.forEach((o: any) => {
+        const r = packRows[o.id];
+        if (r.boxId) {
+          toInsert.push({
+            stock_item_id: r.boxId,
+            txn_type: 'out', qty: 1,
+            ref_type: 'pack', ref_id: o.order_no,
+            note: `แพ็คออเดอร์ ${o.order_no} - ${o.customers?.name || ''}`,
+          });
+        }
+        if (r.bubbleId) {
+          toInsert.push({
+            stock_item_id: r.bubbleId,
+            txn_type: 'out', qty: 1,
+            ref_type: 'pack', ref_id: o.order_no,
+            note: `แพ็คออเดอร์ ${o.order_no} - ${o.customers?.name || ''}`,
+          });
+        }
+      });
       const { error } = await supabase.from('stock_transactions').insert(toInsert);
       if (error) throw error;
-      showToast(`✓ บันทึกสต็อกเริ่มต้น ${toInsert.length} รายการแล้ว`);
+      showToast(`✓ ตัดสต็อก ${selected.length} ออเดอร์ (${toInsert.length} transactions)`);
       setShowInitStock(false);
       await loadItems();
     } catch (err: any) {
@@ -503,15 +502,16 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
       {/* ── Modal: รับสต็อกเริ่มต้น ─────────────────────────────────── */}
       {showInitStock && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col">
+
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
               <div>
                 <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                  <PackagePlus size={20} className="text-emerald-600"/> รับสต็อกเริ่มต้น
+                  <PackagePlus size={20} className="text-cyan-600"/> ตัดสต็อกกล่อง+บั้บเบิ้ล จากออเดอร์
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  🧴 สินค้า: pre-filled จากออเดอร์ที่แพ็คไปแล้ว — 📦 กล่อง/บั้บเบิ้ล: กรอกเอง
+                  เลือกออเดอร์ → เลือกกล่อง+บั้บเบิ้ล → บันทึกตัดสต็อก
                 </p>
               </div>
               <button onClick={() => setShowInitStock(false)} className="p-2 hover:bg-slate-100 rounded-lg">
@@ -519,135 +519,168 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
               </button>
             </div>
 
-            {/* Tabs */}
-            <div className="flex gap-1 px-6 pt-4 shrink-0">
-              {(['box','bubble','product'] as const).map(t => {
-                const labels = { box: '📦 กล่อง', bubble: '🫧 บั้บเบิ้ล', product: '🧴 สินค้า' };
-                const cnt = items.filter(it => it.type === t && initRows[it.id]?.selected).length;
-                return (
-                  <button key={t} onClick={() => setInitTab(t)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1.5
-                      ${initTab === t ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                    {labels[t]}
-                    {cnt > 0 && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${initTab===t?'bg-white text-emerald-700':'bg-emerald-100 text-emerald-700'}`}>{cnt}</span>}
-                  </button>
-                );
-              })}
-              <div className="ml-auto flex items-center gap-2">
-                <span className="text-xs text-slate-500">ราคาเดียวกัน:</span>
-                <input type="number" min={0} step={0.1}
-                  value={bulkPrice}
-                  onChange={e => setBulkPrice(e.target.value)}
-                  placeholder="ราคา/หน่วย"
-                  className="border rounded-lg px-2 py-1.5 text-xs w-28 focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
-                <button
-                  onClick={() => {
-                    const price = parseFloat(bulkPrice) || 0;
-                    const tabItems = items.filter(it => it.type === initTab && initRows[it.id]?.selected);
-                    if (tabItems.length === 0) { showToast('เลือกรายการก่อน', 'error'); return; }
-                    setInitRows(prev => {
-                      const next = { ...prev };
-                      tabItems.forEach(it => { next[it.id] = { ...next[it.id], price }; });
-                      return next;
-                    });
-                  }}
-                  className="px-3 py-1.5 bg-slate-700 text-white rounded-lg text-xs hover:bg-slate-800 whitespace-nowrap">
-                  ใส่ให้ที่เลือก
-                </button>
-              </div>
-            </div>
-
-            {/* Select all */}
-            <div className="px-6 py-2 shrink-0 flex items-center gap-3 border-b">
-              <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none">
-                <input type="checkbox"
-                  checked={items.filter(it => it.type === initTab).every(it => initRows[it.id]?.selected)}
+            {/* Bulk assign bar */}
+            <div className="px-6 py-3 bg-slate-50 border-b shrink-0 flex items-center gap-3 flex-wrap">
+              <span className="text-xs font-medium text-slate-600">ใส่ให้ทุกที่เลือก:</span>
+              {/* Bulk Box */}
+              <div className="flex flex-col gap-0.5">
+                <input list="bulk-init-boxes"
+                  value={bulkBoxId ? (items.find(b => b.id === bulkBoxId)?.name || bulkBoxSearch) : bulkBoxSearch}
                   onChange={e => {
-                    const tabItems = items.filter(it => it.type === initTab);
-                    setInitRows(prev => {
-                      const next = { ...prev };
-                      tabItems.forEach(it => { next[it.id] = { ...next[it.id], selected: e.target.checked }; });
-                      return next;
-                    });
+                    setBulkBoxSearch(e.target.value);
+                    const found = items.find(b => b.type === 'box' && b.name === e.target.value);
+                    setBulkBoxId(found ? found.id : '');
                   }}
-                  className="rounded cursor-pointer"/>
-                เลือกทั้งหมดใน tab นี้
-              </label>
-              <span className="text-xs text-slate-400">
-                เลือกแล้ว {Object.values(initRows).filter(r => r.selected).length} รายการ
-                จากทั้งหมด {items.length} รายการ
+                  placeholder="กล่อง..."
+                  className="border rounded-lg px-2 py-1.5 text-xs w-40 focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white"/>
+                <datalist id="bulk-init-boxes">
+                  {items.filter(b => b.type === 'box').map(b => <option key={b.id} value={b.name}/>)}
+                </datalist>
+              </div>
+              {/* Bulk Bubble */}
+              <div className="flex flex-col gap-0.5">
+                <input list="bulk-init-bubbles"
+                  value={bulkBubbleId ? (items.find(b => b.id === bulkBubbleId)?.name || bulkBubbleSearch) : bulkBubbleSearch}
+                  onChange={e => {
+                    setBulkBubbleSearch(e.target.value);
+                    const found = items.find(b => b.type === 'bubble' && b.name === e.target.value);
+                    setBulkBubbleId(found ? found.id : '');
+                  }}
+                  placeholder="บั้บเบิ้ล..."
+                  className="border rounded-lg px-2 py-1.5 text-xs w-40 focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white"/>
+                <datalist id="bulk-init-bubbles">
+                  {items.filter(b => b.type === 'bubble').map(b => <option key={b.id} value={b.name}/>)}
+                </datalist>
+              </div>
+              <button
+                onClick={() => {
+                  const selected = initOrders.filter(o => packRows[o.id]?.selected);
+                  if (selected.length === 0) { showToast('เลือกออเดอร์ก่อน', 'error'); return; }
+                  setPackRows(prev => {
+                    const next = { ...prev };
+                    selected.forEach(o => {
+                      next[o.id] = {
+                        ...next[o.id],
+                        ...(bulkBoxId ? { boxId: bulkBoxId, boxSearch: bulkBoxSearch } : {}),
+                        ...(bulkBubbleId ? { bubbleId: bulkBubbleId, bubbleSearch: bulkBubbleSearch } : {}),
+                      };
+                    });
+                    return next;
+                  });
+                }}
+                className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-700 whitespace-nowrap">
+                ✓ ใส่ให้ที่เลือก
+              </button>
+              <span className="text-xs text-slate-400 ml-auto">
+                เลือกแล้ว {Object.values(packRows).filter(r => r.selected).length} / {initOrders.length} ออเดอร์
               </span>
             </div>
 
             {/* Table */}
-            <div className="flex-1 overflow-auto px-6 py-2">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-white border-b">
-                  <tr>
-                    <th className="py-2 w-8"/>
-                    <th className="py-2 text-left text-xs text-slate-500 font-medium">ชื่อ</th>
-                    <th className="py-2 text-center text-xs text-slate-500 font-medium w-24">หน่วย</th>
-                    <th className="py-2 text-center text-xs text-slate-500 font-medium w-32">จำนวน *</th>
-                    <th className="py-2 text-center text-xs text-slate-500 font-medium w-36">ราคา/หน่วย (฿)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items
-                    .filter(it => it.type === initTab)
-                    .map(it => {
-                      const row = initRows[it.id] || { qty: 0, price: 0, selected: false };
+            <div className="flex-1 overflow-auto">
+              {initLoadingOrders && (
+                <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด...</div>
+              )}
+              {!initLoadingOrders && (
+                <table className="w-full text-sm border-collapse">
+                  <thead className="bg-slate-800 text-white sticky top-0 z-10">
+                    <tr>
+                      <th className="p-3 w-8">
+                        <input type="checkbox"
+                          checked={initOrders.length > 0 && initOrders.every(o => packRows[o.id]?.selected)}
+                          onChange={e => setPackRows(prev => {
+                            const next = { ...prev };
+                            initOrders.forEach(o => { next[o.id] = { ...next[o.id], selected: e.target.checked }; });
+                            return next;
+                          })}
+                          className="rounded cursor-pointer"/>
+                      </th>
+                      <th className="p-3 text-left text-xs font-medium">เลขออเดอร์</th>
+                      <th className="p-3 text-left text-xs font-medium">ลูกค้า</th>
+                      <th className="p-3 text-left text-xs font-medium">สินค้า</th>
+                      <th className="p-3 text-left text-xs font-medium w-44">กล่อง</th>
+                      <th className="p-3 text-left text-xs font-medium w-44">บั้บเบิ้ล</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {initOrders.map((o, idx) => {
+                      const r = packRows[o.id] || { boxId: '', bubbleId: '', boxSearch: '', bubbleSearch: '', selected: false };
+                      const prods = (o.raw_prod || '').split('|').filter(Boolean);
                       return (
-                        <tr key={it.id} className={`border-b transition ${row.selected ? 'bg-emerald-50/60' : 'hover:bg-slate-50'}`}>
-                          <td className="py-2 text-center">
-                            <input type="checkbox" checked={row.selected}
-                              onChange={e => setInitRows(prev => ({
+                        <tr key={o.id} className={`border-b align-top transition ${r.selected ? 'bg-cyan-50' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                          <td className="p-3">
+                            <input type="checkbox" checked={r.selected}
+                              onChange={e => setPackRows(prev => ({
                                 ...prev,
-                                [it.id]: { ...prev[it.id], selected: e.target.checked }
+                                [o.id]: { ...prev[o.id], selected: e.target.checked }
                               }))}
                               className="rounded cursor-pointer"/>
                           </td>
-                          <td className="py-2 font-medium text-slate-800">{it.name}</td>
-                          <td className="py-2 text-center text-slate-500 text-xs">{it.unit}</td>
-                          <td className="py-2 text-center">
-                            <div className="flex flex-col items-center gap-0.5">
-                              <input type="number" min={0}
-                                value={row.qty || ''}
-                                onChange={e => setInitRows(prev => ({
-                                  ...prev,
-                                  [it.id]: { ...prev[it.id], qty: Number(e.target.value) || 0, selected: Number(e.target.value) > 0 ? true : prev[it.id].selected }
-                                }))}
-                                placeholder="0"
-                                className={`border rounded-lg px-2 py-1 text-center text-sm w-24 focus:outline-none focus:ring-2 focus:ring-emerald-300
-                                  ${row.selected && !row.qty ? 'border-red-300 bg-red-50' : row.qty > 0 && initTab === 'product' ? 'border-emerald-300 bg-emerald-50' : ''}`}/>
-                              {initTab === 'product' && row.qty > 0 && (
-                                <span className="text-[9px] text-emerald-600">จากออเดอร์</span>
-                              )}
-                            </div>
+                          <td className="p-3 text-xs text-cyan-600 font-mono whitespace-nowrap">{o.order_no}</td>
+                          <td className="p-3 font-medium text-slate-800 whitespace-nowrap">{o.customers?.name || '-'}</td>
+                          <td className="p-3">
+                            {prods.map((p: string, i: number) => (
+                              <div key={i} className="flex items-center gap-1 text-xs text-slate-700">
+                                <span className="text-slate-300 text-[10px]">{i+1}.</span>
+                                {p.trim()}
+                              </div>
+                            ))}
                           </td>
-                          <td className="py-2 text-center">
-                            <input type="number" min={0} step={0.01}
-                              value={row.price || ''}
-                              onChange={e => setInitRows(prev => ({
-                                ...prev,
-                                [it.id]: { ...prev[it.id], price: parseFloat(e.target.value) || 0 }
-                              }))}
-                              placeholder="0.00"
-                              className="border rounded-lg px-2 py-1 text-center text-sm w-28 focus:outline-none focus:ring-2 focus:ring-emerald-300"/>
+                          {/* กล่อง */}
+                          <td className="p-3">
+                            <>
+                              <input list={'ibox-' + o.id}
+                                value={r.boxId ? (items.find(b => b.id === r.boxId)?.name || r.boxSearch) : r.boxSearch}
+                                onChange={e => {
+                                  const found = items.find(b => b.type === 'box' && b.name === e.target.value);
+                                  setPackRows(prev => ({
+                                    ...prev,
+                                    [o.id]: { ...prev[o.id], boxSearch: e.target.value, boxId: found?.id || '' }
+                                  }));
+                                }}
+                                placeholder="พิมพ์ค้นหา..."
+                                className={['border rounded-lg px-2 py-1 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-cyan-300', r.boxId ? 'border-green-400 bg-green-50' : ''].join(' ')}/>
+                              <datalist id={'ibox-' + o.id}>
+                                {items.filter(b => b.type === 'box').map(b => <option key={b.id} value={b.name}/>)}
+                              </datalist>
+                            </>
+                          </td>
+                          {/* บั้บเบิ้ล */}
+                          <td className="p-3">
+                            <>
+                              <input list={'ibub-' + o.id}
+                                value={r.bubbleId ? (items.find(b => b.id === r.bubbleId)?.name || r.bubbleSearch) : r.bubbleSearch}
+                                onChange={e => {
+                                  const found = items.find(b => b.type === 'bubble' && b.name === e.target.value);
+                                  setPackRows(prev => ({
+                                    ...prev,
+                                    [o.id]: { ...prev[o.id], bubbleSearch: e.target.value, bubbleId: found?.id || '' }
+                                  }));
+                                }}
+                                placeholder="พิมพ์ค้นหา..."
+                                className={['border rounded-lg px-2 py-1 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-cyan-300', r.bubbleId ? 'border-green-400 bg-green-50' : ''].join(' ')}/>
+                              <datalist id={'ibub-' + o.id}>
+                                {items.filter(b => b.type === 'bubble').map(b => <option key={b.id} value={b.name}/>)}
+                              </datalist>
+                            </>
                           </td>
                         </tr>
                       );
-                    })
-                  }
-                </tbody>
-              </table>
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
 
             {/* Footer */}
             <div className="px-6 py-4 border-t flex items-center justify-between shrink-0">
               <div className="text-sm text-slate-500">
-                รายการที่กรอกจำนวนแล้ว:{' '}
-                <span className="font-bold text-emerald-600">
-                  {Object.values(initRows).filter(r => r.selected && r.qty > 0).length} รายการ
+                ที่เลือกและมีกล่อง/บั้บเบิ้ล:{' '}
+                <span className="font-bold text-cyan-600">
+                  {initOrders.filter(o => {
+                    const r = packRows[o.id];
+                    return r?.selected && (r.boxId || r.bubbleId);
+                  }).length} ออเดอร์
                 </span>
               </div>
               <div className="flex gap-2">
@@ -656,15 +689,16 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                   ยกเลิก
                 </button>
                 <button onClick={handleSaveInitStock} disabled={initSaving}
-                  className="px-6 py-2 bg-emerald-500 text-white rounded-xl hover:bg-emerald-600 text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+                  className="px-6 py-2 bg-cyan-600 text-white rounded-xl hover:bg-cyan-700 text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
                   <PackagePlus size={16}/>
-                  {initSaving ? 'กำลังบันทึก...' : 'บันทึกสต็อกเริ่มต้น'}
+                  {initSaving ? 'กำลังบันทึก...' : 'ตัดสต็อก'}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+}
 
       {showAddItem && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
