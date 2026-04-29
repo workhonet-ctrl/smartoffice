@@ -52,7 +52,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
 
   // Popup รับสต็อกเริ่มต้น
   const [showInitStock, setShowInitStock] = useState(false);
-  const [initTab, setInitTab]   = useState<'box'|'bubble'|'product'>('box');
+  const [initTab, setInitTab]   = useState<'box'|'bubble'|'product'>('product');
   const [initRows, setInitRows] = useState<Record<string, { qty: number; price: number; selected: boolean }>>({});
   const [bulkPrice, setBulkPrice] = useState('');
   const [initSaving, setInitSaving] = useState(false);
@@ -167,13 +167,50 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   };
 
   // ── เปิด popup รับสต็อกเริ่มต้น ──────────────────────────────
-  const handleOpenInitStock = () => {
-    // init rows จาก items ทั้งหมด
+  const handleOpenInitStock = async () => {
+    // ดึง promo quantities จาก orders เพื่อ pre-fill จำนวน
     const rows: Record<string, { qty: number; price: number; selected: boolean }> = {};
     items.forEach(it => { rows[it.id] = { qty: 0, price: 0, selected: false }; });
+
+    try {
+      // นับจาก orders แพ็คแล้วทั้งหมด via products_promo → stock_items
+      const { data: promos } = await supabase
+        .from('products_promo')
+        .select('id, short_name')
+        .eq('active', true);
+
+      // นับ order_count ต่อ promo_id จาก orders
+      const { data: orders } = await supabase
+        .from('orders')
+        .select('promo_ids, quantities')
+        .in('order_status', ['แพ็คสินค้า', 'ส่งสินค้าแล้ว']);
+
+      // สร้าง map: short_name → total qty ที่เบิกออกไปแล้ว
+      const promoQtyMap: Record<string, number> = {};
+      (orders || []).forEach((o: any) => {
+        const ids = o.promo_ids || [];
+        const qtys = String(o.quantities || '').split('|').map((q: string) => Number(q) || 1);
+        ids.forEach((pid: string, i: number) => {
+          promoQtyMap[pid] = (promoQtyMap[pid] || 0) + (qtys[i] || 1);
+        });
+      });
+
+      // map promo → stock_item via short_name
+      (promos || []).forEach((p: any) => {
+        const si = items.find(it => it.type === 'product' && it.name === p.short_name);
+        if (si && promoQtyMap[p.id]) {
+          rows[si.id] = {
+            ...rows[si.id],
+            qty: (rows[si.id].qty || 0) + promoQtyMap[p.id],
+            selected: true,
+          };
+        }
+      });
+    } catch (e) { /* ignore — ยังคงเปิด popup ได้ */ }
+
     setInitRows(rows);
     setBulkPrice('');
-    setInitTab('box');
+    setInitTab('product'); // เริ่มที่ tab สินค้าก่อนเพราะมี data
     setShowInitStock(true);
   };
 
@@ -474,7 +511,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                   <PackagePlus size={20} className="text-emerald-600"/> รับสต็อกเริ่มต้น
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  เลือกรายการ กรอกจำนวน และราคา — ถ้าราคาเท่ากันใช้ "ใส่ราคาทีเดียว"
+                  🧴 สินค้า: pre-filled จากออเดอร์ที่แพ็คไปแล้ว — 📦 กล่อง/บั้บเบิ้ล: กรอกเอง
                 </p>
               </div>
               <button onClick={() => setShowInitStock(false)} className="p-2 hover:bg-slate-100 rounded-lg">
@@ -572,15 +609,20 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                           <td className="py-2 font-medium text-slate-800">{it.name}</td>
                           <td className="py-2 text-center text-slate-500 text-xs">{it.unit}</td>
                           <td className="py-2 text-center">
-                            <input type="number" min={0}
-                              value={row.qty || ''}
-                              onChange={e => setInitRows(prev => ({
-                                ...prev,
-                                [it.id]: { ...prev[it.id], qty: Number(e.target.value) || 0, selected: Number(e.target.value) > 0 ? true : prev[it.id].selected }
-                              }))}
-                              placeholder="0"
-                              className={`border rounded-lg px-2 py-1 text-center text-sm w-24 focus:outline-none focus:ring-2 focus:ring-emerald-300
-                                ${row.selected && !row.qty ? 'border-red-300 bg-red-50' : ''}`}/>
+                            <div className="flex flex-col items-center gap-0.5">
+                              <input type="number" min={0}
+                                value={row.qty || ''}
+                                onChange={e => setInitRows(prev => ({
+                                  ...prev,
+                                  [it.id]: { ...prev[it.id], qty: Number(e.target.value) || 0, selected: Number(e.target.value) > 0 ? true : prev[it.id].selected }
+                                }))}
+                                placeholder="0"
+                                className={`border rounded-lg px-2 py-1 text-center text-sm w-24 focus:outline-none focus:ring-2 focus:ring-emerald-300
+                                  ${row.selected && !row.qty ? 'border-red-300 bg-red-50' : row.qty > 0 && initTab === 'product' ? 'border-emerald-300 bg-emerald-50' : ''}`}/>
+                              {initTab === 'product' && row.qty > 0 && (
+                                <span className="text-[9px] text-emerald-600">จากออเดอร์</span>
+                              )}
+                            </div>
                           </td>
                           <td className="py-2 text-center">
                             <input type="number" min={0} step={0.01}
