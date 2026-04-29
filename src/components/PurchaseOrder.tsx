@@ -229,17 +229,29 @@ export default function PurchaseOrder() {
           .filter(it => it.stock_item_id && it.qty > 0);
 
         if (itemsWithStock.length > 0) {
-          const reversals = itemsWithStock.map(it => ({
-            stock_item_id: it.stock_item_id,
-            txn_type: 'out',
-            qty: it.qty,
-            ref_type: 'purchase_cancel',
-            ref_id: po.po_no,
-            note: `ยกเลิก PO ${po.po_no} - ${it.name}`,
-          }));
-          const { error: txnErr } = await supabase
-            .from('stock_transactions').insert(reversals);
-          if (txnErr) throw txnErr;
+          // ตรวจก่อนว่า stock_item_id ยังมีใน stock_items จริงๆ
+          const { data: validItems } = await supabase
+            .from('stock_items')
+            .select('id')
+            .in('id', itemsWithStock.map((it: any) => it.stock_item_id));
+          const validIds = new Set((validItems || []).map((v: any) => v.id));
+
+          const reversals = itemsWithStock
+            .filter((it: any) => validIds.has(it.stock_item_id))
+            .map((it: any) => ({
+              stock_item_id: it.stock_item_id,
+              txn_type: 'out',
+              qty: it.qty,
+              ref_type: 'purchase_cancel',
+              ref_id: po.po_no,
+              note: `ยกเลิก PO ${po.po_no} - ${it.name}`,
+            }));
+
+          if (reversals.length > 0) {
+            const { error: txnErr } = await supabase
+              .from('stock_transactions').insert(reversals);
+            if (txnErr) throw txnErr;
+          }
         }
       }
 
