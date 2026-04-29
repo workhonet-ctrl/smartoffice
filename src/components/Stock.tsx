@@ -42,15 +42,13 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [search, setSearch]       = useState('');
   const [toast, setToast]     = useState<{ msg: string; type: 'success'|'error' } | null>(null);
 
-  // รับเข้าสต็อก form
-  const [rcvItemId,   setRcvItemId]   = useState('');
-  const [rcvQty,      setRcvQty]      = useState(1);
-  const [rcvNote,     setRcvNote]     = useState('');
-  const [rcvRefId,    setRcvRefId]    = useState('');
-  const [rcvDate,     setRcvDate]     = useState(new Date().toISOString().split('T')[0]);
-  const [rcvReceiver, setRcvReceiver] = useState('');
-  const [rcvApprover, setRcvApprover] = useState('');
-  const [saving, setSaving]           = useState(false);
+  // รับเข้าสต็อก form (simplified)
+  const [rcvItemId, setRcvItemId] = useState('');
+  const [rcvQty,    setRcvQty]    = useState(1);
+  const [rcvNote,   setRcvNote]   = useState('');
+  const [rcvRefId,  setRcvRefId]  = useState('');
+  const [rcvDate,   setRcvDate]   = useState(new Date().toISOString().split('T')[0]);
+  const [saving, setSaving]       = useState(false);
 
   // เพิ่มรายการใหม่
   const [showAddItem, setShowAddItem] = useState(false);
@@ -64,41 +62,61 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     setTimeout(() => setToast(null), 4000);
   };
 
-  useEffect(() => { loadAll(); }, []);
+  // load เฉพาะ stock ใช้บ่อย
+  const loadItems = async () => {
+    const { data } = await supabase.from('stock_current').select('*').order('type').order('name');
+    if (data) setItems(data as StockItem[]);
+  };
+
+  // load transactions (lazy — เฉพาะเมื่อเปิดแท็บ history)
+  const loadTxns = async () => {
+    setLoading(true);
+    const { data } = await supabase.from('stock_transactions')
+      .select('*, stock_items(name,unit)')
+      .order('created_at', { ascending: false }).limit(200);
+    if (data) setTxns(data as Transaction[]);
+    setLoading(false);
+  };
+
+  // load PO (lazy — เฉพาะเมื่อเปิดแท็บ receive)
+  const loadPO = async () => {
+    setLoading(true);
+    const { data: po } = await supabase.from('purchase_orders')
+      .select('*').eq('status', 'approved')
+      .order('po_date', { ascending: false });
+    if (po) {
+      const rows: StockInRow[] = [];
+      for (const p of po) {
+        for (const item of (p.items || [])) {
+          rows.push({
+            po_no: p.po_no, po_date: p.po_date,
+            supplier_name: p.supplier_name,
+            item_name: item.name, qty: item.qty,
+            unit: item.unit, price: item.price,
+            total: item.qty * item.price,
+          });
+        }
+      }
+      setReceivedRows(rows);
+    }
+    setLoading(false);
+  };
 
   const loadAll = async () => {
     setLoading(true);
-    try {
-      const [{ data: s }, { data: t }, { data: po }] = await Promise.all([
-        supabase.from('stock_current').select('*').order('type').order('name'),
-        supabase.from('stock_transactions').select('*, stock_items(name,unit)')
-          .order('created_at', { ascending: false }).limit(200),
-        supabase.from('purchase_orders').select('*').eq('status', 'approved')
-          .order('po_date', { ascending: false }),
-      ]);
-      if (s) setItems(s as StockItem[]);
-      if (t) setTxns(t as Transaction[]);
-
-      // แปลง PO → รายการรับเข้าทีละ item
-      if (po) {
-        const rows: StockInRow[] = [];
-        for (const p of po) {
-          for (const item of (p.items || [])) {
-            rows.push({
-              po_no: p.po_no, po_date: p.po_date,
-              supplier_name: p.supplier_name,
-              item_name: item.name, qty: item.qty,
-              unit: item.unit, price: item.price,
-              total: item.qty * item.price,
-            });
-          }
-        }
-        setReceivedRows(rows);
-      }
-    } finally { setLoading(false); }
+    await loadItems();
+    setLoading(false);
   };
 
-  // sync จาก products_master + boxes + bubbles
+  useEffect(() => { loadAll(); }, []);
+
+  // lazy load เมื่อสลับแท็บ
+  useEffect(() => {
+    if (tab === 'history' && txns.length === 0) loadTxns();
+    if (tab === 'receive' && receivedRows.length === 0) loadPO();
+  }, [tab]);
+
+  // sync จาก products_master + boxes + bubbles (ใช้ upsert + unique constraint แทน JS loop)
   const handleSync = async () => {
     setLoading(true);
     try {
@@ -108,27 +126,19 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
         supabase.from('bubbles').select('id, name, length_cm').gt('length_cm', 0),
       ]);
 
-      const toUpsert: any[] = [];
-      for (const m of masters || []) {
-        const exists = items.find(i => i.ref_id === m.id && i.type === 'product');
-        if (!exists) toUpsert.push({ name: m.name, unit: 'ชิ้น', type: 'product', ref_id: m.id, min_qty: 0 });
-      }
-      for (const b of boxes || []) {
-        const exists = items.find(i => i.ref_id === b.id && i.type === 'box');
-        if (!exists) toUpsert.push({ name: b.name, unit: 'อัน', type: 'box', ref_id: b.id, min_qty: 0 });
-      }
-      for (const b of bubbles || []) {
-        const exists = items.find(i => i.ref_id === b.id && i.type === 'bubble');
-        if (!exists) toUpsert.push({ name: `บั้บเบิ้ล ยาว ${Number(b.length_cm)} cm`, unit: 'แผ่น', type: 'bubble', ref_id: b.id, min_qty: 0 });
-      }
+      const toUpsert: any[] = [
+        ...(masters || []).map(m => ({ name: m.name, unit: 'ชิ้น', type: 'product', ref_id: m.id, min_qty: 0 })),
+        ...(boxes   || []).map(b => ({ name: b.name, unit: 'อัน',  type: 'box',     ref_id: b.id, min_qty: 0 })),
+        ...(bubbles || []).map(b => ({ name: `บั้บเบิ้ล ยาว ${Number(b.length_cm)} cm`, unit: 'แผ่น', type: 'bubble', ref_id: b.id, min_qty: 0 })),
+      ];
 
-      if (toUpsert.length > 0) {
-        await supabase.from('stock_items').insert(toUpsert);
-        showToast(`✓ ซิงค์แล้ว ${toUpsert.length} รายการใหม่`);
-      } else {
-        showToast('ไม่มีรายการใหม่ที่ต้องซิงค์', 'success');
-      }
-      await loadAll();
+      // upsert โดย unique constraint (name, type) — ของที่มีอยู่แล้วจะ skip
+      const { count } = await supabase.from('stock_items')
+        .upsert(toUpsert, { onConflict: 'name,type', ignoreDuplicates: true })
+        .select('id', { count: 'exact', head: true });
+
+      showToast(count && count > 0 ? `✓ ซิงค์แล้ว ${count} รายการใหม่` : 'ไม่มีรายการใหม่ที่ต้องซิงค์');
+      await loadItems();
     } finally { setLoading(false); }
   };
 
@@ -136,23 +146,16 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     if (!rcvItemId || rcvQty <= 0) return;
     setSaving(true);
     try {
-      const noteStr = [
-        rcvNote,
-        rcvReceiver ? `ผู้รับเข้า: ${rcvReceiver}` : '',
-        rcvApprover ? `ผู้อนุมัติ: ${rcvApprover}` : '',
-      ].filter(Boolean).join(' | ');
-
       await supabase.from('stock_transactions').insert([{
         stock_item_id: rcvItemId, txn_type: 'in', qty: rcvQty,
         ref_type: 'manual', ref_id: rcvRefId || null,
-        note: noteStr || null,
+        note: rcvNote || null,
         created_at: new Date(rcvDate).toISOString(),
       }]);
       showToast('✓ รับเข้าสต็อกสำเร็จ');
       setRcvQty(1); setRcvNote(''); setRcvRefId('');
-      setRcvReceiver(''); setRcvApprover('');
       setRcvDate(new Date().toISOString().split('T')[0]);
-      await loadAll();
+      await loadItems(); // โหลดแค่ stock ไม่ต้องโหลด txn/PO ทั้งหมด
     } finally { setSaving(false); }
   };
 
@@ -189,7 +192,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   };
 
   return (
-    <div className="flex flex-col h-screen p-6 pb-2">
+    <div className="flex flex-col h-screen p-3 sm:p-6 pb-2">
       {/* Header */}
       <div className="shrink-0 mb-4 flex items-center justify-between flex-wrap gap-3">
         <div>
