@@ -189,6 +189,10 @@ export default function PurchaseOrder() {
     if (!editingPO) return;
     const validItems = poItems.filter(it => it.name.trim() && it.qty > 0);
     if (!validItems.length) { showToast('กรุณาเพิ่มรายการสินค้า', 'error'); return; }
+    // แจ้งเตือนถ้า PO นี้อนุมัติแล้ว (ตัวเลขสต็อกจะไม่เปลี่ยนตาม)
+    if (editingPO.status === 'approved') {
+      if (!confirm('⚠ PO นี้อนุมัติแล้ว\nการแก้ไขจะเปลี่ยนรายการใบสั่งซื้อ แต่ไม่ย้อน transaction สต็อกที่บันทึกไปแล้ว\nยืนยันแก้ไขต่อไหม?')) return;
+    }
     setSaving(true);
     try {
       const { error } = await supabase.from('purchase_orders').update({
@@ -198,7 +202,7 @@ export default function PurchaseOrder() {
         items:         validItems,
         total_thb:     total,
         note:          note || null,
-      }).eq('id', editingPO.id).neq('status', 'approved'); // ป้องกันแก้ PO ที่อนุมัติแล้ว
+      }).eq('id', editingPO.id);
       if (error) throw error;
       showToast('✓ บันทึกการแก้ไขสำเร็จ');
       setEditingPO(null);
@@ -209,6 +213,17 @@ export default function PurchaseOrder() {
     } catch (err: any) {
       showToast('❌ ' + (err.message||'เกิดข้อผิดพลาด'), 'error');
     } finally { setSaving(false); }
+  };
+
+  const handleDeletePO = async (po: PO) => {
+    const warn = po.status === 'approved'
+      ? `⚠ PO นี้อนุมัติแล้ว และรับเข้าสต็อกไปแล้ว\nการลบจะไม่ย้อน transaction สต็อก\n\nลบ ${po.po_no} ยืนยัน?`
+      : `ลบ ${po.po_no} ยืนยัน?`;
+    if (!confirm(warn)) return;
+    const { error } = await supabase.from('purchase_orders').delete().eq('id', po.id);
+    if (error) { showToast('❌ ลบไม่สำเร็จ: ' + error.message, 'error'); return; }
+    showToast('✓ ลบ ' + po.po_no + ' แล้ว');
+    await loadData();
   };
 
   const handleApprove = async () => {
@@ -530,18 +545,20 @@ export default function PurchaseOrder() {
                   <td className="p-3 text-center">{statusBadge(po.status)}</td>
                   <td className="p-3 text-center">
                     <div className="flex items-center justify-center gap-1.5">
-                      {po.status !== 'approved' && (
-                        <button onClick={() => startEditPO(po)}
-                          className="flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs hover:bg-amber-200 font-medium">
-                          <Pencil size={11}/> แก้ไข
-                        </button>
-                      )}
+                      <button onClick={() => startEditPO(po)}
+                        className="flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs hover:bg-amber-200 font-medium">
+                        <Pencil size={11}/> แก้ไข
+                      </button>
                       {po.status === 'draft' && (
                         <button onClick={() => handleApproveDraft(po)}
                           className="px-3 py-1 bg-green-500 text-white rounded-lg text-xs hover:bg-green-600 font-medium">
                           อนุมัติ
                         </button>
                       )}
+                      <button onClick={() => handleDeletePO(po)}
+                        className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs hover:bg-red-200 font-medium">
+                        <Trash2 size={11}/> ลบ
+                      </button>
                     </div>
                   </td>
                 </tr>
