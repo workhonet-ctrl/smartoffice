@@ -199,7 +199,8 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
       setMultiCount(multiCnt);
       const result: ReqItem[] = [
         ...Object.entries(masterMap).map(([id, {name, qty}]) => ({ key:`p-${id}`, name, qty, unit:'ชิ้น', type:'product' as const })),
-        ...Object.entries(boxMap).map(([id, {name, qty}])    => ({ key:`box-${id}`, name:` qty, unit:'อัน', type:'box' as const })),
+        ...Object.entries(boxMap).map(([id, {name, qty}])    => ({ key:`box-${id}`, name: name.startsWith('กล่อง ') ? name : `กล่อง ${name}`,
+  qty, unit:'อัน', type:'box' as const })),
         ...Object.entries(bubbleMap).map(([id, {name, qty}]) => ({ key:`bub-${id}`, name:` qty, unit:'แผ่น', type:'bubble' as const })),
       ];
       setItems(result);
