@@ -217,13 +217,44 @@ export default function PurchaseOrder() {
 
   const handleDeletePO = async (po: PO) => {
     const warn = po.status === 'approved'
-      ? `⚠ PO นี้อนุมัติแล้ว และรับเข้าสต็อกไปแล้ว\nการลบจะไม่ย้อน transaction สต็อก\n\nลบ ${po.po_no} ยืนยัน?`
+      ? `⚠ PO ${po.po_no} อนุมัติแล้ว\nระบบจะย้อน transaction สต็อกอัตโนมัติ\n\nยืนยันลบ?`
       : `ลบ ${po.po_no} ยืนยัน?`;
     if (!confirm(warn)) return;
-    const { error } = await supabase.from('purchase_orders').delete().eq('id', po.id);
-    if (error) { showToast('❌ ลบไม่สำเร็จ: ' + error.message, 'error'); return; }
-    showToast('✓ ลบ ' + po.po_no + ' แล้ว');
-    await loadData();
+
+    setSaving(true);
+    try {
+      // ถ้า approved → สร้าง transactions 'out' ย้อนคืนสต็อก
+      if (po.status === 'approved') {
+        const itemsWithStock = ((po.items as any[]) || [])
+          .filter(it => it.stock_item_id && it.qty > 0);
+
+        if (itemsWithStock.length > 0) {
+          const reversals = itemsWithStock.map(it => ({
+            stock_item_id: it.stock_item_id,
+            txn_type: 'out',
+            qty: it.qty,
+            ref_type: 'purchase_cancel',
+            ref_id: po.po_no,
+            note: `ยกเลิก PO ${po.po_no} - ${it.name}`,
+          }));
+          const { error: txnErr } = await supabase
+            .from('stock_transactions').insert(reversals);
+          if (txnErr) throw txnErr;
+        }
+      }
+
+      // ลบ PO
+      const { error } = await supabase.from('purchase_orders').delete().eq('id', po.id);
+      if (error) throw error;
+
+      const msg = po.status === 'approved'
+        ? `✓ ลบ ${po.po_no} และย้อน transaction สต็อกแล้ว`
+        : `✓ ลบ ${po.po_no} แล้ว`;
+      showToast(msg);
+      await loadData();
+    } catch (err: any) {
+      showToast('❌ ลบไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally { setSaving(false); }
   };
 
   const handleApprove = async () => {
