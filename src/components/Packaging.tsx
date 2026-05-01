@@ -346,89 +346,114 @@ export default function Packaging({
       console.error('[pack_history insert error]', phError);
       alert('บันทึกประวัติปริ้นไม่สำเร็จ: ' + phError.message);
     }
-    // ── สร้าง rows แบบ per-order (เหมือนหน้าจอ prep tab) ────────────────
-    const rows = orders.map(o => {
-      const multi = o.promos.length > 1;
-      const selBoxName  = multi ? (boxes.find(b => b.id === override[o.id]?.box_id)?.name || '-') : (o.promos[0]?.box_name || '-');
-      const selBubObj   = multi ? (override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null) : null;
-      const selBubName  = multi
-        ? (selBubObj ? `ยาว ${selBubObj.length_cm} cm` : '-')
-        : (o.promos[0]?.bubble_name && !o.promos[0].bubble_name.includes('0 cm') ? o.promos[0].bubble_name : '-');
-      return {
-        customerName: o.customers?.name || '-',
-        tel:          o.customers?.tel || '',
-        promos:       o.promos.map(p => ({ short_name: p.short_name, name: p.name, qty: p.qty })),
-        product:      o.promos.map(p => p.short_name || p.name).join(' + '),
-        box:          selBoxName,
-        bubble:       selBubName,
-        isMulti:      multi,
-        isFlash:      (o.courier === 'FLASH' || o.route === 'B'),
-      };
-    });
+    // ── สร้าง HTML แบบใบสรุป (เหมือนแท็บใบสรุปบนหน้าจอ) ────────────────
+
+    const makeGroupedRows2 = (subset: PackOrder[]) => {
+      const grouped: Record<string, { short_name: string; promo_name: string; box: string; bubble: string; count: number }> = {};
+      for (const o of subset.filter(o2 => o2.promos.length === 1)) {
+        const p = o.promos[0]; if (!p) continue;
+        const bub = p.bubble_name && !p.bubble_name.includes('0 cm') ? p.bubble_name : '-';
+        if (grouped[p.id]) grouped[p.id].count++;
+        else grouped[p.id] = { short_name: p.short_name||'', promo_name: p.name, box: p.box_name||'-', bubble: bub, count: 1 };
+      }
+      return Object.values(grouped);
+    };
+
+    const flashOrd  = orders.filter(o => o.courier === 'FLASH' || (o as any).route === 'B');
+    const myordOrd  = orders.filter(o => o.courier !== 'FLASH' && (o as any).route !== 'B');
+    const fSingle   = makeGroupedRows2(flashOrd);
+    const mSingle   = makeGroupedRows2(myordOrd);
+    const fMultis   = flashOrd.filter(o => o.promos.length > 1);
+    const mMultis   = myordOrd.filter(o => o.promos.length > 1);
+
+    const buildRows = (grouped: typeof fSingle, multis: typeof fMultis, startIdx: number) => {
+      let html2 = ''; let idx = startIdx;
+      for (const g of grouped) {
+        html2 += `<tr>
+          <td class="num">${idx++}</td>
+          <td><div style="font-weight:700">${g.short_name || g.promo_name}</div>
+              <div style="font-size:11px;color:#64748b">${g.promo_name}</div></td>
+          <td style="text-align:center"><span class="badge">${g.count} ออเดอร์</span></td>
+          <td style="text-align:center">${g.box}</td>
+          <td style="text-align:center;color:#0369a1">${g.bubble !== '-' ? g.bubble : '-'}</td>
+          <td><div class="note-box"></div></td>
+        </tr>`;
+      }
+      for (const o of multis) {
+        const bxName = boxes.find(b => b.id === override[o.id]?.box_id)?.name || '-';
+        const buObj  = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
+        const buName = buObj ? `ยาว ${buObj.length_cm} cm` : '-';
+        const ph = o.promos.map((p2, pi) =>
+          `<div><span style="background:#fef3c7;color:#92400e;border-radius:3px;padding:0 3px;font-size:10px">${pi+1}</span>
+           <strong>${p2.short_name || p2.name}</strong>
+           <span style="color:#64748b;font-size:11px"> ${p2.name}</span></div>`).join('');
+        html2 += `<tr style="background:#fffbeb">
+          <td class="num">${idx++}</td>
+          <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
+          <td style="text-align:center"><span class="badge">1 ออเดอร์</span></td>
+          <td style="text-align:center">${bxName}</td>
+          <td style="text-align:center;color:#0369a1">${buName !== '-' ? buName : '-'}</td>
+          <td><div class="note-box"></div></td>
+        </tr>`;
+      }
+      return { html: html2, nextIdx: idx };
+    };
+
+    const { html: fRows, nextIdx: ni } = buildRows(fSingle, fMultis, 1);
+    const { html: mRows }              = buildRows(mSingle, mMultis, ni);
+
+    const fSection = (fSingle.length + fMultis.length) > 0 ? `
+      <tr><td colspan="6" style="background:#fefce8;border-top:2px solid #ca8a04;padding:6px 10px">
+        <span style="font-weight:700;color:#854d0e">🟡 FLASH — ${flashOrd.length} ออเดอร์</span>
+      </td></tr>${fRows}` : '';
+
+    const mSection = (mSingle.length + mMultis.length) > 0 ? `
+      <tr><td colspan="6" style="background:#eff6ff;border-top:2px solid #2563eb;padding:6px 10px">
+        <span style="font-weight:700;color:#1d4ed8">🔵 MyOrder — ${myordOrd.length} ออเดอร์</span>
+      </td></tr>${mRows}` : '';
 
     const html = `<!DOCTYPE html>
-<html>
-<head>
+<html><head>
   <meta charset="utf-8"/>
   <title>ใบเตรียมสินค้า</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Sarabun', sans-serif; font-size: 13px; color: #1e293b; padding: 24px; }
-    h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
-    .meta { font-size: 12px; color: #64748b; margin-bottom: 20px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-    th { background: #1e293b; color: white; padding: 9px 12px; text-align: left; font-size: 12px; }
-    td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px; vertical-align: top; }
-    tr:nth-child(even) td { background: #f8fafc; }
-    .num  { text-align: center; }
-    .count { text-align: center; font-weight: 700; font-size: 16px; color: #0e7490; }
-    .promo-tag { display: inline-block; background: #e0f2fe; color: #0369a1; border-radius: 4px; padding: 1px 6px; font-size: 11px; margin: 1px; }
-    .note-box { border: 1px solid #cbd5e1; border-radius: 6px; min-height: 32px; width: 100%; }
-    .footer { margin-top: 32px; display: flex; gap: 60px; }
-    .sig { border-top: 1px solid #94a3b8; width: 200px; text-align: center; padding-top: 6px; font-size: 11px; color: #64748b; margin-top: 48px; }
-    @media print { body { padding: 12px; } }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Sarabun',sans-serif;font-size:13px;color:#1e293b;padding:20px}
+    h1{font-size:20px;font-weight:700;margin-bottom:3px}
+    .meta{font-size:11px;color:#64748b;margin-bottom:14px}
+    table{width:100%;border-collapse:collapse;margin-bottom:20px}
+    th{background:#1e293b;color:white;padding:8px 10px;text-align:left;font-size:11px}
+    td{padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;vertical-align:top}
+    .num{text-align:center;color:#64748b;font-weight:700;width:28px}
+    .badge{display:inline-block;background:#cffafe;color:#164e63;border-radius:99px;padding:1px 8px;font-weight:700;font-size:12px}
+    .note-box{border:1px solid #cbd5e1;border-radius:4px;min-height:28px}
+    .footer{margin-top:24px;display:flex;gap:60px}
+    .sig{border-top:1px solid #94a3b8;width:180px;text-align:center;padding-top:5px;font-size:10px;color:#64748b;margin-top:36px}
+    @media print{body{padding:10px}}
   </style>
-</head>
-<body>
+</head><body>
   <h1>📋 ใบเตรียมสินค้า</h1>
-  <div class="meta">
-    วันที่: ${today} &nbsp;|&nbsp; จำนวนออเดอร์: ${orders.length} รายการ &nbsp;|&nbsp; ผู้รับผิดชอบ: ${responsible}
-  </div>
+  <div class="meta">วันที่: ${today} &nbsp;|&nbsp; จำนวนออเดอร์: ${orders.length} รายการ &nbsp;|&nbsp; ผู้รับผิดชอบ: ${responsible}</div>
   <table>
-    <thead>
-      <tr>
-        <th style="width:32px">#</th>
-        <th>รายการสินค้า</th>
-        <th>โปรโมชั่น</th>
-        <th style="text-align:center;width:80px">จำนวน (ออเดอร์)</th>
-        <th style="width:80px">กล่อง</th>
-        <th style="width:100px">บับเบิ้ล</th>
-        <th style="width:150px">หมายเหตุ</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${rows.map((r, i) => `
-        <tr>
-          <td class="num">${i + 1}</td>
-          <td style="font-weight:500">${r.product}</td>
-          <td>${r.promo ? '<span class="promo-tag">' + r.promo + '</span>' : '<span style="color:#94a3b8">-</span>'}</td>
-          <td class="count">${r.count}</td>
-          <td style="text-align:center">${r.box}</td>
-          <td style="text-align:center;color:#0369a1">${r.bubble}</td>
-          <td><div class="note-box"></div></td>
-        </tr>
-      `).join('')}
-    </tbody>
+    <thead><tr>
+      <th style="width:28px">#</th>
+      <th>รายการสินค้า / โปรโมชั่น</th>
+      <th style="text-align:center;width:100px">จำนวน (ออเดอร์)</th>
+      <th style="text-align:center;width:120px">กล่อง</th>
+      <th style="text-align:center;width:90px">บับเบิ้ล</th>
+      <th style="width:120px">หมายเหตุ</th>
+    </tr></thead>
+    <tbody>${fSection}${mSection}</tbody>
   </table>
   <div class="footer">
     <div class="sig">ผู้เตรียม: ${responsible}</div>
     <div class="sig">ผู้ตรวจสอบ: ___________________</div>
   </div>
-  <script>window.onload = () => { window.print(); }</script>
-</body>
-</html>`;
+  <script>window.onload=()=>{window.print()}</script>
+</body></html>`;
 
-    openPrintWindow(rows, today, responsible, orders.length);
+    const w = window.open('', '_blank', 'width=1000,height=700');
+    if (w) { w.document.write(html); w.document.close(); }
     // เปิดแท็บประวัติปริ้น + reload
     setTab('history');
     setTimeout(() => loadPrintHistory(), 300);
