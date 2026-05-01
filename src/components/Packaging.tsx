@@ -228,16 +228,32 @@ export default function Packaging({
   };
 
   const openPrintWindow = (rows: any[], today: string, resp: string, orderCount: number) => {
-    const tableRows = rows.map((r: any, i: number) => `
-      <tr>
+    // rows ใหม่ = per-order rows (ชื่อลูกค้า, เบอร์, สินค้า, กล่อง, บั้บเบิ้ล)
+    const tableRows = rows.map((r: any, i: number) => {
+      const promoHtml = Array.isArray(r.promos)
+        ? r.promos.map((p: any, pi: number) => `
+            <div style="margin-bottom:2px">
+              ${r.promos.length > 1 ? '<span style="background:#e0f2fe;color:#0369a1;border-radius:3px;padding:0 4px;font-size:10px;margin-right:3px">' + (pi+1) + '</span>' : ''}
+              <span style="font-weight:600;color:#1e293b">${p.short_name || p.name}</span>
+              <span style="color:#64748b;font-size:11px"> / ${p.name}</span>
+            </div>`).join('')
+        : `<span style="color:#1e293b">${r.product}</span>`;
+      const channelBadge = r.isFlash
+        ? '<span style="background:#fef9c3;color:#854d0e;border-radius:3px;padding:0 5px;font-size:10px;font-weight:700;margin-left:4px">FLASH</span>'
+        : '<span style="background:#dbeafe;color:#1d4ed8;border-radius:3px;padding:0 5px;font-size:10px;font-weight:700;margin-left:4px">MyOrder</span>';
+      return `
+      <tr class="${r.isMulti ? 'multi-row' : ''}">
         <td class="num">${i + 1}</td>
-        <td style="font-weight:500">${r.product}</td>
-        <td>${r.promo ? '<span class="promo-tag">' + r.promo + '</span>' : '<span style="color:#94a3b8">-</span>'}</td>
-        <td class="count">${r.count}</td>
-        <td style="text-align:center">${r.box}</td>
-        <td style="text-align:center;color:#0369a1">${r.bubble !== '-' ? r.bubble : '-'}</td>
+        <td>
+          <div style="font-weight:600;font-size:13px">${r.customerName || '-'}${channelBadge}</div>
+          <div style="color:#64748b;font-size:11px">${r.tel || ''}</div>
+        </td>
+        <td>${promoHtml}</td>
+        <td style="text-align:center;font-size:12px;color:#64748b">${r.box || '-'}</td>
+        <td style="text-align:center;font-size:12px;color:#0369a1">${r.bubble && r.bubble !== '-' ? r.bubble : '-'}</td>
         <td><div class="note-box"></div></td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
 
     const html = `<!DOCTYPE html>
 <html>
@@ -246,20 +262,19 @@ export default function Packaging({
   <title>ใบเตรียมสินค้า</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Sarabun', sans-serif; font-size: 13px; color: #1e293b; padding: 24px; }
-    h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
-    .meta { font-size: 12px; color: #64748b; margin-bottom: 20px; }
+    body { font-family: 'Sarabun', sans-serif; font-size: 13px; color: #1e293b; padding: 20px; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 3px; }
+    .meta { font-size: 11px; color: #64748b; margin-bottom: 16px; }
     table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-    th { background: #1e293b; color: white; padding: 9px 12px; text-align: left; font-size: 12px; }
-    td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px; vertical-align: top; }
+    th { background: #1e293b; color: white; padding: 8px 10px; text-align: left; font-size: 11px; }
+    td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; font-size: 12px; vertical-align: top; }
     tr:nth-child(even) td { background: #f8fafc; }
-    .num  { text-align: center; }
-    .count { text-align: center; font-weight: 700; font-size: 16px; color: #0e7490; }
-    .promo-tag { display: inline-block; background: #e0f2fe; color: #0369a1; border-radius: 4px; padding: 1px 6px; font-size: 11px; }
-    .note-box { border: 1px solid #cbd5e1; border-radius: 6px; min-height: 32px; width: 100%; }
-    .footer { margin-top: 32px; display: flex; gap: 60px; }
-    .sig { border-top: 1px solid #94a3b8; width: 200px; text-align: center; padding-top: 6px; font-size: 11px; color: #64748b; margin-top: 48px; }
-    @media print { body { padding: 12px; } }
+    tr.multi-row td { background: #fffbeb; }
+    .num { text-align: center; color: #64748b; font-weight: 700; width: 28px; }
+    .note-box { border: 1px solid #cbd5e1; border-radius: 4px; min-height: 28px; width: 100%; }
+    .footer { margin-top: 28px; display: flex; gap: 60px; }
+    .sig { border-top: 1px solid #94a3b8; width: 180px; text-align: center; padding-top: 6px; font-size: 10px; color: #64748b; margin-top: 40px; }
+    @media print { body { padding: 10px; } }
   </style>
 </head>
 <body>
@@ -268,13 +283,12 @@ export default function Packaging({
   <table>
     <thead>
       <tr>
-        <th style="width:32px">#</th>
-        <th>รายการสินค้า</th>
-        <th>โปรโมชั่น</th>
-        <th style="text-align:center;width:80px">จำนวน (ออเดอร์)</th>
-        <th style="width:80px">กล่อง</th>
-        <th style="width:100px">บับเบิ้ล</th>
-        <th style="width:150px">หมายเหตุ</th>
+        <th style="width:28px">#</th>
+        <th style="width:180px">ลูกค้า / เบอร์</th>
+        <th>สินค้า / โปรโมชั่น</th>
+        <th style="width:110px;text-align:center">กล่อง</th>
+        <th style="width:90px;text-align:center">บับเบิ้ล</th>
+        <th style="width:120px">หมายเหตุ</th>
       </tr>
     </thead>
     <tbody>${tableRows}</tbody>
@@ -287,7 +301,7 @@ export default function Packaging({
 </body>
 </html>`;
 
-    const w = window.open('', '_blank', 'width=900,height=700');
+    const w = window.open('', '_blank', 'width=1000,height=700');
     if (w) { w.document.write(html); w.document.close(); }
   };
 
@@ -332,39 +346,25 @@ export default function Packaging({
       console.error('[pack_history insert error]', phError);
       alert('บันทึกประวัติปริ้นไม่สำเร็จ: ' + phError.message);
     }
-    // ── สร้าง rows จากข้อมูลแท็บจัดเตรียมสินค้า ──────────────────────────────
-    // Part A: สินค้าเดี่ยว (grouped แล้ว เหมือนเดิม)
-    const singleRows = summaryGroups.grouped.map(g => {
-      const bubble = g.bubble_name && !g.bubble_name.includes('0 cm') ? g.bubble_name : '-';
+    // ── สร้าง rows แบบ per-order (เหมือนหน้าจอ prep tab) ────────────────
+    const rows = orders.map(o => {
+      const multi = o.promos.length > 1;
+      const selBoxName  = multi ? (boxes.find(b => b.id === override[o.id]?.box_id)?.name || '-') : (o.promos[0]?.box_name || '-');
+      const selBubObj   = multi ? (override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null) : null;
+      const selBubName  = multi
+        ? (selBubObj ? `ยาว ${selBubObj.length_cm} cm` : '-')
+        : (o.promos[0]?.bubble_name && !o.promos[0].bubble_name.includes('0 cm') ? o.promos[0].bubble_name : '-');
       return {
-        product: g.short_name || g.promo_name,
-        promo:   g.promo_name || '',
-        count:   g.count,
-        box:     g.box_name || '-',
-        bubble,
-        note: '',
+        customerName: o.customers?.name || '-',
+        tel:          o.customers?.tel || '',
+        promos:       o.promos.map(p => ({ short_name: p.short_name, name: p.name, qty: p.qty })),
+        product:      o.promos.map(p => p.short_name || p.name).join(' + '),
+        box:          selBoxName,
+        bubble:       selBubName,
+        isMulti:      multi,
+        isFlash:      (o.courier === 'FLASH' || o.route === 'B'),
       };
     });
-
-    // Part B: แพ็คพิเศษ — group orders ที่ product+promo+box+bubble เหมือนกันรวมกัน
-    const multiGroupMap: Record<string, { product: string; promo: string; box: string; bubble: string; count: number }> = {};
-    for (const o of summaryGroups.multiOrders) {
-      const product = o.promos.map((p: any) => p.short_name || p.name).join(' + ');
-      const promo   = o.promos.map((p: any) => (p.short_name || p.name) + ' ×' + p.qty).join(', ');
-      const boxName = boxes.find(b => b.id === override[o.id]?.box_id)?.name || '-';
-      const bubObj  = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
-      const bubble  = bubObj ? 'ยาว ' + bubObj.length_cm + ' cm' : '-';
-      // key รวมทุก field — ถ้าเหมือนกันทั้งหมดให้นับรวม
-      const key = [product, promo, boxName, bubble].join('||');
-      if (multiGroupMap[key]) {
-        multiGroupMap[key].count += 1;
-      } else {
-        multiGroupMap[key] = { product, promo, box: boxName, bubble, count: 1 };
-      }
-    }
-    const multiRows = Object.values(multiGroupMap).map(r => ({ ...r, note: 'แพ็คพิเศษ' }));
-
-    const rows = [...singleRows, ...multiRows];
 
     const html = `<!DOCTYPE html>
 <html>
