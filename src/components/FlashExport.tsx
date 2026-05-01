@@ -153,7 +153,7 @@ export default function FlashExport() {
       }
 
       // 3. อัพเดต order_status + ล้าง tracking_no
-      const newStatus = returnType === 'no_send' ? 'รอแพ็ค' : 'ตีกลับ';
+      const newStatus = returnType === 'no_send' ? 'รอคีย์ออเดอร์' : 'ตีกลับ';
       await supabase.from('orders')
         .update({
           order_status: newStatus,
