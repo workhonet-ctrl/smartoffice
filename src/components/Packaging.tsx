@@ -631,7 +631,6 @@ export default function Packaging({
               {orders.length === 0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">ไม่มีออเดอร์</td></tr>}
               {orders.map((o, idx) => {
                 const multi    = isMulti(o);
-                const totalQty = o.promos.reduce((s, p) => s + p.qty, 0);
                 const missingBox = multi && !override[o.id]?.box_id;
                 return (
                   <tr key={o.id}
@@ -678,7 +677,7 @@ export default function Packaging({
                       )}
                     </td>
                     <td className="p-3 text-center whitespace-nowrap">
-                      <div className="font-bold text-slate-700 text-sm">{totalQty}</div>
+                      <div className="font-bold text-slate-700 text-sm">1</div>
                       {multi && <div className="text-[10px] text-slate-400">{o.promos.length} รายการ</div>}
                     </td>
                     <td className="p-3 whitespace-nowrap">
