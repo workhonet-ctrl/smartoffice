@@ -149,7 +149,7 @@ export default function FlashExport() {
         const { error: txnErr } = await supabase.from('stock_transactions').insert(txns);
         if (txnErr) throw txnErr;
       } else {
-        showToast('⚠ ไม่พบสินค้าในสต็อก — อัพเดตสถานะออเดอร์อย่างเดียว', 'error');
+          alert('⚠ ไม่พบสินค้าในสต็อก — อัพเดตสถานะออเดอร์อย่างเดียว');
       }
 
       // 3. อัพเดต order_status
@@ -159,13 +159,14 @@ export default function FlashExport() {
         .eq('id', returnOrder.id);
 
       const label = returnType === 'no_send' ? 'ไม่ได้ส่ง' : 'ตีกลับ';
-      showToast(`✓ คืนสต็อก (${label}) ออเดอร์ ${orderNo} แล้ว — ย้ายกลับ ${newStatus}`);
+      alert(`✓ คืนสต็อก (${label}) ออเดอร์ ${orderNo} แล้ว`);
       setReturnOrder(null);
       setReturnType('');
       setReturnNote('');
-      await Promise.all([loadPrintedOrders(), loadOrders()]);
+      // โหลด packReady (รอส่งออก) + printedOrders + exportedOrders
+      await Promise.all([loadPackReady(), loadPrintedOrders(), loadExportedOrders()]);
     } catch (err: any) {
-      showToast('❌ ' + (err.message || 'unknown'), 'error');
+      alert('❌ เกิดข้อผิดพลาด: ' + (err.message || 'unknown'));
     } finally { setReturnSaving(false); }
   };
 
