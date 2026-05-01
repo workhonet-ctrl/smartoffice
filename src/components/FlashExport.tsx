@@ -35,6 +35,11 @@ export default function FlashExport() {
   const [previewRows, setPreviewRows]     = useState<PreviewRow[]>([]);
   const [showPreview, setShowPreview]     = useState(false);
   const [tab, setTab] = useState<'pending' | 'pack' | 'exported' | 'printed'>('pending');
+  // คืนสต็อก popup
+  const [returnOrder, setReturnOrder]     = useState<Order | null>(null);
+  const [returnType, setReturnType]       = useState<'no_send' | 'returned' | ''>('');
+  const [returnNote, setReturnNote]       = useState('');
+  const [returnSaving, setReturnSaving]   = useState(false);
   const [selectedPending,  setSelectedPending]  = useState<Set<string>>(new Set());
   const [selectedExported, setSelectedExported] = useState<Set<string>>(new Set());
   const [selectedPrinted,  setSelectedPrinted]  = useState<Set<string>>(new Set());
@@ -96,6 +101,70 @@ export default function FlashExport() {
 
   // ส่งสำเร็จ = ส่งสินค้าแล้ว (มี tracking + ยืนยันส่ง), ทุก route
   // helper: bulk update เป็น chunk ป้องกัน URL เกิน limit
+  // ── คืนสต็อก ───────────────────────────────────────────────────────────
+  const handleReturnOrder = async () => {
+    if (!returnOrder || !returnType) return;
+    setReturnSaving(true);
+    try {
+      const orderNo = (returnOrder as any).order_no;
+      const custName = returnOrder.customers?.name || orderNo;
+      const promoIds: string[] = (returnOrder as any).promo_ids || [];
+      const quantities = String((returnOrder as any).quantities || '1').split('|');
+
+      // 1. หา stock_items จาก promo_ids → products_promo → products_master → stock_items
+      const txns: any[] = [];
+      for (let i = 0; i < promoIds.length; i++) {
+        const pid = promoIds[i];
+        const qty = Number(quantities[i] || 1);
+        const { data: promo } = await supabase
+          .from('products_promo').select('id, name, short_name, master_id').eq('id', pid).maybeSingle();
+        if (!promo) continue;
+
+        // หา stock_item จากชื่อ short_name หรือ name
+        const searchName = promo.short_name || promo.name;
+        const { data: si } = await supabase
+          .from('stock_items').select('id, name')
+          .or(`name.ilike.%${searchName}%`)
+          .maybeSingle();
+
+        if (si) {
+          const noteText = returnType === 'no_send'
+            ? `คืนสต็อก(ไม่ได้ส่ง) ออเดอร์ ${orderNo} - ${custName}${returnNote ? ' | ' + returnNote : ''}`
+            : `คืนสต็อก(ตีกลับ) ออเดอร์ ${orderNo} - ${custName}${returnNote ? ' | ' + returnNote : ''}`;
+          txns.push({
+            stock_item_id: si.id,
+            txn_type: 'in',
+            qty,
+            ref_type: returnType === 'no_send' ? 'return_no_send' : 'return_rejected',
+            ref_id: orderNo,
+            note: noteText,
+          });
+        }
+      }
+
+      // 2. insert stock transactions
+      if (txns.length > 0) {
+        const { error: txnErr } = await supabase.from('stock_transactions').insert(txns);
+        if (txnErr) throw txnErr;
+      }
+
+      // 3. อัพเดต order_status
+      const newStatus = returnType === 'no_send' ? 'รอแพ็ค' : 'ตีกลับ';
+      await supabase.from('orders')
+        .update({ order_status: newStatus, parcel_status: 'ยังไม่มีเลขพัสดุ' })
+        .eq('id', returnOrder.id);
+
+      const label = returnType === 'no_send' ? 'ไม่ได้ส่ง' : 'ตีกลับ';
+      showToast(`✓ คืนสต็อก (${label}) ออเดอร์ ${orderNo} แล้ว — ย้ายกลับ ${newStatus}`);
+      setReturnOrder(null);
+      setReturnType('');
+      setReturnNote('');
+      await Promise.all([loadPrintedOrders(), loadOrders()]);
+    } catch (err: any) {
+      showToast('❌ ' + (err.message || 'unknown'), 'error');
+    } finally { setReturnSaving(false); }
+  };
+
   const bulkUpdate = async (ids: string[], payload: Record<string, string>) => {
     const CHUNK = 200;
     for (let i = 0; i < ids.length; i += CHUNK) {
@@ -768,16 +837,25 @@ export default function FlashExport() {
                         </span>
                       </td>
                       <td className="p-3 text-center">
-                        {hasTracking && (
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                          {hasTracking && (
+                            <button
+                              onClick={async () => {
+                                await supabase.from('orders')
+                                  .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง' }).eq('id', o.id);
+                                await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
+                              }}
+                              className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold whitespace-nowrap">
+                              ✓ ส่งแล้ว
+                            </button>
+                          )}
                           <button
-                            onClick={async () => {
-                              await supabase.from('orders')
-                                .update({ order_status: 'ส่งสินค้าแล้ว', parcel_status: 'อยู่ระหว่างจัดส่ง' }).eq('id', o.id);
-                              await Promise.all([loadPrintedOrders(), loadExportedOrders()]);
-                            }}
-                            className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 font-bold whitespace-nowrap">
-                            ✓ ส่งแล้ว
+                            onClick={() => { setReturnOrder(o); setReturnType(''); setReturnNote(''); }}
+                            className="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs rounded-lg hover:bg-amber-200 font-medium whitespace-nowrap">
+                            ↩ คืนสต็อก
                           </button>
+                        </div>
+                      </td>
                         )}
                       </td>
                     </tr>
@@ -983,6 +1061,77 @@ export default function FlashExport() {
                   บันทึก Tracking ที่เลือก
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: คืนสต็อก ── */}
+      {returnOrder && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h2 className="text-base font-bold text-slate-800">↩ คืนสต็อก</h2>
+                <p className="text-xs text-slate-400 mt-0.5">{returnOrder.customers?.name || returnOrder.order_no}</p>
+              </div>
+              <button onClick={() => setReturnOrder(null)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400">✕</button>
+            </div>
+
+            <div className="px-6 py-5 space-y-4">
+              {/* สินค้า */}
+              <div className="bg-slate-50 rounded-xl p-3 text-sm">
+                <div className="text-xs text-slate-400 mb-1">รายการสินค้า</div>
+                <div className="font-medium text-slate-800">{(returnOrder as any).raw_prod || '-'}</div>
+              </div>
+
+              {/* เลือกประเภทการคืน */}
+              <div>
+                <div className="text-xs font-semibold text-slate-500 mb-2">ประเภทการคืน *</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setReturnType('no_send')}
+                    className={`p-3 rounded-xl border-2 text-left transition ${returnType === 'no_send' ? 'border-amber-400 bg-amber-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                    <div className="text-sm font-bold text-amber-700">📦 ไม่ได้ส่ง</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">คืนสต็อก + ย้ายกลับ "รอแพ็ค"</div>
+                  </button>
+                  <button
+                    onClick={() => setReturnType('returned')}
+                    className={`p-3 rounded-xl border-2 text-left transition ${returnType === 'returned' ? 'border-red-400 bg-red-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                    <div className="text-sm font-bold text-red-700">🔄 สินค้าตีกลับ</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">คืนสต็อก + เปลี่ยนสถานะ "ตีกลับ"</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* หมายเหตุ */}
+              <div>
+                <div className="text-xs font-semibold text-slate-500 mb-1">หมายเหตุ (เพิ่มเติม)</div>
+                <input value={returnNote} onChange={e => setReturnNote(e.target.value)}
+                  placeholder="เช่น สินค้าหมด, ลูกค้ายกเลิก..."
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"/>
+              </div>
+
+              {/* แสดง flow */}
+              {returnType && (
+                <div className={`rounded-xl p-3 text-xs ${returnType === 'no_send' ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+                  {returnType === 'no_send'
+                    ? '✓ คืนสต็อกยาสีฟัน SP4 → สถานะออเดอร์กลับเป็น "รอแพ็ค" → จะปรากฏใน Flash Export "รอส่งออก" อีกครั้ง'
+                    : '✓ คืนสต็อกยาสีฟัน SP4 → สถานะออเดอร์เป็น "ตีกลับ" → ไม่ปรากฏในรายการส่งออก'}
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t flex gap-2 justify-end">
+              <button onClick={() => setReturnOrder(null)}
+                className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-medium">
+                ยกเลิก
+              </button>
+              <button onClick={handleReturnOrder} disabled={!returnType || returnSaving}
+                className={`px-5 py-2 text-white rounded-xl text-sm font-semibold disabled:opacity-50 flex items-center gap-2
+                  ${returnType === 'returned' ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'}`}>
+                {returnSaving ? 'กำลังบันทึก...' : '↩ ยืนยันคืนสต็อก'}
+              </button>
             </div>
           </div>
         </div>
