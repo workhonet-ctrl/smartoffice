@@ -42,6 +42,10 @@ export default function FlashExport() {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [searchProduct, setSearchProduct]   = useState('');
   const [searchExported, setSearchExported] = useState('');
+  const [minAmount, setMinAmount]           = useState('');
+  const [maxAmount, setMaxAmount]           = useState('');
+  const [minAmountExp, setMinAmountExp]     = useState('');
+  const [maxAmountExp, setMaxAmountExp]     = useState('');
   // upload tracking file
   const [uploadResult, setUploadResult] = useState<{ matched: number; notFound: number; conflicts: number; duplicate?: number } | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -362,13 +366,19 @@ export default function FlashExport() {
 
   const togglePending  = (id: string) => setSelectedPending(s  => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleExported = (id: string) => setSelectedExported(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const filteredOrders = searchProduct.trim()
-    ? orders.filter(o => (o.raw_prod || '').toLowerCase().includes(searchProduct.toLowerCase()))
-    : orders;
+  const filteredOrders = orders.filter(o => {
+    if (searchProduct.trim() && !(o.raw_prod || '').toLowerCase().includes(searchProduct.toLowerCase())) return false;
+    if (minAmount !== '' && Number(o.total_thb) < Number(minAmount)) return false;
+    if (maxAmount !== '' && Number(o.total_thb) > Number(maxAmount)) return false;
+    return true;
+  });
 
-  const filteredExportedOrders = searchExported.trim()
-    ? exportedOrders.filter(o => (o.raw_prod || '').toLowerCase().includes(searchExported.toLowerCase()))
-    : exportedOrders;
+  const filteredExportedOrders = exportedOrders.filter(o => {
+    if (searchExported.trim() && !(o.raw_prod || '').toLowerCase().includes(searchExported.toLowerCase())) return false;
+    if (minAmountExp !== '' && Number(o.total_thb) < Number(minAmountExp)) return false;
+    if (maxAmountExp !== '' && Number(o.total_thb) > Number(maxAmountExp)) return false;
+    return true;
+  });
 
   const allPendingSelected  = filteredOrders.length > 0 && filteredOrders.every(o => selectedPending.has(o.id));
   const allExportedSelected = filteredExportedOrders.length > 0 && filteredExportedOrders.every(o => selectedExported.has(o.id));
@@ -409,7 +419,22 @@ export default function FlashExport() {
                 placeholder="ค้นหาชื่อสินค้า เช่น ครีม Secret Rose(1 แถม 1)..."
                 className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
             </div>
-            {searchProduct && (
+            {/* Filter ยอด (฿) */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-xs text-slate-500 whitespace-nowrap">ยอด ฿</span>
+              <input type="number" min={0} value={minAmount} onChange={e => setMinAmount(e.target.value)}
+                placeholder="ต่ำสุด"
+                className="border rounded-lg px-2 py-2 text-xs w-24 focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+              <span className="text-slate-400 text-xs">—</span>
+              <input type="number" min={0} value={maxAmount} onChange={e => setMaxAmount(e.target.value)}
+                placeholder="สูงสุด"
+                className="border rounded-lg px-2 py-2 text-xs w-24 focus:outline-none focus:ring-2 focus:ring-yellow-300"/>
+              {(minAmount || maxAmount) && (
+                <button onClick={() => { setMinAmount(''); setMaxAmount(''); }}
+                  className="text-slate-400 hover:text-red-500 text-xs px-1">✕</button>
+              )}
+            </div>
+            {(searchProduct || minAmount || maxAmount) && (
               <span className="text-xs text-slate-500 shrink-0">พบ {filteredOrders.length} รายการ</span>
             )}
             <button onClick={handlePreview} disabled={orders.length===0||previewing}
@@ -554,7 +579,22 @@ export default function FlashExport() {
                 placeholder="ค้นหาชื่อลูกค้า / สินค้า..."
                 className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-300"/>
             </div>
-            {searchExported && <span className="text-xs text-slate-500 shrink-0">พบ {filteredExportedOrders.length} รายการ</span>}
+            {/* Filter ยอด (฿) */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-xs text-slate-500 whitespace-nowrap">ยอด ฿</span>
+              <input type="number" min={0} value={minAmountExp} onChange={e => setMinAmountExp(e.target.value)}
+                placeholder="ต่ำสุด"
+                className="border rounded-lg px-2 py-2 text-xs w-24 focus:outline-none focus:ring-2 focus:ring-green-300"/>
+              <span className="text-slate-400 text-xs">—</span>
+              <input type="number" min={0} value={maxAmountExp} onChange={e => setMaxAmountExp(e.target.value)}
+                placeholder="สูงสุด"
+                className="border rounded-lg px-2 py-2 text-xs w-24 focus:outline-none focus:ring-2 focus:ring-green-300"/>
+              {(minAmountExp || maxAmountExp) && (
+                <button onClick={() => { setMinAmountExp(''); setMaxAmountExp(''); }}
+                  className="text-slate-400 hover:text-red-500 text-xs px-1">✕</button>
+              )}
+            </div>
+            {(searchExported || minAmountExp || maxAmountExp) && <span className="text-xs text-slate-500 shrink-0">พบ {filteredExportedOrders.length} รายการ</span>}
             <span className="text-xs bg-green-50 border border-green-100 text-green-700 rounded-lg px-3 py-2">
               ✅ ส่งสำเร็จ {exportedOrders.length} รายการ
             </span>
