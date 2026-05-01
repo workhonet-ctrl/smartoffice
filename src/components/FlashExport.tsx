@@ -684,6 +684,7 @@ export default function FlashExport() {
                   <th className="p-3 text-left whitespace-nowrap">Tracking</th>
                   <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
                   <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
+                  <th className="p-3 text-center whitespace-nowrap">↩ คืน</th>
                 </tr>
               </thead>
               <tbody>
@@ -711,6 +712,12 @@ export default function FlashExport() {
                       <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">
                         {o.order_status || 'ส่งแล้ว'}
                       </span>
+                    </td>
+                    <td className="p-3 text-center">
+                      <button onClick={() => { setReturnOrder(o); setReturnType('no_send'); setReturnNote(''); }}
+                        className="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs rounded-lg hover:bg-amber-200 font-medium whitespace-nowrap">
+                        ↩ คืน
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1085,25 +1092,18 @@ export default function FlashExport() {
               <div className="bg-slate-50 rounded-xl p-3 text-sm">
                 <div className="text-xs text-slate-400 mb-1">รายการสินค้า</div>
                 <div className="font-medium text-slate-800">{(returnOrder as any).raw_prod || '-'}</div>
+                <div className="text-xs text-slate-400 mt-1">ลูกค้า: {returnOrder.customers?.name} · {returnOrder.order_no}</div>
               </div>
 
               {/* เลือกประเภทการคืน */}
               <div>
                 <div className="text-xs font-semibold text-slate-500 mb-2">ประเภทการคืน *</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setReturnType('no_send')}
-                    className={`p-3 rounded-xl border-2 text-left transition ${returnType === 'no_send' ? 'border-amber-400 bg-amber-50' : 'border-slate-200 hover:border-slate-300'}`}>
-                    <div className="text-sm font-bold text-amber-700">📦 ไม่ได้ส่ง</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">คืนสต็อก + ย้ายกลับ "รอแพ็ค"</div>
-                  </button>
-                  <button
-                    onClick={() => setReturnType('returned')}
-                    className={`p-3 rounded-xl border-2 text-left transition ${returnType === 'returned' ? 'border-red-400 bg-red-50' : 'border-slate-200 hover:border-slate-300'}`}>
-                    <div className="text-sm font-bold text-red-700">🔄 สินค้าตีกลับ</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">คืนสต็อก + เปลี่ยนสถานะ "ตีกลับ"</div>
-                  </button>
-                </div>
+                <button
+                  onClick={() => setReturnType('no_send')}
+                  className={`w-full p-3 rounded-xl border-2 text-left transition ${returnType === 'no_send' ? 'border-amber-400 bg-amber-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                  <div className="text-sm font-bold text-amber-700">📦 ไม่ได้ส่ง</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">คืนสต็อก + ย้ายกลับ "รอส่งออก" (รอแพ็ค)</div>
+                </button>
               </div>
 
               {/* หมายเหตุ */}
@@ -1116,10 +1116,8 @@ export default function FlashExport() {
 
               {/* แสดง flow */}
               {returnType && (
-                <div className={`rounded-xl p-3 text-xs ${returnType === 'no_send' ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
-                  {returnType === 'no_send'
-                    ? '✓ คืนสต็อกยาสีฟัน SP4 → สถานะออเดอร์กลับเป็น "รอแพ็ค" → จะปรากฏใน Flash Export "รอส่งออก" อีกครั้ง'
-                    : '✓ คืนสต็อกยาสีฟัน SP4 → สถานะออเดอร์เป็น "ตีกลับ" → ไม่ปรากฏในรายการส่งออก'}
+                <div className="rounded-xl p-3 text-xs bg-amber-50 text-amber-800 border border-amber-200">
+                  ✓ คืนสต็อกสินค้ากลับ → สถานะออเดอร์ = <strong>"รอแพ็ค"</strong> → จะปรากฏใน Flash Export แท็บ <strong>"รอส่งออก"</strong> อีกครั้ง
                 </div>
               )}
             </div>
