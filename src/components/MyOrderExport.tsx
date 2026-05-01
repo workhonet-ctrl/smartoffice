@@ -171,6 +171,10 @@ async function exportToExcel(targetOrders: Order[], selectionsMap: OrderSelectio
 export default function MyOrderExport() {
   const [orders,         setOrders]         = useState<Order[]>([]);
   const [exportedOrders, setExportedOrders] = useState<Order[]>([]);
+  // คืนสต็อก
+  const [returnOrder, setReturnOrder]   = useState<Order | null>(null);
+  const [returnNote, setReturnNote]     = useState('');
+  const [returnSaving, setReturnSaving] = useState(false);
   const [printedOrders,  setPrintedOrders]  = useState<Order[]>([]);
   const [loading,        setLoading]        = useState(true);
   const [exporting,      setExporting]      = useState(false);
@@ -209,6 +213,52 @@ export default function MyOrderExport() {
         setOrderSelections(sel);
       }
     } finally { setLoading(false); }
+  };
+
+  const handleReturnMyOrder = async () => {
+    if (!returnOrder) return;
+    setReturnSaving(true);
+    try {
+      const orderNo = (returnOrder as any).order_no;
+      const custName = returnOrder.customers?.name || orderNo;
+      const promoIds: string[] = (returnOrder as any).promo_ids || [];
+      const quantities = String((returnOrder as any).quantities || '1').split('|');
+
+      const txns: any[] = [];
+      for (let i = 0; i < promoIds.length; i++) {
+        const pid = promoIds[i];
+        const qty = Number(quantities[i] || 1);
+        const { data: promo } = await supabase
+          .from('products_promo').select('id, name, short_name').eq('id', pid).maybeSingle();
+        if (!promo) continue;
+        const searchName = (promo.short_name || promo.name || '').trim();
+        const { data: si } = await supabase.from('stock_items').select('id')
+          .ilike('name', `%${searchName}%`).maybeSingle();
+        if (si) {
+          txns.push({
+            stock_item_id: si.id, txn_type: 'in', qty,
+            ref_type: 'return_no_send', ref_id: orderNo,
+            note: `คืนสต็อก(ไม่ได้ส่ง) ออเดอร์ ${orderNo} - ${custName}${returnNote ? ' | ' + returnNote : ''}`,
+          });
+        }
+      }
+
+      if (txns.length > 0) {
+        const { error } = await supabase.from('stock_transactions').insert(txns);
+        if (error) throw error;
+      }
+
+      await supabase.from('orders')
+        .update({ order_status: 'รอแพ็ค', parcel_status: 'ยังไม่มีเลขพัสดุ' })
+        .eq('id', returnOrder.id);
+
+      showToast(`✓ คืนสต็อก ออเดอร์ ${orderNo} → ย้ายกลับ "รอส่งออก"`);
+      setReturnOrder(null); setReturnNote('');
+      await loadOrders();
+      await loadExportedOrders();
+    } catch (err: any) {
+      showToast('❌ ' + (err.message || 'unknown'), 'error');
+    } finally { setReturnSaving(false); }
   };
 
   const loadExportedOrders = async () => {
@@ -486,6 +536,7 @@ export default function MyOrderExport() {
                   <th className="p-3 text-left whitespace-nowrap">Tracking</th>
                   <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
                   <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
+                  <th className="p-3 text-center whitespace-nowrap">↩ คืน</th>
                 </tr>
               </thead>
               <tbody>
@@ -507,6 +558,12 @@ export default function MyOrderExport() {
                       <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">
                         {o.order_status||'ส่งแล้ว'}
                       </span>
+                    </td>
+                    <td className="p-3 text-center">
+                      <button onClick={() => { setReturnOrder(o); setReturnNote(''); }}
+                        className="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs rounded-lg hover:bg-amber-200 font-medium whitespace-nowrap">
+                        ↩ คืน
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -745,5 +802,43 @@ export default function MyOrderExport() {
         </div>
       )}
     </div>
+      {/* ── Modal: คืนสต็อก MyOrder ── */}
+      {returnOrder && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h2 className="text-base font-bold text-slate-800">↩ คืนสต็อก (ไม่ได้ส่ง)</h2>
+                <p className="text-xs text-slate-400 mt-0.5">{returnOrder.customers?.name} · {(returnOrder as any).order_no}</p>
+              </div>
+              <button onClick={() => setReturnOrder(null)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400">✕</button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div className="bg-slate-50 rounded-xl p-3 text-sm">
+                <div className="text-xs text-slate-400 mb-1">รายการสินค้า</div>
+                <div className="font-medium text-slate-800">{(returnOrder as any).raw_prod || '-'}</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-slate-500 mb-1">หมายเหตุ (เพิ่มเติม)</div>
+                <input value={returnNote} onChange={e => setReturnNote(e.target.value)}
+                  placeholder="เช่น สินค้าหมด, ลูกค้ายกเลิก..."
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"/>
+              </div>
+              <div className="rounded-xl p-3 text-xs bg-amber-50 text-amber-800 border border-amber-200">
+                ✓ คืนสต็อกสินค้า → สถานะออเดอร์ = <strong>"รอแพ็ค"</strong> → ปรากฏใน MyOrder Export แท็บ <strong>"รอส่งออก"</strong> อีกครั้ง
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t flex gap-2 justify-end">
+              <button onClick={() => setReturnOrder(null)}
+                className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-medium">ยกเลิก</button>
+              <button onClick={handleReturnMyOrder} disabled={returnSaving}
+                className="px-5 py-2 bg-amber-500 text-white rounded-xl hover:bg-amber-600 text-sm font-semibold disabled:opacity-50">
+                {returnSaving ? 'กำลังบันทึก...' : '↩ ยืนยันคืนสต็อก'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
   );
 }
