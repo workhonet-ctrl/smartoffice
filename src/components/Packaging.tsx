@@ -666,7 +666,6 @@ export default function Packaging({
                               <div>
                                 {p.short_name && <div className="font-medium text-slate-800 text-sm">{p.short_name}</div>}
                                 <div className="text-xs text-slate-500">{p.name}</div>
-                                <div className="text-xs text-cyan-600 font-bold">สั่ง ×{p.qty}</div>
                               </div>
                             </div>
                           ))}
@@ -794,7 +793,6 @@ export default function Packaging({
                               <div>
                                 {p.short_name && <div className="font-semibold text-slate-800 text-sm whitespace-nowrap">{p.short_name}</div>}
                                 <div className="text-xs text-slate-500 whitespace-nowrap">{p.name}</div>
-                                <div className="text-xs text-cyan-600 font-bold">สั่ง ×{p.qty}</div>
                               </div>
                             </div>
                           ))}
@@ -864,7 +862,6 @@ export default function Packaging({
                               <div>
                                 {p.short_name && <div className="font-semibold text-slate-800 text-sm whitespace-nowrap">{p.short_name}</div>}
                                 <div className="text-xs text-slate-500 whitespace-nowrap">{p.name}</div>
-                                <div className="text-xs text-cyan-600 font-bold">สั่ง ×{p.qty}</div>
                               </div>
                             </div>
                           ))}
