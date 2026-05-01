@@ -206,9 +206,9 @@ export default function Packaging({
     const { data } = await supabase
       .from('pack_history')
       .select('id, pack_date, responsible_person, order_count, status, created_at, summary_snapshot')
-      .eq('status', 'printed')
+      .in('status', ['printed', 'approved'])
       .order('created_at', { ascending: false })
-      .limit(30);
+      .limit(50);
     setPrintHistory(data || []);
     setLoadingHistory(false);
   };
@@ -952,6 +952,7 @@ export default function Packaging({
                   <th className="p-3 text-left text-xs font-medium text-slate-500">วันที่ปริ้น</th>
                   <th className="p-3 text-left text-xs font-medium text-slate-500">ผู้รับผิดชอบ</th>
                   <th className="p-3 text-center text-xs font-medium text-slate-500">จำนวนออเดอร์</th>
+                  <th className="p-3 text-center text-xs font-medium text-slate-500">สถานะ</th>
                   <th className="p-3 text-center text-xs font-medium text-slate-500">รายการสินค้า</th>
                   <th className="p-3 text-center text-xs font-medium text-slate-500">ปริ้นซ้ำ</th>
                 </tr>
@@ -969,6 +970,12 @@ export default function Packaging({
                       <td className="p-3 font-medium text-slate-800">{item.responsible_person || '-'}</td>
                       <td className="p-3 text-center">
                         <span className="px-2 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-xs font-bold">{item.order_count}</span>
+                      </td>
+                      <td className="p-3 text-center">
+                        {item.status === 'approved'
+                          ? <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">✓ อนุมัติแล้ว</span>
+                          : <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">ปริ้นแล้ว</span>
+                        }
                       </td>
                       <td className="p-3">
                         <div className="flex flex-col gap-0.5 max-h-20 overflow-auto">
