@@ -17,6 +17,7 @@ type Customer = {
 };
 type Order = {
   id: string; order_no: string; order_date: string; raw_prod: string | null;
+  promo_ids?: string[] | null; quantities?: string | null;
   total_thb: number; order_status: string; tracking_no: string | null; ship_date?: string | null;
 };
 
@@ -444,7 +445,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const loadOrders = async (customerId: string) => {
     setLoadingOrders(true);
     const { data } = await supabase.from('orders')
-      .select('id, order_no, order_date, raw_prod, total_thb, order_status, tracking_no, ship_date')
+      .select('id, order_no, order_date, raw_prod, promo_ids, quantities, total_thb, order_status, tracking_no, ship_date')
       .eq('customer_id', customerId)
       .order('order_date', { ascending: false });
     if (data) setCustOrders(data);
@@ -1514,7 +1515,33 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                   ฿{Number(shipCostMap[o.tracking_no]).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2})}
                                 </span>
                               )}
-                              <span className="text-slate-600 flex-1 truncate">{o.raw_prod || '-'}</span>
+                              <span className="text-slate-600 flex-1 min-w-0">
+                                {(() => {
+                                  // ถ้ามี promo_ids → แสดง short_name + name × qty
+                                  const pids: string[] = Array.isArray(o.promo_ids) ? o.promo_ids : [];
+                                  const qtys = String(o.quantities || '').split('|').map(s => s.trim());
+                                  if (pids.length > 0 && promoOptions.length > 0) {
+                                    return (
+                                      <div className="flex flex-col gap-0.5">
+                                        {pids.map((pid, i) => {
+                                          const promo = promoOptions.find(p => p.id === pid);
+                                          const qty = qtys[i] || '1';
+                                          return (
+                                            <span key={i} className="truncate text-xs">
+                                              <span className="font-medium text-slate-700">{promo?.short_name || promo?.master_name || pid}</span>
+                                              <span className="text-slate-400 mx-0.5">/</span>
+                                              <span className="text-slate-500">{promo?.name || ''}</span>
+                                              <span className="text-cyan-600 font-bold ml-1">×{qty}</span>
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  }
+                                  // fallback: raw_prod
+                                  return <span className="truncate">{o.raw_prod || '-'}</span>;
+                                })()}
+                              </span>
                               <span className="font-bold text-emerald-600 shrink-0">฿{fmt2(Number(o.total_thb))}</span>
                               <span className={`px-2 py-0.5 rounded-full font-medium shrink-0 ${
                                 o.order_status === 'แพ็คสินค้า' ? 'bg-teal-100 text-teal-700' :
