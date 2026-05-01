@@ -2331,7 +2331,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
             <div className="flex-1 overflow-auto p-5 space-y-4">
               {/* รายการสินค้า */}
               <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-2">รายการสินค้า</label>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">รายการสินค้า</label>
+                {editOrder?.raw_prod && (
+                  <div className="text-[10px] text-slate-400 bg-slate-50 rounded px-2 py-1 mb-2 font-mono">
+                    📄 ต้นฉบับ: {editOrder.raw_prod}
+                    {editOrder.quantities && <span className="ml-2">| จำนวน: {editOrder.quantities}</span>}
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   {editOrderItems.length === 0 && (
                     <div className="text-center text-xs text-slate-400 py-3 bg-slate-50 rounded-lg">
@@ -2342,20 +2348,32 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                     const promo = promoOptions.find(p => p.id === item.promoId);
                     return (
                       <div key={itemIdx} className="flex items-center gap-2 bg-cyan-50 border border-cyan-200 rounded-lg px-3 py-2" title={`รหัส: ${item.promoId}`}>
+                        <span className="w-5 h-5 rounded-full bg-cyan-200 text-cyan-800 text-[10px] font-bold flex items-center justify-center shrink-0">{itemIdx + 1}</span>
                         <div className="flex-1 min-w-0">
-                          <div className="text-[10px] text-slate-500 leading-tight truncate">{promo?.master_name || '—'}</div>
-                          <div className="text-xs text-slate-800 font-medium leading-tight truncate">{promo?.name || item.promoId}</div>
+                          {promo ? (
+                            <>
+                              <div className="text-xs font-bold text-slate-800 leading-tight">
+                                {promo.short_name || promo.master_name || '—'}
+                              </div>
+                              <div className="text-[11px] text-slate-500 leading-tight">
+                                {promo.name}
+                                {promo.price_thb && <span className="ml-1.5 text-emerald-600 font-semibold">฿{Number(promo.price_thb).toLocaleString()}</span>}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-xs text-slate-400">{item.promoId}</div>
+                          )}
                         </div>
-                        {promo && (
-                          <span className="text-[11px] text-emerald-600 font-semibold shrink-0">฿{Number(promo.price_thb).toLocaleString()}</span>
-                        )}
-                        <input type="number" min="1"
-                          value={item.qty}
-                          onChange={e => {
-                            const qty = Math.max(1, Number(e.target.value)||1);
-                            setEditOrderItems(prev => prev.map((it, i) => i === itemIdx ? {...it, qty} : it));
-                          }}
-                          className="w-14 border rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-cyan-300 shrink-0"/>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[10px] text-slate-400">จำนวน</span>
+                          <input type="number" min="1"
+                            value={item.qty}
+                            onChange={e => {
+                              const qty = Math.max(1, Number(e.target.value)||1);
+                              setEditOrderItems(prev => prev.map((it, i) => i === itemIdx ? {...it, qty} : it));
+                            }}
+                            className="w-14 border rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-cyan-300"/>
+                        </div>
                         <button
                           onClick={() => setEditOrderItems(prev => prev.filter((_, i) => i !== itemIdx))}
                           className="text-red-400 hover:text-red-600 shrink-0 w-6 h-6 rounded hover:bg-red-50 flex items-center justify-center"
