@@ -99,6 +99,15 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
   // mapping modal state
   const [showMappingModal, setShowMappingModal] = useState(false);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);  // popup ตรวจสอบก่อน import
+  const [pendingImportData, setPendingImportData] = useState<{
+    dataRows: any[];
+    autoPromoMap: Record<string,string>;
+    unmappedProds: {name:string; qty:string}[];
+    prodQtyMap: Record<string,string>;
+    e: any;
+  } | null>(null);
+  const [previewMappingSelects, setPreviewMappingSelects] = useState<Record<string,string>>({});
   const [unmappedList, setUnmappedList]         = useState<{name:string; qty:string}[]>([]);
   const [promoOptions, setPromoOptions]         = useState<{id:string; name:string; short_name:string|null; price_thb:number; master_name:string}[]>([]);
   const [mappingSelects, setMappingSelects]     = useState<Record<string, string>>({}); // raw_name → promo_id
@@ -471,7 +480,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       )];
       const autoPromoMap: Record<string,string> = {};
       const unmappedProds: {name:string; qty:string}[] = [];
-      // สร้าง map ชื่อสินค้า → จำนวน (ดึงจากแถวแรกที่เจอ)
       const prodQtyMap: Record<string,string> = {};
       dataRows.forEach(r => {
         const prods = String(r[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
@@ -487,7 +495,39 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         });
       }
 
-      // ── Step 2: โหลด customers ที่มีอยู่แล้วทั้งหมดครั้งเดียว (by tel) ──
+      // โหลด promos สำหรับแสดงชื่อใน preview
+      if (promoOptions.length === 0) {
+        const { data: promos } = await supabase
+          .from('products_promo')
+          .select('id, name, short_name, price_thb, products_master(name)')
+          .eq('active', true).order('id');
+        setPromoOptions((promos || []).map((p: any) => ({
+          ...p, master_name: p.products_master?.name || '',
+        })));
+      }
+
+      // ── หยุดก่อน: เปิด preview popup ให้ตรวจสอบการจับคู่ ──────────────
+      const initSelects: Record<string,string> = {};
+      rawProdsAll.forEach(rp => { initSelects[rp] = autoPromoMap[rp] || ''; });
+      setPreviewMappingSelects(initSelects);
+      setPendingImportData({ dataRows, autoPromoMap, unmappedProds, prodQtyMap, e });
+      setShowPreviewModal(true);
+    } catch (err) {
+      console.error(err);
+      showToast('เกิดข้อผิดพลาดในการอ่านไฟล์', 'error');
+    } finally { setImporting(false); }
+  };
+
+  // ── ดำเนินการ import จริง หลังจาก user confirm ──────────────────────────
+  const handleConfirmImport = async () => {
+    if (!pendingImportData) return;
+    const { dataRows, e } = pendingImportData;
+    // ใช้ previewMappingSelects เป็น autoPromoMap ที่ user แก้ไขแล้ว
+    const finalPromoMap = { ...previewMappingSelects };
+    setShowPreviewModal(false);
+    setPendingImportData(null);
+    setImporting(true); setImportResult(null);
+    try {
       const allTels = [...new Set(dataRows.map(r => String(r[6]||'').trim()))];
       const existingCustMap: Record<string,string> = {}; // tel → id
       for (let i=0; i<allTels.length; i+=500) {
@@ -588,7 +628,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         }
 
         const rawProds = String(row[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
-        const promoIds = rawProds.map(rp=>autoPromoMap[rp]||'').filter(Boolean);
+        const promoIds = rawProds.map(rp=>finalPromoMap[rp]||'').filter(Boolean);
         const quantities = String(row[15]||'1');
         const weightKg   = (Number(row[16])||0)/1000;
         const postal     = String(row[11]||'').trim();
@@ -1533,6 +1573,101 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
       {/* Toast */}
       {/* ── Mapping Modal ── */}
+
+      {/* ── Preview Modal: ตรวจสอบการจับคู่สินค้าก่อน import ── */}
+      {showPreviewModal && pendingImportData && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-slate-800">ตรวจสอบการจับคู่สินค้า</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  ตรวจสอบว่าสินค้าในไฟล์จับคู่กับสินค้าในระบบถูกต้องก่อน import
+                </p>
+              </div>
+              <button onClick={() => { setShowPreviewModal(false); setPendingImportData(null); }}
+                className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600">
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto px-6 py-4">
+              {Object.keys(previewMappingSelects).length === 0 ? (
+                <div className="text-center text-slate-400 py-8">ไม่พบรายการสินค้าในไฟล์</div>
+              ) : (
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b">
+                      <th className="p-3 text-left text-xs text-slate-500 font-medium">ชื่อสินค้าในไฟล์</th>
+                      <th className="p-3 text-center text-xs text-slate-500 font-medium w-12">จำนวน</th>
+                      <th className="p-3 text-left text-xs text-slate-500 font-medium">จับคู่กับสินค้าในระบบ</th>
+                      <th className="p-3 text-center text-xs text-slate-500 font-medium w-16">สถานะ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(previewMappingSelects).map(([rawName, promoId]) => {
+                      const matchedPromo = promoOptions.find(p => p.id === promoId);
+                      const isMatched = !!promoId && !!matchedPromo;
+                      return (
+                        <tr key={rawName} className={'border-b ' + (isMatched ? 'bg-green-50/50' : 'bg-red-50/50')}>
+                          <td className="p-3 font-medium text-slate-800">{rawName}</td>
+                          <td className="p-3 text-center text-slate-500 text-xs">
+                            {pendingImportData.prodQtyMap[rawName] || '-'}
+                          </td>
+                          <td className="p-3">
+                            <select
+                              value={promoId}
+                              onChange={e => setPreviewMappingSelects(prev => ({ ...prev, [rawName]: e.target.value }))}
+                              className={'border rounded-lg px-2 py-1 text-xs w-full focus:outline-none focus:ring-2 focus:ring-cyan-300 '
+                                + (isMatched ? 'border-green-300 bg-green-50' : 'border-red-300 bg-red-50')}>
+                              <option value="">-- ยังไม่ได้จับคู่ --</option>
+                              {promoOptions.map(p => (
+                                <option key={p.id} value={p.id}>
+                                  {p.short_name || p.name} — {p.name}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="p-3 text-center">
+                            {isMatched
+                              ? <span className="text-green-600 text-lg">✓</span>
+                              : <span className="text-red-500 text-lg">!</span>
+                            }
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t flex items-center justify-between shrink-0 bg-slate-50 rounded-b-2xl">
+              <div className="text-xs text-slate-500">
+                จับคู่แล้ว{' '}
+                <span className="font-bold text-green-600">
+                  {Object.values(previewMappingSelects).filter(Boolean).length}
+                </span>
+                {' '}/ {Object.keys(previewMappingSelects).length} รายการ
+                {Object.values(previewMappingSelects).some(v => !v) && (
+                  <span className="text-amber-600 ml-2">⚠ สินค้าที่ไม่ได้จับคู่จะไม่ถูก import</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => { setShowPreviewModal(false); setPendingImportData(null); }}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-medium">
+                  ยกเลิก
+                </button>
+                <button onClick={handleConfirmImport} disabled={importing}
+                  className="px-6 py-2 bg-cyan-600 text-white rounded-xl hover:bg-cyan-700 text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+                  {importing ? 'กำลัง import...' : `✓ ยืนยัน import ${pendingImportData.dataRows.length} รายการ`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showMappingModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[80vh] flex flex-col">
