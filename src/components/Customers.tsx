@@ -521,7 +521,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   // ── ดำเนินการ import จริง หลังจาก user confirm ──────────────────────────
   const handleConfirmImport = async () => {
     if (!pendingImportData) return;
-    const { dataRows, e } = pendingImportData;
+    const { dataRows, unmappedProds, e } = pendingImportData;
     // ใช้ previewMappingSelects เป็น autoPromoMap ที่ user แก้ไขแล้ว
     const finalPromoMap = { ...previewMappingSelects };
     setShowPreviewModal(false);
