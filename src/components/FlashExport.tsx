@@ -121,10 +121,10 @@ export default function FlashExport() {
         if (!promo) continue;
 
         // หา stock_item จากชื่อ short_name หรือ name
-        const searchName = promo.short_name || promo.name;
+        const searchName = (promo.short_name || promo.name || '').trim();
         const { data: si } = await supabase
           .from('stock_items').select('id, name')
-          .or(`name.ilike.%${searchName}%`)
+          .ilike('name', `%${searchName}%`)
           .maybeSingle();
 
         if (si) {
@@ -139,13 +139,17 @@ export default function FlashExport() {
             ref_id: orderNo,
             note: noteText,
           });
+        } else {
+          console.warn(`[คืนสต็อก] ไม่พบ stock_item ชื่อ "${searchName}" — ข้ามรายการนี้`);
         }
       }
 
-      // 2. insert stock transactions
+      // 2. insert stock transactions (ถ้าเจอ stock_item)
       if (txns.length > 0) {
         const { error: txnErr } = await supabase.from('stock_transactions').insert(txns);
         if (txnErr) throw txnErr;
+      } else {
+        showToast('⚠ ไม่พบสินค้าในสต็อก — อัพเดตสถานะออเดอร์อย่างเดียว', 'error');
       }
 
       // 3. อัพเดต order_status
