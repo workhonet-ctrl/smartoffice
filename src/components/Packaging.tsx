@@ -8,6 +8,7 @@ type PackOrder = {
   raw_prod: string | null; quantities: string | null; quantity: number | null;
   promo_ids: string[] | null;
   courier: string | null;
+  route: string | null;
   customers: { name: string; tel: string } | null;
   promos: PromoDetail[];
 };
@@ -161,8 +162,8 @@ export default function Packaging({
   };
 
   const isMulti  = (o: PackOrder) => o.promos.length > 1;
-  const isFlash  = (o: PackOrder) => o.courier === 'FLASH';
-  const chanBadge = (o: PackOrder) => o.courier === 'FLASH'
+  const isFlash  = (o: PackOrder) => o.courier === 'FLASH' || o.route === 'B';
+  const chanBadge = (o: PackOrder) => (o.courier === 'FLASH' || o.route === 'B')
     ? <span className="ml-1 px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-[9px] font-bold">FLASH</span>
     : <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[9px] font-bold">MyOrder</span>;
 
