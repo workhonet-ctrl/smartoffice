@@ -152,10 +152,14 @@ export default function FlashExport() {
           alert('⚠ ไม่พบสินค้าในสต็อก — อัพเดตสถานะออเดอร์อย่างเดียว');
       }
 
-      // 3. อัพเดต order_status
+      // 3. อัพเดต order_status + ล้าง tracking_no
       const newStatus = returnType === 'no_send' ? 'รอแพ็ค' : 'ตีกลับ';
       await supabase.from('orders')
-        .update({ order_status: newStatus, parcel_status: 'ยังไม่มีเลขพัสดุ' })
+        .update({
+          order_status: newStatus,
+          parcel_status: 'ยังไม่มีเลขพัสดุ',
+          tracking_no: null,        // ล้าง tracking เพื่อให้กลับมาที่รอส่งออก
+        })
         .eq('id', returnOrder.id);
 
       const label = returnType === 'no_send' ? 'ไม่ได้ส่ง' : 'ตีกลับ';
