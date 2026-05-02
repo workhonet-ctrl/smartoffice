@@ -100,7 +100,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
   // mapping modal state
   const [showMappingModal, setShowMappingModal] = useState(false);
-  const [showPreviewModal, setShowPreviewModal] = useState(false);  // popup ตรวจสอบก่อน import
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [pendingImportData, setPendingImportData] = useState<{
     dataRows: any[];
     autoPromoMap: Record<string,string>;
@@ -109,6 +109,11 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     e: any;
   } | null>(null);
   const [previewMappingSelects, setPreviewMappingSelects] = useState<Record<string,string>>({});
+  // Popup ใหม่ — แสดง 8 columns พร้อมตรวจยอด (ใช้ร่วมกัน Excel+Flash)
+  const [showOrderPreview, setShowOrderPreview]   = useState(false);
+  const [previewOrderRows, setPreviewOrderRows]   = useState<any[]>([]);  // [{date,name,facebook,tel,payment,mappedPromos,qty,amtFile,amtSystem,match,rawMappings}]
+  const [previewImportFn, setPreviewImportFn]     = useState<(() => Promise<void>) | null>(null);
+  const [previewSaving, setPreviewSaving]         = useState(false);
   const [unmappedList, setUnmappedList]         = useState<{name:string; qty:string}[]>([]);
   const [promoOptions, setPromoOptions]         = useState<{id:string; name:string; short_name:string|null; price_thb:number; master_name:string}[]>([]);
   const [mappingSelects, setMappingSelects]     = useState<Record<string, string>>({}); // raw_name → promo_id
@@ -295,7 +300,34 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     setFlashMinCod('');
     setFlashMaxCod('');
     setFlashSelectedRows(new Set());
-    setShowFlashImport(true);
+
+    // ── สร้าง previewOrderRows สำหรับ popup ตรวจสอบ ──────────────────────
+    const currentPromos = promoOptions.length > 0 ? promoOptions : [];
+    const flashPreviewRows = dataRows.map((r: any, idx: number) => {
+      const date     = String(r[3]||'');   // col D วันที่จัดส่ง
+      const custName = String(r[9]||'');   // col J ชื่อผู้รับ
+      const facebook = String(r[7]||'');   // col H ชื่อผู้สั่ง
+      const tel      = String(r[11]||'');  // col L เบอร์โทร
+      const amtFile  = Number(r[17]||0);   // col R ยอด
+      const payment  = amtFile > 0 ? 'COD' : 'BANK';
+      const rawProd  = String(r[27]||'').trim(); // col AB สินค้า
+      const rawProds = rawProd ? rawProd.split('|').map((s:string)=>s.trim()).filter(Boolean) : [];
+      const selItems = initialSel[idx] || [];
+      const mappedPromos = rawProds.map((rp, i) => {
+        const pid   = autoMap[rp] || '';
+        const promo = currentPromos.find((p:any) => p.id === pid);
+        const qty   = selItems[i]?.qty || 1;
+        return { rawName: rp, promoId: pid, promo, qty };
+      });
+      const amtSystem = mappedPromos.reduce((s, mp) => s + (mp.promo ? Number(mp.promo.price_thb||0) * mp.qty : 0), 0);
+      return { date, custName, facebook, tel, payment, mappedPromos, qty: rawProds.length, amtFile, amtSystem, match: Math.abs(amtFile - amtSystem) < 1 };
+    });
+    setPreviewOrderRows(flashPreviewRows);
+    setPreviewImportFn(() => async () => {
+      setShowOrderPreview(false);
+      setShowFlashImport(true);
+    });
+    setShowOrderPreview(true);
 
     // แสดงสรุปการ match
     const matchedCount = Object.keys(initialSel).length;
@@ -507,12 +539,38 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         })));
       }
 
-      // ── หยุดก่อน: เปิด preview popup ให้ตรวจสอบการจับคู่ ──────────────
+      // ── หยุดก่อน: เปิด preview popup ให้ตรวจสอบ ──────────────────────
       const initSelects: Record<string,string> = {};
       rawProdsAll.forEach(rp => { initSelects[rp] = autoPromoMap[rp] || ''; });
       setPreviewMappingSelects(initSelects);
       setPendingImportData({ dataRows, autoPromoMap, unmappedProds, prodQtyMap, e });
-      setShowPreviewModal(true);
+
+      // สร้าง previewOrderRows (1 row = 1 ออเดอร์)
+      const currentPromos = promoOptions.length > 0 ? promoOptions : [];
+      const rows = dataRows.map((r: any) => {
+        const date = String(r[0]||'');
+        const custName = String(r[4]||'');
+        const facebook = String(r[3]||'');
+        const tel      = String(r[6]||'');
+        const amtFile  = Number(r[17]||0);
+        const payRaw   = Number(r[17]||0);
+        const payment  = payRaw > 0 ? 'COD' : 'BANK';
+        const rawProds = String(r[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
+        const qtys     = String(r[15]||'1').split('|').map((s:string)=>s.trim());
+        const mappedPromos = rawProds.map((rp, i) => {
+          const pid   = initSelects[rp] || '';
+          const promo = currentPromos.find((p:any) => p.id === pid);
+          return { rawName: rp, promoId: pid, promo, qty: Number(qtys[i]||1) };
+        });
+        const amtSystem = mappedPromos.reduce((s, mp) => {
+          return s + (mp.promo ? Number(mp.promo.price_thb||0) * mp.qty : 0);
+        }, 0);
+        return { date, custName, facebook, tel, payment, mappedPromos, qty: rawProds.length, amtFile, amtSystem, match: Math.abs(amtFile - amtSystem) < 1 };
+      });
+      setPreviewOrderRows(rows);
+      // เก็บ pendingImportData ไว้ให้ handleConfirmImport เดิมใช้ได้
+      setShowPreviewModal(false);
+      setShowOrderPreview(true);
     } catch (err) {
       console.error(err);
       showToast('เกิดข้อผิดพลาดในการอ่านไฟล์', 'error');
@@ -1600,6 +1658,150 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
       {/* Toast */}
       {/* ── Mapping Modal ── */}
+
+
+      {/* ══════════════════════════════════════════════════════════════════
+          Popup ตรวจสอบออเดอร์ก่อน import (Excel + Flash)
+          แสดง 8 columns + ตรวจยอดเงิน
+      ══════════════════════════════════════════════════════════════════ */}
+      {showOrderPreview && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[95vh] flex flex-col">
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  📋 ตรวจสอบออเดอร์ก่อน Import
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  ตรวจสอบการจับคู่สินค้าและยอดเงิน — แถวสีแดง = ยอดไม่ตรง
+                </p>
+              </div>
+              <button onClick={() => { setShowOrderPreview(false); setPendingImportData(null); }}
+                className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+
+            {/* Stats bar */}
+            <div className="px-6 py-2 bg-slate-50 border-b shrink-0 flex items-center gap-4 flex-wrap text-xs">
+              <span className="text-slate-600">ทั้งหมด <strong>{previewOrderRows.length}</strong> ออเดอร์</span>
+              <span className="text-green-600">✓ ยอดตรง <strong>{previewOrderRows.filter(r=>r.match).length}</strong></span>
+              <span className="text-red-500">✗ ยอดไม่ตรง <strong>{previewOrderRows.filter(r=>!r.match).length}</strong></span>
+              <span className="text-amber-600">⚠ ยังไม่จับคู่ <strong>{previewOrderRows.filter(r=>r.mappedPromos.some((mp:any)=>!mp.promoId)).length}</strong> ออเดอร์</span>
+            </div>
+
+            {/* Table */}
+            <div className="flex-1 overflow-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead className="bg-slate-800 text-white sticky top-0 z-10">
+                  <tr>
+                    <th className="p-2.5 text-left whitespace-nowrap w-24">วันที่</th>
+                    <th className="p-2.5 text-left whitespace-nowrap">ชื่อลูกค้า</th>
+                    <th className="p-2.5 text-left whitespace-nowrap">เฟสบุ๊ค</th>
+                    <th className="p-2.5 text-left whitespace-nowrap w-24">เบอร์โทร</th>
+                    <th className="p-2.5 text-center whitespace-nowrap w-16">ชำระ</th>
+                    <th className="p-2.5 text-left min-w-[220px]">รายการสินค้า (จับคู่)</th>
+                    <th className="p-2.5 text-center whitespace-nowrap w-16">จำนวน</th>
+                    <th className="p-2.5 text-right whitespace-nowrap w-24">ยอดไฟล์ (฿)</th>
+                    <th className="p-2.5 text-right whitespace-nowrap w-24">ยอดระบบ (฿)</th>
+                    <th className="p-2.5 text-center whitespace-nowrap w-14">ตรง?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewOrderRows.map((row, idx) => (
+                    <tr key={idx}
+                      className={`border-b align-top transition ${
+                        !row.match ? 'bg-red-50 hover:bg-red-100' :
+                        idx % 2 === 0 ? 'bg-white hover:bg-green-50' : 'bg-slate-50/50 hover:bg-green-50'
+                      }`}>
+                      <td className="p-2.5 text-slate-500 whitespace-nowrap">{row.date}</td>
+                      <td className="p-2.5 font-medium text-slate-800 whitespace-nowrap">{row.custName || '-'}</td>
+                      <td className="p-2.5 text-slate-500 whitespace-nowrap">{row.facebook || '-'}</td>
+                      <td className="p-2.5 text-slate-600 whitespace-nowrap">{row.tel}</td>
+                      <td className="p-2.5 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          row.payment === 'COD' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'
+                        }`}>{row.payment}</span>
+                      </td>
+                      <td className="p-2.5">
+                        {row.mappedPromos.map((mp: any, mi: number) => (
+                          <div key={mi} className={`flex items-start gap-1.5 ${mi > 0 ? 'mt-1' : ''}`}>
+                            <span className="text-slate-300 shrink-0">{mi+1}.</span>
+                            <div className="flex-1">
+                              {mp.promoId && mp.promo ? (
+                                <>
+                                  <span className="font-semibold text-slate-800">{mp.promo.short_name || mp.promo.master_name}</span>
+                                  <span className="text-slate-400 mx-1">/</span>
+                                  <span className="text-slate-600">{mp.promo.name}</span>
+                                  <span className="text-cyan-600 ml-1 font-bold">×{mp.qty}</span>
+                                  <span className="text-emerald-600 ml-1">฿{(Number(mp.promo.price_thb||0)*mp.qty).toLocaleString()}</span>
+                                </>
+                              ) : (
+                                <span className="text-red-500 font-medium">⚠ {mp.rawName} <span className="text-[10px] font-normal">(ยังไม่จับคู่)</span></span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </td>
+                      <td className="p-2.5 text-center font-bold text-slate-700">{row.qty}</td>
+                      <td className="p-2.5 text-right text-slate-700">
+                        {row.amtFile > 0 ? `฿${Number(row.amtFile).toLocaleString()}` : '-'}
+                      </td>
+                      <td className={`p-2.5 text-right font-semibold ${
+                        !row.match && row.amtFile > 0 ? 'text-red-600' : 'text-slate-700'
+                      }`}>
+                        {row.amtSystem > 0 ? `฿${row.amtSystem.toLocaleString()}` : '-'}
+                      </td>
+                      <td className="p-2.5 text-center text-base">
+                        {!row.match && row.amtFile > 0 && row.amtSystem > 0
+                          ? <span title="ยอดไม่ตรง">🔴</span>
+                          : row.amtFile > 0 && row.amtSystem > 0
+                          ? <span title="ยอดตรง">✅</span>
+                          : <span title="ไม่มีข้อมูล">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t flex items-center justify-between shrink-0 bg-slate-50 rounded-b-2xl">
+              <div className="text-xs text-slate-500 space-y-0.5">
+                {previewOrderRows.filter(r=>!r.match && r.amtFile>0 && r.amtSystem>0).length > 0 && (
+                  <div className="text-red-600 font-medium">
+                    ⚠ มี {previewOrderRows.filter(r=>!r.match && r.amtFile>0 && r.amtSystem>0).length} ออเดอร์ที่ยอดไม่ตรง — ยังสามารถ import ได้
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => { setShowOrderPreview(false); setPendingImportData(null); setPreviewImportFn(null); }}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-medium">
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={async () => {
+                    setPreviewSaving(true);
+                    try {
+                      if (previewImportFn) {
+                        // Flash: เปิด Flash Import modal
+                        await previewImportFn();
+                      } else {
+                        // Excel: import โดยตรง
+                        setShowOrderPreview(false);
+                        await handleConfirmImport();
+                      }
+                    } finally { setPreviewSaving(false); }
+                  }}
+                  disabled={previewSaving || importing}
+                  className="px-6 py-2 bg-cyan-600 text-white rounded-xl hover:bg-cyan-700 text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+                  {previewSaving || importing ? 'กำลัง import...' : `✓ ยืนยัน import ${previewOrderRows.length} ออเดอร์`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Preview Modal: ตรวจสอบการจับคู่สินค้าก่อน import ── */}
       {showPreviewModal && pendingImportData && (
