@@ -1732,20 +1732,42 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                               <div className="text-slate-500 text-[10px]">
                                 📄 ต้นฉบับ: <span className="font-medium text-slate-700">{mp.rawName}</span>
                               </div>
-                              {/* จับคู่ */}
-                              {mp.promoId && mp.promo ? (
-                                <div className="text-[11px] mt-0.5">
-                                  <span className="text-slate-300 mr-1">→</span>
-                                  <span className="font-semibold text-slate-800">{mp.promo.short_name || mp.promo.master_name}</span>
-                                  <span className="text-slate-400 mx-1">/</span>
-                                  <span className="text-slate-600">{mp.promo.name}</span>
-                                  <span className="text-cyan-600 ml-1 font-bold">×{mp.qty}</span>
-                                  <span className="text-emerald-600 ml-1 font-semibold">฿{(Number(mp.promo.price_thb||0)*mp.qty).toLocaleString()}</span>
-                                </div>
-                              ) : (
-                                <div className="text-[11px] mt-0.5 text-red-500">
-                                  <span className="text-slate-300 mr-1">→</span>
-                                  <span className="font-medium">⚠ ยังไม่จับคู่</span>
+                              {/* dropdown จับคู่ */}
+                              <div className="mt-0.5 flex items-center gap-1">
+                                <span className="text-slate-300 text-[10px]">→</span>
+                                <select
+                                  value={mp.promoId}
+                                  onChange={e => {
+                                    const newPromoId = e.target.value;
+                                    setPreviewOrderRows(prev => prev.map((r, ri) => {
+                                      if (ri !== idx) return r;
+                                      const newPromos = r.mappedPromos.map((m: any, mj: number) => {
+                                        if (mj !== mi) return m;
+                                        const promo = promoOptions.find((p: any) => p.id === newPromoId);
+                                        return { ...m, promoId: newPromoId, promo };
+                                      });
+                                      const newAmtSystem = newPromos.reduce((s: number, m: any) =>
+                                        s + (m.promo ? Number(m.promo.price_thb||0) * m.qty : 0), 0);
+                                      return { ...r, mappedPromos: newPromos, amtSystem: newAmtSystem,
+                                        match: r.amtFile > 0 && Math.abs(r.amtFile - newAmtSystem) < 1 };
+                                    }));
+                                    // sync กลับ previewMappingSelects ด้วย
+                                    setPreviewMappingSelects(prev => ({ ...prev, [mp.rawName]: newPromoId }));
+                                  }}
+                                  className={`text-[11px] border rounded px-1.5 py-0.5 w-full max-w-[280px] focus:outline-none focus:ring-1 focus:ring-cyan-300
+                                    ${mp.promoId ? 'border-green-300 bg-green-50 text-slate-700' : 'border-red-300 bg-red-50 text-red-600'}`}>
+                                  <option value="">-- เลือกสินค้า --</option>
+                                  {promoOptions.map((p: any) => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.short_name || p.master_name} / {p.name} (฿{Number(p.price_thb||0).toLocaleString()})
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              {/* แสดงราคาถ้าเลือกแล้ว */}
+                              {mp.promoId && mp.promo && (
+                                <div className="text-[10px] text-emerald-600 mt-0.5 ml-3">
+                                  ฿{(Number(mp.promo.price_thb||0)*mp.qty).toLocaleString()} × {mp.qty} รายการ
                                 </div>
                               )}
                             </div>
@@ -1792,11 +1814,22 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                   onClick={async () => {
                     setPreviewSaving(true);
                     try {
+                      // บันทึก mapping ใหม่ที่ user เลือกใน popup นี้ลง product_mappings
+                      const newMappings: {raw_name: string; promo_id: string}[] = [];
+                      previewOrderRows.forEach(row => {
+                        row.mappedPromos.forEach((mp: any) => {
+                          if (mp.promoId && mp.rawName) {
+                            newMappings.push({ raw_name: mp.rawName, promo_id: mp.promoId });
+                          }
+                        });
+                      });
+                      if (newMappings.length > 0) {
+                        await supabase.from('product_mappings')
+                          .upsert(newMappings, { onConflict: 'raw_name' });
+                      }
                       if (previewImportFn) {
-                        // Flash: เปิด Flash Import modal
                         await previewImportFn();
                       } else {
-                        // Excel: import โดยตรง
                         setShowOrderPreview(false);
                         await handleConfirmImport();
                       }
