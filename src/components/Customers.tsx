@@ -548,13 +548,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // สร้าง previewOrderRows (1 row = 1 ออเดอร์)
       const currentPromos = promoOptions.length > 0 ? promoOptions : [];
       const previewRows = dataRows.map((r: any) => {
-        const date = String(r[0]||'');
+        const rawDate  = String(r[3]||'');
+        const date     = rawDate ? rawDate.split('T')[0] : '';
         const custName = String(r[4]||'');
-        const facebook = String(r[3]||'');
+        const facebook = String(r[5]||'');
         const tel      = String(r[6]||'');
-        const amtFile  = Number(r[17]||0);
-        const payRaw   = Number(r[17]||0);
-        const payment  = payRaw > 0 ? 'COD' : 'BANK';
+        const amtFile  = Number(r[21]||0);          // col V ยอดเงิน
+        const payment  = String(r[22]||'COD').trim(); // col W ชำระเงิน
         const rawProds = String(r[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
         const qtys     = String(r[15]||'1').split('|').map((s:string)=>s.trim());
         const mappedPromos = rawProds.map((rp, i) => {
@@ -565,7 +565,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const amtSystem = mappedPromos.reduce((s, mp) => {
           return s + (mp.promo ? Number(mp.promo.price_thb||0) * mp.qty : 0);
         }, 0);
-        return { date, custName, facebook, tel, payment, mappedPromos, qty: rawProds.length, amtFile, amtSystem, match: Math.abs(amtFile - amtSystem) < 1 };
+        return { date, custName, facebook, tel, payment, mappedPromos, qty: rawProds.length, amtFile, amtSystem, match: amtFile > 0 && Math.abs(amtFile - amtSystem) < 1 };
       });
       setPreviewOrderRows(previewRows);
       // เก็บ pendingImportData ไว้ให้ handleConfirmImport เดิมใช้ได้
@@ -1725,19 +1725,28 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                       </td>
                       <td className="p-2.5">
                         {row.mappedPromos.map((mp: any, mi: number) => (
-                          <div key={mi} className={`flex items-start gap-1.5 ${mi > 0 ? 'mt-1' : ''}`}>
-                            <span className="text-slate-300 shrink-0">{mi+1}.</span>
-                            <div className="flex-1">
+                          <div key={mi} className={`flex items-start gap-1.5 ${mi > 0 ? 'mt-1.5 pt-1.5 border-t border-slate-100' : ''}`}>
+                            <span className="text-slate-300 shrink-0 text-[10px] mt-0.5">{mi+1}.</span>
+                            <div className="flex-1 min-w-0">
+                              {/* ต้นฉบับ */}
+                              <div className="text-slate-500 text-[10px]">
+                                📄 ต้นฉบับ: <span className="font-medium text-slate-700">{mp.rawName}</span>
+                              </div>
+                              {/* จับคู่ */}
                               {mp.promoId && mp.promo ? (
-                                <>
+                                <div className="text-[11px] mt-0.5">
+                                  <span className="text-slate-300 mr-1">→</span>
                                   <span className="font-semibold text-slate-800">{mp.promo.short_name || mp.promo.master_name}</span>
                                   <span className="text-slate-400 mx-1">/</span>
                                   <span className="text-slate-600">{mp.promo.name}</span>
                                   <span className="text-cyan-600 ml-1 font-bold">×{mp.qty}</span>
-                                  <span className="text-emerald-600 ml-1">฿{(Number(mp.promo.price_thb||0)*mp.qty).toLocaleString()}</span>
-                                </>
+                                  <span className="text-emerald-600 ml-1 font-semibold">฿{(Number(mp.promo.price_thb||0)*mp.qty).toLocaleString()}</span>
+                                </div>
                               ) : (
-                                <span className="text-red-500 font-medium">⚠ {mp.rawName} <span className="text-[10px] font-normal">(ยังไม่จับคู่)</span></span>
+                                <div className="text-[11px] mt-0.5 text-red-500">
+                                  <span className="text-slate-300 mr-1">→</span>
+                                  <span className="font-medium">⚠ ยังไม่จับคู่</span>
+                                </div>
                               )}
                             </div>
                           </div>
