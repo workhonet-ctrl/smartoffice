@@ -117,6 +117,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const [previewSearch, setPreviewSearch]         = useState<Record<string,string>>({});  // key = "rowIdx-promoIdx"
   const [previewSelectedRows, setPreviewSelectedRows] = useState<Set<number>>(new Set()); // row ที่เลือก
   const [openPromoIdx, setOpenPromoIdx]           = useState<string|null>(null); // "rowIdx-promoIdx" ที่ dropdown เปิดอยู่
+  const [bulkFilter, setBulkFilter]               = useState('');  // filter rows ในตาราง
   const [unmappedList, setUnmappedList]         = useState<{name:string; qty:string}[]>([]);
   const [promoOptions, setPromoOptions]         = useState<{id:string; name:string; short_name:string|null; price_thb:number; master_name:string}[]>([]);
   const [mappingSelects, setMappingSelects]     = useState<Record<string, string>>({}); // raw_name → promo_id
@@ -1691,6 +1692,18 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
               <span className="text-green-600">✓ ยอดตรง <strong>{previewOrderRows.filter(r=>r.match).length}</strong></span>
               <span className="text-red-500">✗ ยอดไม่ตรง <strong>{previewOrderRows.filter(r=>!r.match).length}</strong></span>
               <span className="text-amber-600">⚠ ยังไม่จับคู่ <strong>{previewOrderRows.filter(r=>r.mappedPromos.some((mp:any)=>!mp.promoId)).length}</strong> ออเดอร์</span>
+              {/* Filter rows */}
+              <div className="ml-auto flex items-center gap-2">
+                <input
+                  type="text"
+                  value={bulkFilter}
+                  onChange={e => setBulkFilter(e.target.value)}
+                  placeholder="🔍 กรองต้นฉบับ หรือ ยอด เช่น ครีม / 229"
+                  className="border rounded-lg px-3 py-1.5 text-xs w-56 focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white"/>
+                {bulkFilter && (
+                  <button onClick={() => setBulkFilter('')} className="text-slate-400 hover:text-red-500 text-xs">✕</button>
+                )}
+              </div>
             </div>
 
             {/* Bulk assign bar */}
@@ -1777,20 +1790,35 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                   </tr>
                 </thead>
                 <tbody>
-                  {previewOrderRows.map((row, idx) => (
-                    <tr key={idx}
+                  {(() => {
+                    const filtered = bulkFilter.trim()
+                      ? previewOrderRows.filter(r => {
+                          const f = bulkFilter.trim().toLowerCase();
+                          // กรองจาก ต้นฉบับ
+                          const hasRaw = r.mappedPromos.some((mp:any) =>
+                            (mp.rawName||'').toLowerCase().includes(f)
+                          );
+                          // กรองจาก ยอดไฟล์
+                          const hasAmt = String(r.amtFile).includes(f);
+                          return hasRaw || hasAmt;
+                        })
+                      : previewOrderRows;
+                    return filtered.map((row, idx) => {
+                    const origIdx = previewOrderRows.indexOf(row);
+                    return (
+                    <tr key={origIdx}
                       className={`border-b align-top transition ${
-                        previewSelectedRows.has(idx) ? 'bg-amber-50 hover:bg-amber-100' :
+                        previewSelectedRows.has(origIdx) ? 'bg-amber-50 hover:bg-amber-100' :
                         !row.match ? 'bg-red-50 hover:bg-red-100' :
                         idx % 2 === 0 ? 'bg-white hover:bg-green-50' : 'bg-slate-50/50 hover:bg-green-50'
                       }`}>
                       {/* checkbox */}
                       <td className="p-2.5 text-center">
                         <input type="checkbox"
-                          checked={previewSelectedRows.has(idx)}
+                          checked={previewSelectedRows.has(origIdx)}
                           onChange={e => setPreviewSelectedRows(prev => {
                             const next = new Set(prev);
-                            e.target.checked ? next.add(idx) : next.delete(idx);
+                            e.target.checked ? next.add(origIdx) : next.delete(origIdx);
                             return next;
                           })}
                           className="cursor-pointer rounded"/>
@@ -1820,7 +1848,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                   <input
                                     type="text"
                                     value={(() => {
-                                      const key = `${idx}-${mi}`;
+                                      const key = `${origIdx}-${mi}`;
                                       // ถ้า dropdown เปิดอยู่ → แสดง search text
                                       if (openPromoIdx === key) return previewSearch[key] ?? '';
                                       // ถ้าจับคู่แล้ว → แสดงชื่อสินค้า
@@ -1830,13 +1858,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                       return '';
                                     })()}
                                     onChange={e => {
-                                      const key = `${idx}-${mi}`;
+                                      const key = `${origIdx}-${mi}`;
                                       setOpenPromoIdx(key);
                                       setPreviewSearch(prev => ({ ...prev, [key]: e.target.value }));
                                       // ล้าง promo ถ้า user แก้ text
                                       if (mp.promoId) {
                                         setPreviewOrderRows(prev => prev.map((r, ri) => {
-                                          if (ri !== idx) return r;
+                                          if (ri !== origIdx) return r;
                                           const newPromos = r.mappedPromos.map((m:any, mj:number) =>
                                             mj === mi ? { ...m, promoId: '', promo: null } : m
                                           );
@@ -1845,7 +1873,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                       }
                                     }}
                                     onFocus={() => {
-                                      const key = `${idx}-${mi}`;
+                                      const key = `${origIdx}-${mi}`;
                                       setOpenPromoIdx(key);
                                       setPreviewSearch(prev => ({ ...prev, [key]: '' }));
                                     }}
@@ -1854,7 +1882,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                     className={`w-full border rounded px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-cyan-300
                                       ${mp.promoId ? 'border-green-300 bg-green-50' : 'border-red-300 bg-red-50 text-red-600 placeholder:text-red-400'}`}/>
                                   {/* Dropdown list */}
-                                  {openPromoIdx === `${idx}-${mi}` && (
+                                  {openPromoIdx === `${origIdx}-${mi}` && (
                                     <div className="absolute top-full left-0 right-0 bg-white border rounded-lg shadow-xl z-50 max-h-44 overflow-auto mt-0.5">
                                       {promoOptions
                                         .filter((p:any) => {
@@ -1919,7 +1947,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                           : <span title="ไม่มีข้อมูล">—</span>}
                       </td>
                     </tr>
-                  ))}
+                  );
+                    });
+                  })()
+                  }
                 </tbody>
               </table>
             </div>
