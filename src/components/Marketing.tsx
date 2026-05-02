@@ -265,19 +265,8 @@ function AdsProductList() {
                     const margin = calcMargin(p);
                     const isPositive = margin > 0;
                     return (
-                      <div className="flex flex-col items-center gap-1">
-                        {/* Margin จาก KPI สินค้า */}
-                        <div className={`font-bold text-sm ${isPositive ? 'text-emerald-600' : 'text-red-500'}`}>
-                          ฿{margin.toFixed(2)}
-                        </div>
-                        <div className="text-[9px] text-slate-400">Margin (KPI)</div>
-                        {/* Manual KPI เพิ่มเติม */}
-                        <input
-                          value={kpiMap[p.id] || ''}
-                          onChange={e => setKpiMap(prev => ({ ...prev, [p.id]: e.target.value }))}
-                          placeholder="KPI เพิ่มเติม..."
-                          className="w-full border rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-purple-300 mt-0.5"
-                        />
+                      <div className={`font-bold text-sm ${isPositive ? 'text-emerald-600' : 'text-red-500'}`}>
+                        ฿{margin.toFixed(2)}
                       </div>
                     );
                   })()}
