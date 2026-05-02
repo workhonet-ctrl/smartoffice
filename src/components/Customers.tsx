@@ -1688,7 +1688,12 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
             {/* Stats bar */}
             <div className="px-6 py-2 bg-slate-50 border-b shrink-0 flex items-center gap-4 flex-wrap text-xs">
-              <span className="text-slate-600">ทั้งหมด <strong>{previewOrderRows.length}</strong> ออเดอร์</span>
+              <span className="text-slate-600">
+                {bulkFilter.trim()
+                  ? <>แสดง <strong className="text-cyan-600">{previewOrderRows.filter(r=>{const f=bulkFilter.trim().toLowerCase();return r.mappedPromos.some((mp:any)=>(mp.rawName||'').toLowerCase().includes(f))||String(r.amtFile).includes(f);}).length}</strong> / ทั้งหมด <strong>{previewOrderRows.length}</strong> ออเดอร์</>
+                  : <>ทั้งหมด <strong>{previewOrderRows.length}</strong> ออเดอร์</>
+                }
+              </span>
               <span className="text-green-600">✓ ยอดตรง <strong>{previewOrderRows.filter(r=>r.match).length}</strong></span>
               <span className="text-red-500">✗ ยอดไม่ตรง <strong>{previewOrderRows.filter(r=>!r.match).length}</strong></span>
               <span className="text-amber-600">⚠ ยังไม่จับคู่ <strong>{previewOrderRows.filter(r=>r.mappedPromos.some((mp:any)=>!mp.promoId)).length}</strong> ออเดอร์</span>
@@ -1773,8 +1778,31 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                   <tr>
                     <th className="p-2.5 w-8 text-center">
                       <input type="checkbox"
-                        checked={previewOrderRows.length > 0 && previewSelectedRows.size === previewOrderRows.length}
-                        onChange={e => setPreviewSelectedRows(e.target.checked ? new Set(previewOrderRows.map((_,i)=>i)) : new Set())}
+                        checked={(() => {
+                          const fRows = bulkFilter.trim()
+                            ? previewOrderRows.filter(r => {
+                                const f = bulkFilter.trim().toLowerCase();
+                                return r.mappedPromos.some((mp:any)=>(mp.rawName||'').toLowerCase().includes(f)) || String(r.amtFile).includes(f);
+                              })
+                            : previewOrderRows;
+                          return fRows.length > 0 && fRows.every(r => previewSelectedRows.has(previewOrderRows.indexOf(r)));
+                        })()}
+                        onChange={e => {
+                          const fRows = bulkFilter.trim()
+                            ? previewOrderRows.filter(r => {
+                                const f = bulkFilter.trim().toLowerCase();
+                                return r.mappedPromos.some((mp:any)=>(mp.rawName||'').toLowerCase().includes(f)) || String(r.amtFile).includes(f);
+                              })
+                            : previewOrderRows;
+                          setPreviewSelectedRows(prev => {
+                            const next = new Set(prev);
+                            fRows.forEach(r => {
+                              const oi = previewOrderRows.indexOf(r);
+                              e.target.checked ? next.add(oi) : next.delete(oi);
+                            });
+                            return next;
+                          });
+                        }}
                         className="cursor-pointer rounded"/>
                     </th>
                     <th className="p-2.5 text-left whitespace-nowrap w-24">วันที่</th>
