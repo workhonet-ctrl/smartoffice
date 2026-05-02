@@ -44,7 +44,13 @@ export default function ProductKPI() {
 
   const [shipActualMap, setShipActualMap] = useState<Record<string,number>>({}); // promo_id → avg actual
 
-  useEffect(() => { loadData(); loadActualShipping(); }, []);
+  useEffect(() => {
+    const init = async () => {
+      await loadActualShipping(); // โหลดขนส่งจริงก่อน
+      await loadData();           // ค่อยโหลด KPI (calcRow จะได้ใช้ shipActualMap ที่พร้อมแล้ว)
+    };
+    init();
+  }, []);
 
   const loadActualShipping = async () => {
     // ดึงค่าส่งจริงเฉลี่ยต่อ promo จาก orders join shipping_flash/myorder
@@ -117,15 +123,18 @@ export default function ProductKPI() {
   };
 
   // คำนวณ KPI ต่อแถว
-  const calcRow = (p: PromoKPI) => {
+  const calcRow = (p: PromoKPI, shipMap: Record<string,number> = shipActualMap) => {
     const vatVal   = parseFloat(vatMap[p.promo_id] || '0') || 0;
     const com      = p.price * 0.015;
     const free2    = p.price * 0.02;
-    const totalCost = p.cost_goods + p.box_price + p.bub_price + p.ship_thb + vatVal + com + free2;
+    // ขนส่ง: ใช้จริงเฉลี่ยถ้ามี ไม่งั้นใช้ประมาณ
+    const actualShip = shipMap[p.promo_id];
+    const shipUsed = (actualShip !== undefined && actualShip !== null) ? actualShip : p.ship_thb;
+    const totalCost = p.cost_goods + p.box_price + p.bub_price + shipUsed + vatVal + com + free2;
     const profit   = p.price - totalCost;
     const margin   = profit - 20;                          // กำไร - 20
     const roas     = margin !== 0 ? p.price / margin : 0; // ราคาขาย ÷ Margin
-    return { vatVal, com, free2, totalCost, profit, margin, roas };
+    return { vatVal, com, free2, shipUsed, totalCost, profit, margin, roas };
   };
 
   const filtered = useMemo(() => {
@@ -307,11 +316,15 @@ export default function ProductKPI() {
                     {p.bub_price > 0 ? `฿${fmt(p.bub_price)}` : <span className="text-slate-300">-</span>}
                   </td>
                   <td className="p-3 text-right text-slate-500">
-                    {p.ship_thb > 0 ? `฿${fmt(p.ship_thb)}` : <span className="text-slate-300">-</span>}
+                    {p.ship_thb > 0
+                      ? <span className={shipActualMap[p.promo_id] ? 'line-through text-slate-300 text-xs' : ''}>
+                          ฿{fmt(p.ship_thb)}
+                        </span>
+                      : <span className="text-slate-300">-</span>}
                   </td>
                   <td className="p-3 text-right text-blue-600">
                     {shipActualMap[p.promo_id]
-                      ? `฿${fmt(shipActualMap[p.promo_id])}`
+                      ? <span className="font-semibold">฿{fmt(shipActualMap[p.promo_id])}</span>
                       : <span className="text-slate-300">-</span>}
                   </td>
                   {/* VAT — กรอกได้ทีละแถว */}
