@@ -1732,23 +1732,17 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                 onClick={() => {
                   if (!bulkPromoId) return;
                   const promo = promoOptions.find((p:any) => p.id === bulkPromoId);
+                  const newMappings: Record<string,string> = {};
                   setPreviewOrderRows(prev => prev.map((r, ri) => {
                     if (!previewSelectedRows.has(ri)) return r;
-                    const newPromos = r.mappedPromos.map((m:any) => ({ ...m, promoId: bulkPromoId, promo }));
+                    const newPromos = r.mappedPromos.map((m:any) => {
+                      newMappings[m.rawName] = bulkPromoId;
+                      return { ...m, promoId: bulkPromoId, promo };
+                    });
                     const newAmt = newPromos.reduce((s:number, m:any) => s + (m.promo ? Number(m.promo.price_thb||0)*m.qty : 0), 0);
                     return { ...r, mappedPromos: newPromos, amtSystem: newAmt, match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
                   }));
-                  // sync previewMappingSelects
-                  setPreviewOrderRows(prev => {
-                    prev.forEach(r => {
-                      if (previewSelectedRows.has(prev.indexOf(r))) {
-                        r.mappedPromos.forEach((m:any) => {
-                          setPreviewMappingSelects(ps => ({ ...ps, [m.rawName]: bulkPromoId }));
-                        });
-                      }
-                    });
-                    return prev;
-                  });
+                  setPreviewMappingSelects(prev => ({ ...prev, ...newMappings }));
                 }}
                 className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 disabled:opacity-40 whitespace-nowrap">
                 ✓ ใส่ให้ที่เลือก
@@ -1825,9 +1819,16 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                 <div className="relative flex-1">
                                   <input
                                     type="text"
-                                    value={mp.promoId && openPromoIdx !== `${idx}-${mi}`
-                                      ? `${mp.promo?.short_name||mp.promo?.master_name||''} / ${mp.promo?.name||''} (฿${Number(mp.promo?.price_thb||0).toLocaleString()})`
-                                      : (previewSearch[`${idx}-${mi}`] ?? '')}
+                                    value={(() => {
+                                      const key = `${idx}-${mi}`;
+                                      // ถ้า dropdown เปิดอยู่ → แสดง search text
+                                      if (openPromoIdx === key) return previewSearch[key] ?? '';
+                                      // ถ้าจับคู่แล้ว → แสดงชื่อสินค้า
+                                      if (mp.promoId && mp.promo?.name) {
+                                        return `${mp.promo.short_name||mp.promo.master_name||''} / ${mp.promo.name} (฿${Number(mp.promo.price_thb||0).toLocaleString()})`;
+                                      }
+                                      return '';
+                                    })()}
                                     onChange={e => {
                                       const key = `${idx}-${mi}`;
                                       setOpenPromoIdx(key);
