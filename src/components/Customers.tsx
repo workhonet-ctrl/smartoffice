@@ -114,6 +114,11 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const [previewOrderRows, setPreviewOrderRows]   = useState<any[]>([]);  // [{date,name,facebook,tel,payment,mappedPromos,qty,amtFile,amtSystem,match,rawMappings}]
   const [previewImportFn, setPreviewImportFn]     = useState<(() => Promise<void>) | null>(null);
   const [previewSaving, setPreviewSaving]         = useState(false);
+  const [previewSearch, setPreviewSearch]         = useState('');       // ค้นหาในช่อง search ของ dropdown
+  const [previewSelectedRows, setPreviewSelectedRows] = useState<Set<number>>(new Set()); // row ที่เลือก
+  const [bulkPromoSearch, setBulkPromoSearch]     = useState('');       // bulk assign search
+  const [bulkPromoId, setBulkPromoId]             = useState('');       // bulk assign promo
+  const [openPromoIdx, setOpenPromoIdx]           = useState<string|null>(null); // "rowIdx-promoIdx" ที่ dropdown เปิดอยู่
   const [unmappedList, setUnmappedList]         = useState<{name:string; qty:string}[]>([]);
   const [promoOptions, setPromoOptions]         = useState<{id:string; name:string; short_name:string|null; price_thb:number; master_name:string}[]>([]);
   const [mappingSelects, setMappingSelects]     = useState<Record<string, string>>({}); // raw_name → promo_id
@@ -1690,11 +1695,83 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
               <span className="text-amber-600">⚠ ยังไม่จับคู่ <strong>{previewOrderRows.filter(r=>r.mappedPromos.some((mp:any)=>!mp.promoId)).length}</strong> ออเดอร์</span>
             </div>
 
+            {/* Bulk assign bar */}
+            <div className="px-6 py-2 bg-amber-50 border-b shrink-0 flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-medium text-amber-800 whitespace-nowrap">
+                จับคู่ทีเดียว ({previewSelectedRows.size} row ที่เลือก):
+              </span>
+              {/* Searchable bulk promo */}
+              <div className="relative flex-1 min-w-[200px] max-w-sm">
+                <input
+                  type="text"
+                  value={bulkPromoSearch}
+                  onChange={e => { setBulkPromoSearch(e.target.value); setBulkPromoId(''); }}
+                  placeholder="ค้นหาชื่อสินค้า หรือ ราคา..."
+                  className="w-full border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white"/>
+                {bulkPromoSearch && !bulkPromoId && (
+                  <div className="absolute top-full left-0 right-0 bg-white border rounded-lg shadow-xl z-50 max-h-48 overflow-auto mt-0.5">
+                    {promoOptions
+                      .filter((p:any) => {
+                        const s = bulkPromoSearch.toLowerCase();
+                        return (p.short_name||'').toLowerCase().includes(s)
+                          || (p.name||'').toLowerCase().includes(s)
+                          || String(p.price_thb||'').includes(s);
+                      })
+                      .map((p:any) => (
+                        <button key={p.id} onMouseDown={() => { setBulkPromoId(p.id); setBulkPromoSearch(`${p.short_name||p.name} / ${p.name} (฿${Number(p.price_thb||0).toLocaleString()})`); }}
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-amber-50 border-b last:border-0">
+                          <span className="font-semibold text-slate-800">{p.short_name||p.master_name}</span>
+                          <span className="text-slate-500 mx-1">/</span>
+                          <span className="text-slate-600">{p.name}</span>
+                          <span className="text-emerald-600 ml-1.5 font-bold">฿{Number(p.price_thb||0).toLocaleString()}</span>
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+              <button
+                disabled={!bulkPromoId || previewSelectedRows.size === 0}
+                onClick={() => {
+                  if (!bulkPromoId) return;
+                  const promo = promoOptions.find((p:any) => p.id === bulkPromoId);
+                  setPreviewOrderRows(prev => prev.map((r, ri) => {
+                    if (!previewSelectedRows.has(ri)) return r;
+                    const newPromos = r.mappedPromos.map((m:any) => ({ ...m, promoId: bulkPromoId, promo }));
+                    const newAmt = newPromos.reduce((s:number, m:any) => s + (m.promo ? Number(m.promo.price_thb||0)*m.qty : 0), 0);
+                    return { ...r, mappedPromos: newPromos, amtSystem: newAmt, match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
+                  }));
+                  // sync previewMappingSelects
+                  setPreviewOrderRows(prev => {
+                    prev.forEach(r => {
+                      if (previewSelectedRows.has(prev.indexOf(r))) {
+                        r.mappedPromos.forEach((m:any) => {
+                          setPreviewMappingSelects(ps => ({ ...ps, [m.rawName]: bulkPromoId }));
+                        });
+                      }
+                    });
+                    return prev;
+                  });
+                }}
+                className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 disabled:opacity-40 whitespace-nowrap">
+                ✓ ใส่ให้ที่เลือก
+              </button>
+              {previewSelectedRows.size > 0 && (
+                <button onClick={() => setPreviewSelectedRows(new Set())}
+                  className="text-xs text-slate-400 hover:text-slate-600">ล้างการเลือก</button>
+              )}
+            </div>
+
             {/* Table */}
             <div className="flex-1 overflow-auto">
               <table className="w-full text-xs border-collapse">
                 <thead className="bg-slate-800 text-white sticky top-0 z-10">
                   <tr>
+                    <th className="p-2.5 w-8 text-center">
+                      <input type="checkbox"
+                        checked={previewOrderRows.length > 0 && previewSelectedRows.size === previewOrderRows.length}
+                        onChange={e => setPreviewSelectedRows(e.target.checked ? new Set(previewOrderRows.map((_,i)=>i)) : new Set())}
+                        className="cursor-pointer rounded"/>
+                    </th>
                     <th className="p-2.5 text-left whitespace-nowrap w-24">วันที่</th>
                     <th className="p-2.5 text-left whitespace-nowrap">ชื่อลูกค้า</th>
                     <th className="p-2.5 text-left whitespace-nowrap">เฟสบุ๊ค</th>
@@ -1711,9 +1788,21 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                   {previewOrderRows.map((row, idx) => (
                     <tr key={idx}
                       className={`border-b align-top transition ${
+                        previewSelectedRows.has(idx) ? 'bg-amber-50 hover:bg-amber-100' :
                         !row.match ? 'bg-red-50 hover:bg-red-100' :
                         idx % 2 === 0 ? 'bg-white hover:bg-green-50' : 'bg-slate-50/50 hover:bg-green-50'
                       }`}>
+                      {/* checkbox */}
+                      <td className="p-2.5 text-center">
+                        <input type="checkbox"
+                          checked={previewSelectedRows.has(idx)}
+                          onChange={e => setPreviewSelectedRows(prev => {
+                            const next = new Set(prev);
+                            e.target.checked ? next.add(idx) : next.delete(idx);
+                            return next;
+                          })}
+                          className="cursor-pointer rounded"/>
+                      </td>
                       <td className="p-2.5 text-slate-500 whitespace-nowrap">{row.date}</td>
                       <td className="p-2.5 font-medium text-slate-800 whitespace-nowrap">{row.custName || '-'}</td>
                       <td className="p-2.5 text-slate-500 whitespace-nowrap">{row.facebook || '-'}</td>
@@ -1732,37 +1821,76 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                               <div className="text-slate-500 text-[10px]">
                                 📄 ต้นฉบับ: <span className="font-medium text-slate-700">{mp.rawName}</span>
                               </div>
-                              {/* dropdown จับคู่ */}
-                              <div className="mt-0.5 flex items-center gap-1">
-                                <span className="text-slate-300 text-[10px]">→</span>
-                                <select
-                                  value={mp.promoId}
-                                  onChange={e => {
-                                    const newPromoId = e.target.value;
-                                    setPreviewOrderRows(prev => prev.map((r, ri) => {
-                                      if (ri !== idx) return r;
-                                      const newPromos = r.mappedPromos.map((m: any, mj: number) => {
-                                        if (mj !== mi) return m;
-                                        const promo = promoOptions.find((p: any) => p.id === newPromoId);
-                                        return { ...m, promoId: newPromoId, promo };
-                                      });
-                                      const newAmtSystem = newPromos.reduce((s: number, m: any) =>
-                                        s + (m.promo ? Number(m.promo.price_thb||0) * m.qty : 0), 0);
-                                      return { ...r, mappedPromos: newPromos, amtSystem: newAmtSystem,
-                                        match: r.amtFile > 0 && Math.abs(r.amtFile - newAmtSystem) < 1 };
-                                    }));
-                                    // sync กลับ previewMappingSelects ด้วย
-                                    setPreviewMappingSelects(prev => ({ ...prev, [mp.rawName]: newPromoId }));
-                                  }}
-                                  className={`text-[11px] border rounded px-1.5 py-0.5 w-full max-w-[280px] focus:outline-none focus:ring-1 focus:ring-cyan-300
-                                    ${mp.promoId ? 'border-green-300 bg-green-50 text-slate-700' : 'border-red-300 bg-red-50 text-red-600'}`}>
-                                  <option value="">-- เลือกสินค้า --</option>
-                                  {promoOptions.map((p: any) => (
-                                    <option key={p.id} value={p.id}>
-                                      {p.short_name || p.master_name} / {p.name} (฿{Number(p.price_thb||0).toLocaleString()})
-                                    </option>
-                                  ))}
-                                </select>
+                              {/* searchable dropdown */}
+                              <div className="mt-0.5 flex items-center gap-1 relative">
+                                <span className="text-slate-300 text-[10px] shrink-0">→</span>
+                                <div className="relative flex-1">
+                                  <input
+                                    type="text"
+                                    value={openPromoIdx === `${idx}-${mi}`
+                                      ? (mp.promoId
+                                          ? `${mp.promo?.short_name||mp.promo?.master_name||''} / ${mp.promo?.name||''} (฿${Number(mp.promo?.price_thb||0).toLocaleString()})`
+                                          : '')
+                                      : (mp.promoId && mp.promo
+                                          ? `${mp.promo.short_name||mp.promo.master_name||''} / ${mp.promo.name} (฿${Number(mp.promo.price_thb||0).toLocaleString()})`
+                                          : '')}
+                                    onChange={e => {
+                                      setOpenPromoIdx(`${idx}-${mi}`);
+                                      setPreviewSearch(e.target.value);
+                                      // ล้าง promo ถ้า user แก้ text
+                                      if (mp.promoId) {
+                                        setPreviewOrderRows(prev => prev.map((r, ri) => {
+                                          if (ri !== idx) return r;
+                                          const newPromos = r.mappedPromos.map((m:any, mj:number) =>
+                                            mj === mi ? { ...m, promoId: '', promo: null } : m
+                                          );
+                                          return { ...r, mappedPromos: newPromos, amtSystem: 0, match: false };
+                                        }));
+                                      }
+                                    }}
+                                    onFocus={() => { setOpenPromoIdx(`${idx}-${mi}`); setPreviewSearch(''); }}
+                                    onBlur={() => setTimeout(() => setOpenPromoIdx(null), 200)}
+                                    placeholder="ค้นหาสินค้า หรือ ราคา..."
+                                    className={`w-full border rounded px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-cyan-300
+                                      ${mp.promoId ? 'border-green-300 bg-green-50' : 'border-red-300 bg-red-50 text-red-600 placeholder:text-red-400'}`}/>
+                                  {/* Dropdown list */}
+                                  {openPromoIdx === `${idx}-${mi}` && (
+                                    <div className="absolute top-full left-0 right-0 bg-white border rounded-lg shadow-xl z-50 max-h-44 overflow-auto mt-0.5">
+                                      {promoOptions
+                                        .filter((p:any) => {
+                                          const s = (previewSearch||'').toLowerCase();
+                                          if (!s) return true;
+                                          return (p.short_name||'').toLowerCase().includes(s)
+                                            || (p.name||'').toLowerCase().includes(s)
+                                            || String(p.price_thb||'').includes(s);
+                                        })
+                                        .map((p:any) => (
+                                          <button key={p.id}
+                                            onMouseDown={() => {
+                                              setPreviewOrderRows(prev => prev.map((r, ri) => {
+                                                if (ri !== idx) return r;
+                                                const newPromos = r.mappedPromos.map((m:any, mj:number) => {
+                                                  if (mj !== mi) return m;
+                                                  return { ...m, promoId: p.id, promo: p };
+                                                });
+                                                const newAmt = newPromos.reduce((s:number, m:any) =>
+                                                  s + (m.promo ? Number(m.promo.price_thb||0)*m.qty : 0), 0);
+                                                return { ...r, mappedPromos: newPromos, amtSystem: newAmt,
+                                                  match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
+                                              }));
+                                              setPreviewMappingSelects(prev => ({ ...prev, [mp.rawName]: p.id }));
+                                              setOpenPromoIdx(null);
+                                            }}
+                                            className="w-full text-left px-2.5 py-1.5 text-[11px] hover:bg-cyan-50 border-b last:border-0">
+                                            <span className="font-semibold text-slate-800">{p.short_name||p.master_name}</span>
+                                            <span className="text-slate-400 mx-1">/</span>
+                                            <span className="text-slate-600">{p.name}</span>
+                                            <span className="text-emerald-600 ml-1.5 font-bold">฿{Number(p.price_thb||0).toLocaleString()}</span>
+                                          </button>
+                                        ))}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                               {/* แสดงราคาถ้าเลือกแล้ว */}
                               {mp.promoId && mp.promo && (
