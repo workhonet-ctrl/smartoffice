@@ -171,6 +171,11 @@ function AdsProductList() {
     return profit - 20; // Margin = กำไร - 20
   };
 
+  const calcRoas = (p: PromoRow): number => {
+    const margin = calcMargin(p);
+    return margin !== 0 ? Number(p.price_thb) / margin : 0;
+  };
+
   useEffect(() => {
     const loadPromos = async () => {
       const { data } = await supabase.from('products_promo')
@@ -238,7 +243,8 @@ function AdsProductList() {
               <th className="p-3 text-left">ชื่อโปร / ชื่อสินค้า</th>
               <th className="p-3 text-center whitespace-nowrap">น้ำหนัก (g)</th>
               <th className="p-3 text-right whitespace-nowrap">ราคาขาย (฿)</th>
-              <th className="p-3 text-center whitespace-nowrap w-40">KPI</th>
+              <th className="p-3 text-right whitespace-nowrap">Margin (฿)</th>
+              <th className="p-3 text-right whitespace-nowrap">ROAS%</th>
             </tr>
           </thead>
           <tbody>
@@ -260,14 +266,23 @@ function AdsProductList() {
                 <td className="p-3 text-right font-bold text-emerald-600">
                   ฿{Number(p.price_thb).toLocaleString()}
                 </td>
-                <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
+                <td className="p-3 text-right">
                   {(() => {
                     const margin = calcMargin(p);
-                    const isPositive = margin > 0;
                     return (
-                      <div className={`font-bold text-sm ${isPositive ? 'text-emerald-600' : 'text-red-500'}`}>
+                      <span className={`font-bold text-sm ${margin > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                         ฿{margin.toFixed(2)}
-                      </div>
+                      </span>
+                    );
+                  })()}
+                </td>
+                <td className="p-3 text-right">
+                  {(() => {
+                    const roas = calcRoas(p);
+                    return (
+                      <span className={`font-bold text-sm ${roas > 0 ? 'text-blue-600' : 'text-red-500'}`}>
+                        {roas > 0 ? roas.toFixed(1) + 'x' : '-'}
+                      </span>
                     );
                   })()}
                 </td>
