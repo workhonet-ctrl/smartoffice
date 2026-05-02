@@ -46,7 +46,7 @@ export default function FinanceDaily() {
     try {
       const [{ data: orders }, { data: adCosts }, { data: otherExp }] = await Promise.all([
         supabase.from('orders')
-          .select('id, order_no, order_date, total_thb, shipping_thb, raw_prod, promo_ids, quantities, quantity, tracking_no, customers(name)')
+          .select('id, order_no, order_date, total_thb, shipping_thb, raw_prod, promo_ids, quantities, quantity, tracking_no, box_id, bubble_id_pack, customers(name), boxes(price_thb), bubbles_pack:bubble_id_pack(price_thb, length_cm)')
           .gte('order_date', dateFrom).lte('order_date', dateTo).order('order_date'),
         supabase.from('finance_expense').select('expense_date, amount_thb')
           .eq('category', 'ค่าโฆษณา').gte('expense_date', dateFrom).lte('expense_date', dateTo),
@@ -94,6 +94,11 @@ export default function FinanceDaily() {
               // ค่าขนส่งจาก promo (ถ้ามี) ไม่งั้นใช้จาก shipping_thb ของ order
               if (promo.ship_thb) oShipFromPromo += Number(promo.ship_thb) * qty;
             }
+            // ถ้า order มี box_id จากการแพ็คจริง → ใช้แทนค่า default จาก promo
+            const actualBox    = (o as any).boxes;
+            const actualBubble = (o as any).bubbles_pack;
+            if (actualBox?.price_thb)    oBox    = Number(actualBox.price_thb);
+            if (actualBubble?.price_thb && actualBubble?.length_cm > 0) oBubble = Number(actualBubble.price_thb);
             o._cost_goods = oGoods; o._cost_box = oBox; o._cost_bubble = oBubble;
             // ใช้ ship จาก promo ถ้ามี ไม่งั้นใช้จาก order
             if (oShipFromPromo > 0) o._ship = oShipFromPromo;
