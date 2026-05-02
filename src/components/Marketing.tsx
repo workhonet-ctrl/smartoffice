@@ -281,7 +281,7 @@ function AdsProductList() {
                     const roas = calcRoas(p);
                     return (
                       <span className={`font-bold text-sm ${roas > 0 ? 'text-blue-600' : 'text-red-500'}`}>
-                        {roas > 0 ? roas.toFixed(1) + 'x' : '-'}
+                        {roas > 0 ? roas.toFixed(2) + '%' : '-'}
                       </span>
                     );
                   })()}
