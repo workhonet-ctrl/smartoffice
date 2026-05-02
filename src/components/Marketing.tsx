@@ -141,8 +141,10 @@ function AdsReport() {
 // ── รายการสินค้า ADS ─────────────────────────────────────────────────────
 type PromoRow = {
   id: string; name: string; short_name: string | null;
-  price_thb: number; active: boolean;
-  products_master: { name: string; weight_g: number } | null;
+  price_thb: number; active: boolean; ship_thb: number;
+  products_master: { name: string; weight_g: number; cost_thb: number } | null;
+  boxes: { name: string; price_thb: number } | null;
+  bubbles: { name: string; length_cm: number; price_thb: number } | null;
 };
 
 function AdsProductList() {
@@ -150,12 +152,61 @@ function AdsProductList() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [kpiMap, setKpiMap] = useState<Record<string, string>>({});
+  const [shipActualMap, setShipActualMap] = useState<Record<string,number>>({});
+
+  // คำนวณ Margin เหมือน ProductKPI
+  const calcMargin = (p: PromoRow): number => {
+    const qty      = (() => { const m = p.name.match(/(\d+)/); return m ? parseInt(m[1]) : 1; })();
+    const cost     = Number(p.products_master?.cost_thb||0) * qty;
+    const box      = Number(p.boxes?.price_thb||0);
+    const bubLen   = Number(p.bubbles?.length_cm||0);
+    const bub      = bubLen > 0 ? Number(p.bubbles?.price_thb||0) : 0;
+    const actual   = shipActualMap[p.id];
+    const ship     = (actual !== undefined && actual !== null) ? actual : Number(p.ship_thb||0);
+    const price    = Number(p.price_thb||0);
+    const com      = price * 0.015;
+    const free2    = price * 0.02;
+    const totalCost = cost + box + bub + ship + com + free2;
+    const profit   = price - totalCost;
+    return profit - 20; // Margin = กำไร - 20
+  };
 
   useEffect(() => {
-    supabase.from('products_promo')
-      .select('id, name, short_name, price_thb, active, products_master(name, weight_g)')
-      .eq('active', true).order('id')
-      .then(({ data }) => { if (data) setPromos(data as any); setLoading(false); });
+    const loadPromos = async () => {
+      const { data } = await supabase.from('products_promo')
+        .select('id, name, short_name, price_thb, active, ship_thb, products_master(name, weight_g, cost_thb), boxes(name,price_thb), bubbles(name,length_cm,price_thb)')
+        .eq('active', true).order('id');
+      if (data) setPromos(data as any);
+
+      // ดึง shipActualMap (ขนส่งจริงเฉลี่ย) เหมือน ProductKPI
+      const [{ data: flash }, { data: myorder }] = await Promise.all([
+        supabase.from('shipping_flash').select('tracking, total_thb'),
+        supabase.from('shipping_myorder').select('tracking, total_thb'),
+      ]);
+      const trackMap: Record<string,number> = {};
+      [...(flash||[]), ...(myorder||[])].forEach((r:any) => {
+        if (r.tracking) trackMap[r.tracking] = Number(r.total_thb||0);
+      });
+      const { data: orders } = await supabase.from('orders')
+        .select('tracking_no, promo_ids').not('tracking_no','is',null);
+      const promoShip: Record<string,number[]> = {};
+      (orders||[]).forEach((o:any) => {
+        const cost = trackMap[o.tracking_no];
+        if (!cost) return;
+        const perPromo = cost / Math.max((o.promo_ids||[]).length, 1);
+        (o.promo_ids||[]).forEach((pid:string) => {
+          if (!promoShip[pid]) promoShip[pid] = [];
+          promoShip[pid].push(perPromo);
+        });
+      });
+      const avgMap: Record<string,number> = {};
+      Object.entries(promoShip).forEach(([pid, costs]) => {
+        avgMap[pid] = costs.reduce((s,v) => s+v, 0) / costs.length;
+      });
+      setShipActualMap(avgMap);
+      setLoading(false);
+    };
+    loadPromos();
   }, []);
 
   const filtered = promos.filter(p =>
@@ -210,12 +261,26 @@ function AdsProductList() {
                   ฿{Number(p.price_thb).toLocaleString()}
                 </td>
                 <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
-                  <input
-                    value={kpiMap[p.id] || ''}
-                    onChange={e => setKpiMap(prev => ({ ...prev, [p.id]: e.target.value }))}
-                    placeholder="กรอก KPI..."
-                    className="w-full border rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-purple-300"
-                  />
+                  {(() => {
+                    const margin = calcMargin(p);
+                    const isPositive = margin > 0;
+                    return (
+                      <div className="flex flex-col items-center gap-1">
+                        {/* Margin จาก KPI สินค้า */}
+                        <div className={`font-bold text-sm ${isPositive ? 'text-emerald-600' : 'text-red-500'}`}>
+                          ฿{margin.toFixed(2)}
+                        </div>
+                        <div className="text-[9px] text-slate-400">Margin (KPI)</div>
+                        {/* Manual KPI เพิ่มเติม */}
+                        <input
+                          value={kpiMap[p.id] || ''}
+                          onChange={e => setKpiMap(prev => ({ ...prev, [p.id]: e.target.value }))}
+                          placeholder="KPI เพิ่มเติม..."
+                          className="w-full border rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-purple-300 mt-0.5"
+                        />
+                      </div>
+                    );
+                  })()}
                 </td>
               </tr>
             ))}
