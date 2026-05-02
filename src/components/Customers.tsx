@@ -114,7 +114,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const [previewOrderRows, setPreviewOrderRows]   = useState<any[]>([]);  // [{date,name,facebook,tel,payment,mappedPromos,qty,amtFile,amtSystem,match,rawMappings}]
   const [previewImportFn, setPreviewImportFn]     = useState<(() => Promise<void>) | null>(null);
   const [previewSaving, setPreviewSaving]         = useState(false);
-  const [previewSearch, setPreviewSearch]         = useState('');       // ค้นหาในช่อง search ของ dropdown
+  const [previewSearch, setPreviewSearch]         = useState<Record<string,string>>({});  // key = "rowIdx-promoIdx"
   const [previewSelectedRows, setPreviewSelectedRows] = useState<Set<number>>(new Set()); // row ที่เลือก
   const [openPromoIdx, setOpenPromoIdx]           = useState<string|null>(null); // "rowIdx-promoIdx" ที่ dropdown เปิดอยู่
   const [unmappedList, setUnmappedList]         = useState<{name:string; qty:string}[]>([]);
@@ -1825,16 +1825,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                 <div className="relative flex-1">
                                   <input
                                     type="text"
-                                    value={openPromoIdx === `${idx}-${mi}`
-                                      ? (mp.promoId
-                                          ? `${mp.promo?.short_name||mp.promo?.master_name||''} / ${mp.promo?.name||''} (฿${Number(mp.promo?.price_thb||0).toLocaleString()})`
-                                          : '')
-                                      : (mp.promoId && mp.promo
-                                          ? `${mp.promo.short_name||mp.promo.master_name||''} / ${mp.promo.name} (฿${Number(mp.promo.price_thb||0).toLocaleString()})`
-                                          : '')}
+                                    value={mp.promoId && openPromoIdx !== `${idx}-${mi}`
+                                      ? `${mp.promo?.short_name||mp.promo?.master_name||''} / ${mp.promo?.name||''} (฿${Number(mp.promo?.price_thb||0).toLocaleString()})`
+                                      : (previewSearch[`${idx}-${mi}`] ?? '')}
                                     onChange={e => {
-                                      setOpenPromoIdx(`${idx}-${mi}`);
-                                      setPreviewSearch(e.target.value);
+                                      const key = `${idx}-${mi}`;
+                                      setOpenPromoIdx(key);
+                                      setPreviewSearch(prev => ({ ...prev, [key]: e.target.value }));
                                       // ล้าง promo ถ้า user แก้ text
                                       if (mp.promoId) {
                                         setPreviewOrderRows(prev => prev.map((r, ri) => {
@@ -1846,7 +1843,11 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                         }));
                                       }
                                     }}
-                                    onFocus={() => { setOpenPromoIdx(`${idx}-${mi}`); setPreviewSearch(''); }}
+                                    onFocus={() => {
+                                      const key = `${idx}-${mi}`;
+                                      setOpenPromoIdx(key);
+                                      setPreviewSearch(prev => ({ ...prev, [key]: '' }));
+                                    }}
                                     onBlur={() => setTimeout(() => setOpenPromoIdx(null), 200)}
                                     placeholder="ค้นหาสินค้า หรือ ราคา..."
                                     className={`w-full border rounded px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-cyan-300
@@ -1856,7 +1857,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                     <div className="absolute top-full left-0 right-0 bg-white border rounded-lg shadow-xl z-50 max-h-44 overflow-auto mt-0.5">
                                       {promoOptions
                                         .filter((p:any) => {
-                                          const s = (previewSearch||'').toLowerCase();
+                                          const s = (previewSearch[`${idx}-${mi}`]||'').toLowerCase();
                                           if (!s) return true;
                                           return (p.short_name||'').toLowerCase().includes(s)
                                             || (p.name||'').toLowerCase().includes(s)
