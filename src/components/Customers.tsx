@@ -547,7 +547,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
       // สร้าง previewOrderRows (1 row = 1 ออเดอร์)
       const currentPromos = promoOptions.length > 0 ? promoOptions : [];
-      const rows = dataRows.map((r: any) => {
+      const previewRows = dataRows.map((r: any) => {
         const date = String(r[0]||'');
         const custName = String(r[4]||'');
         const facebook = String(r[3]||'');
@@ -567,7 +567,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         }, 0);
         return { date, custName, facebook, tel, payment, mappedPromos, qty: rawProds.length, amtFile, amtSystem, match: Math.abs(amtFile - amtSystem) < 1 };
       });
-      setPreviewOrderRows(rows);
+      setPreviewOrderRows(previewRows);
       // เก็บ pendingImportData ไว้ให้ handleConfirmImport เดิมใช้ได้
       setShowPreviewModal(false);
       setShowOrderPreview(true);
@@ -1804,7 +1804,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       )}
 
       {/* ── Preview Modal: ตรวจสอบการจับคู่สินค้าก่อน import ── */}
-}
 
       {showMappingModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
