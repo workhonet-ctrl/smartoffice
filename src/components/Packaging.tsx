@@ -489,18 +489,19 @@ export default function Packaging({
         console.error('pack_history insert error:', error);
         onCreateRequisition('');
       } else {
-        // ✅ อัพเดต order_status รอแพ็ค → กำลังแพ็ค + ship_date วันนี้ (ถ้ายังไม่มี)
-        const packOrderIds = orders.map(o => o.id);
+        // ✅ อัพเดต order_status + บันทึก box_id/bubble_id จริงที่ใช้แพ็ค
         const todayDate = new Date().toISOString().split('T')[0];
-        // ✅ รอ update orders ให้เสร็จก่อน แล้วค่อย navigate ไปหน้าใบเบิก
-        await Promise.all([
-          supabase.from('orders')
-            .update({ order_status: 'กำลังแพ็ค', ship_date: todayDate })
-            .in('id', packOrderIds).is('ship_date', null),
-          supabase.from('orders')
-            .update({ order_status: 'กำลังแพ็ค' })
-            .in('id', packOrderIds).not('ship_date', 'is', null),
-        ]);
+        await Promise.all(orders.map(o => {
+          const multi = isMulti(o);
+          const boxId    = multi ? (override[o.id]?.box_id    || null) : (o.promos[0]?.box_id    || null);
+          const bubbleId = multi ? (override[o.id]?.bubble_id || null) : (o.promos[0]?.bubble_id  || null);
+          return supabase.from('orders').update({
+            order_status: 'กำลังแพ็ค',
+            ...(o.ship_date ? {} : { ship_date: todayDate }),
+            ...(boxId    ? { box_id: boxId }           : {}),
+            ...(bubbleId ? { bubble_id_pack: bubbleId } : {}),
+          }).eq('id', o.id);
+        }));
         // navigate หลัง DB update เสร็จแน่นอน
         onCreateRequisition(ph?.id || '');
       }
