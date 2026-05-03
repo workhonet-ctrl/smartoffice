@@ -89,9 +89,9 @@ export default function FinanceDaily() {
               const master = promo.products_master;
               const box = promo.boxes; const bub = promo.bubbles;
               oGoods += master?.cost_thb ? Number(master.cost_thb)*pieces : 0;
-              // ค่ากล่อง/บั้บเบิ้ล: ใช้จาก promo แรก (i===0) เป็น default
-              if (i===0 && box?.price_thb)  oBox    = Number(box.price_thb);
-              if (i===0 && bub?.price_thb && bub?.length_cm>0) oBubble = Number(bub.price_thb);
+              // ค่ากล่อง: ใช้จาก promo แรกที่มีกล่องจริง (price > 0)
+              if (oBox === 0 && box?.price_thb && Number(box.price_thb) > 0) oBox = Number(box.price_thb);
+              if (oBubble === 0 && bub?.price_thb && Number(bub.price_thb) > 0 && bub?.length_cm > 0) oBubble = Number(bub.price_thb);
               // ค่าขนส่งจาก promo (ถ้ามี) ไม่งั้นใช้จาก shipping_thb ของ order
               if (promo.ship_thb) oShipFromPromo += Number(promo.ship_thb) * qty;
             }
