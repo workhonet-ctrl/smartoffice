@@ -108,39 +108,50 @@ export default function FlashExport() {
     try {
       const orderNo = (returnOrder as any).order_no;
       const custName = returnOrder.customers?.name || orderNo;
-      const promoIds: string[] = (returnOrder as any).promo_ids || [];
-      const quantities = String((returnOrder as any).quantities || '1').split('|');
+      const refLabel = returnType === 'no_send' ? 'ไม่ได้ส่ง' : 'ตีกลับ';
 
-      // 1. หา stock_items จาก promo_ids → products_promo → products_master → stock_items
+      // ── ดึง transaction out ของ requisition ล่าสุดที่เกี่ยวกับออเดอร์นี้ ──
+      // วิธีนี้ถูกต้องที่สุด เพราะรู้ qty จริงที่เบิกออกไป (รวมกล่อง บั้บเบิ้ล สินค้า)
+      const { data: outTxns } = await supabase
+        .from('stock_transactions')
+        .select('stock_item_id, qty, note')
+        .eq('txn_type', 'out')
+        .eq('ref_type', 'requisition')
+        .ilike('note', `%${orderNo}%`);
+
       const txns: any[] = [];
-      for (let i = 0; i < promoIds.length; i++) {
-        const pid = promoIds[i];
-        const qty = Number(quantities[i] || 1);
-        const { data: promo } = await supabase
-          .from('products_promo').select('id, name, short_name, master_id').eq('id', pid).maybeSingle();
-        if (!promo) continue;
 
-        // หา stock_item จากชื่อ short_name หรือ name
-        const searchName = (promo.short_name || promo.name || '').trim();
-        const { data: si } = await supabase
-          .from('stock_items').select('id, name')
-          .ilike('name', `%${searchName}%`)
-          .maybeSingle();
-
-        if (si) {
-          const noteText = returnType === 'no_send'
-            ? `คืนสต็อก(ไม่ได้ส่ง) ออเดอร์ ${orderNo} - ${custName}${returnNote ? ' | ' + returnNote : ''}`
-            : `คืนสต็อก(ตีกลับ) ออเดอร์ ${orderNo} - ${custName}${returnNote ? ' | ' + returnNote : ''}`;
+      if (outTxns && outTxns.length > 0) {
+        // ย้อนทุก transaction out ที่เกี่ยวกับออเดอร์นี้
+        for (const t of outTxns) {
           txns.push({
-            stock_item_id: si.id,
+            stock_item_id: t.stock_item_id,
             txn_type: 'in',
-            qty,
+            qty: Number(t.qty),
             ref_type: returnType === 'no_send' ? 'return_no_send' : 'return_rejected',
             ref_id: orderNo,
-            note: noteText,
+            note: `คืนสต็อก(${refLabel}) ออเดอร์ ${orderNo} - ${custName}${returnNote ? ' | ' + returnNote : ''}`,
           });
-        } else {
-          console.warn(`[คืนสต็อก] ไม่พบ stock_item ชื่อ "${searchName}" — ข้ามรายการนี้`);
+        }
+      } else {
+        // fallback: ถ้าหา transaction ไม่เจอ ให้คืนจาก promo_ids แทน
+        const promoIds: string[] = (returnOrder as any).promo_ids || [];
+        for (const pid of promoIds) {
+          const { data: promo } = await supabase
+            .from('products_promo').select('id, name, short_name, qty_per_set').eq('id', pid).maybeSingle();
+          if (!promo) continue;
+          const searchName = (promo.short_name || promo.name || '').trim();
+          const { data: si } = await supabase
+            .from('stock_items').select('id').ilike('name', `%${searchName}%`).maybeSingle();
+          if (si) {
+            txns.push({
+              stock_item_id: si.id, txn_type: 'in',
+              qty: Number(promo.qty_per_set || 1),
+              ref_type: returnType === 'no_send' ? 'return_no_send' : 'return_rejected',
+              ref_id: orderNo,
+              note: `คืนสต็อก(${refLabel}) ออเดอร์ ${orderNo} - ${custName}`,
+            });
+          }
         }
       }
 
@@ -245,8 +256,9 @@ export default function FlashExport() {
       const [d1='',d2='',d3='',d4='',d5=''] = [...itemDescs,'','','','',''];
       const phone = (order.customers?.tel||'').replace(/[^0-9]/g,'');
 
-      rows.push([orderNoWithName, order.customers?.name||'', address, order.customers?.postal_code||'', phone, '', codAmount, d1,d2,d3,d4,d5, flashItemType, weightKgStr, boxL,boxW,boxH,'','','','Happy Return','','','']);
-      previews.push({ order_no: orderNoWithName, name: order.customers?.name||'-', address, postal_code: order.customers?.postal_code||'-', phone, cod: codAmount, item_desc: itemDescs.join(' | ')||'-', item_type: flashItemType, weight_kg: weightKgStr, box_lwh: `${boxL}×${boxW}×${boxH}`, product_type: 'Happy Return' });
+      const productType = isCOD ? 'Happy Return' : '';
+      rows.push([orderNoWithName, order.customers?.name||'', address, order.customers?.postal_code||'', phone, '', codAmount, d1,d2,d3,d4,d5, flashItemType, weightKgStr, boxL,boxW,boxH,'','','',productType,'','','']);
+      previews.push({ order_no: orderNoWithName, name: order.customers?.name||'-', address, postal_code: order.customers?.postal_code||'-', phone, cod: codAmount, item_desc: itemDescs.join(' | ')||'-', item_type: flashItemType, weight_kg: weightKgStr, box_lwh: `${boxL}×${boxW}×${boxH}`, product_type: productType });
     }
     return { rows, previews };
   };
