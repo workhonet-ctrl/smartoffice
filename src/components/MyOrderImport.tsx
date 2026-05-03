@@ -162,11 +162,9 @@ export default function MyOrderImport() {
     } catch {}
   }, [trackingMap, fileInfos, matched]);
 
-  // auto-load จาก Supabase เมื่อเปิดหน้า
+  // โหลดจาก DB ทุกครั้งที่เปิดหน้า
   useEffect(() => {
-    if (Object.keys(trackingMap).length === 0) {
-      handleLoad();
-    }
+    handleLoad();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── File handling ───────────────────────────────────────────
