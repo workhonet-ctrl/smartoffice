@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { extractQty } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import GraphicBoard from './GraphicBoard';
 import GraphicTasks from './GraphicTasks';
@@ -156,7 +157,7 @@ function AdsProductList() {
 
   // คำนวณ Margin เหมือน ProductKPI
   const calcMargin = (p: PromoRow): number => {
-    const qty      = (() => { const m = p.name.match(/(\d+)/); return m ? parseInt(m[1]) : 1; })();
+    const qty      = extractQty(p.name);                          // "1 แถม 1" → 2
     const cost     = Number(p.products_master?.cost_thb||0) * qty;
     const box      = Number(p.boxes?.price_thb||0);
     const bubLen   = Number(p.bubbles?.length_cm||0);
@@ -164,9 +165,10 @@ function AdsProductList() {
     const actual   = shipActualMap[p.id];
     const ship     = (actual !== undefined && actual !== null) ? actual : Number(p.ship_thb||0);
     const price    = Number(p.price_thb||0);
+    const vat      = 0;                                           // VAT (ไม่มีข้อมูลใน ADS → ใช้ 0 เหมือน KPI default)
     const com      = price * 0.015;
     const free2    = price * 0.02;
-    const totalCost = cost + box + bub + ship + com + free2;
+    const totalCost = cost + box + bub + ship + vat + com + free2;
     const profit   = price - totalCost;
     return profit - 20; // Margin = กำไร - 20
   };
