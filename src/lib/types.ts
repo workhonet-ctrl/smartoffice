@@ -1,5 +1,6 @@
 // ============================================================
-// SmartOffice — types.ts (aligned with Supabase schema)
+// SmartOffice — types.ts (synced with actual Supabase schema)
+// Last verified: 2026-05-03
 // ============================================================
 
 export interface Box {
@@ -27,7 +28,7 @@ export interface ProductMaster {
   name: string;
   cost_thb: number;
   weight_g: number;
-  description?: string;
+  description?: string | null;
   active?: boolean;
   created_at: string;
 }
@@ -43,13 +44,14 @@ export interface ProductPromo {
   color: string;
   item_type: string;
   active?: boolean;
+  ship_thb: number | null;
   created_at: string;
   products_master?: ProductMaster;
   boxes?: Box;
   bubbles?: Bubble;
 }
 
-// FIX: tel (ไม่ใช่ phone), facebook_name (ไม่ใช่ facebook)
+// DB จริง: ใช้ tel (unique), facebook_name
 export interface Customer {
   id: string;
   name: string;
@@ -62,6 +64,7 @@ export interface Customer {
   province: string | null;
   postal_code: string | null;
   channel: string | null;
+  payment_method: string | null;
   tag: string;
   tag_manual: boolean;
   note: string | null;
@@ -73,21 +76,23 @@ export interface Customer {
 
 export interface ProductMapping {
   id: string;
-  raw_name: string;
-  promo_id: string;
+  raw_name: string;     // DB column = raw_name (ไม่ใช่ raw_prod)
+  promo_id: string;     // DB column = promo_id (ไม่ใช่ promo_code)
   created_at: string;
 }
 
-// FIX: total_thb, weight_kg, promo_ids[]
+// DB จริง: total_thb, weight_kg, promo_ids[], box_id, bubble_id_pack
 export interface Order {
   id: string;
   order_no: string;
   customer_id: string | null;
   channel: string | null;
   order_date: string | null;
+  order_time: string | null;
   raw_prod: string | null;
   promo_ids: string[] | null;
   quantity: number;
+  quantities: string | null;
   weight_kg: number | null;
   discount_thb: number;
   shipping_thb: number;
@@ -102,12 +107,19 @@ export interface Order {
   route: string | null;
   note: string | null;
   created_by: string | null;
+  slip_image: string | null;
+  ship_date: string | null;
+  box_id: string | null;
+  bubble_id_pack: string | null;
+  imported_at: string | null;
+  followed_at: string | null;
+  followed_by: string | null;
   created_at: string;
   updated_at: string;
   customers?: Customer;
 }
 
-// FIX: amount_thb
+// DB จริง: amount_thb (ไม่ใช่ amount)
 export interface FinanceIncome {
   id: string;
   order_id: string | null;
@@ -118,39 +130,54 @@ export interface FinanceIncome {
   created_at: string;
 }
 
+// DB จริง: amount_thb, notes (เพิ่มมาทีหลัง), channel
 export interface FinanceExpense {
   id: string;
   category: string;
   description: string;
   amount_thb: number;
   expense_date: string;
+  channel: string | null;
+  notes: string | null;
   reference: string | null;
   attachment_url: string | null;
   recorded_by: string | null;
   created_at: string;
 }
 
-// FIX: role (ไม่ใช่ position), active boolean
+// DB จริง: employees table columns (verified 2026-05-03)
+// มีทั้ง salary+start_date (เก่า) และ hire_date+department_id+status (ใหม่)
 export interface Employee {
   id: string;
   employee_code: string | null;
   name: string;
   nickname: string | null;
+  email: string | null;
   tel: string | null;
+  gender: string | null;
   role: string | null;
-  department: string | null;
-  salary: number | null;
-  start_date: string | null;
+  department: string | null;           // column เก่า (free text)
+  department_id: string | null;        // column ใหม่ (FK-style text)
+  position_id: string | null;
+  salary: number | null;               // column เก่า
+  start_date: string | null;           // column เก่า
+  hire_date: string | null;            // column ใหม่
+  birth_date: string | null;
+  status: string;                      // 'active' | 'inactive'
+  active: boolean;
+  photo_url: string | null;
+  line_id: string | null;
+  emergency_name: string | null;
+  emergency_tel: string | null;
   address_current: string | null;
   address_id: string | null;
   national_id: string | null;
   bank_name: string | null;
   bank_account: string | null;
-  active: boolean;
   created_at: string;
 }
 
-// FIX: เพิ่ม amount, doc_date, description (จาก migration)
+// DB จริง: hr_documents
 export interface HRDocument {
   id: string;
   employee_id: string | null;
@@ -164,6 +191,49 @@ export interface HRDocument {
   doc_date: string | null;
   description: string | null;
   employees?: Employee;
+}
+
+// shipping_flash — มีอยู่จริงใน DB (1049 rows)
+export interface ShippingFlash {
+  id: string;
+  tracking: string;
+  ship_date: string | null;
+  base_thb: number;
+  extra_thb: number;
+  total_thb: number;
+  order_no: string | null;
+  customer: string | null;
+  raw_prod: string | null;
+  matched: boolean;
+  imported_at: string;
+}
+
+// shipping_myorder — มีอยู่จริงใน DB
+export interface ShippingMyOrder {
+  id: string;
+  tracking: string;
+  page: string | null;
+  consignee: string | null;
+  weight_kg: number;
+  cod_thb: number;
+  cod_fee_thb: number;
+  freight_thb: number;
+  total_thb: number;
+  order_no: string | null;
+  customer: string | null;
+  raw_prod: string | null;
+  matched: boolean;
+  imported_at: string;
+}
+
+// case_followups — มีอยู่จริงใน DB
+export interface CaseFollowup {
+  id: string;
+  order_id: string | null;
+  customer_id: string | null;
+  note: string;
+  created_by: string | null;
+  created_at: string;
 }
 
 // ============================================================
@@ -198,7 +268,13 @@ export const HR_DOC_TYPES = [
 ];
 
 export const ORDER_STATUSES = [
-  'รอชำระเงิน','ชำระแล้ว','กำลังแพ็ค','รอขนส่ง','จัดส่งแล้ว','ยกเลิก',
+  'รอคีย์ออเดอร์','รอชำระเงิน','ชำระแล้ว','กำลังแพ็ค',
+  'รอจัดส่ง','รอขนส่ง','จัดส่งแล้ว','ยกเลิก',
+];
+
+export const PARCEL_STATUSES = [
+  'ยังไม่มีเลขพัสดุ','รอรับพัสดุ','อยู่ระหว่างจัดส่ง',
+  'ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ปัญหา','รอจัดส่ง','ค้างอยู่คลัง',
 ];
 
 export const EXPENSE_CATEGORIES = [
