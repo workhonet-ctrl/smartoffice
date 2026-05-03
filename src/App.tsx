@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useAuth } from './lib/AuthProvider';
+import LoginPage from './pages/LoginPage';
 import ProblemCases from './components/ProblemCases';
 import AdsAssignment from './components/AdsAssignment';
 import Sidebar from './components/Sidebar';
@@ -22,37 +24,44 @@ import Marketing from './components/Marketing';
 import HR from './components/HR';
 import ComingSoon from './components/ComingSoon';
 import ProductKPI from './components/ProductKPI';
+import { LogOut } from 'lucide-react';
 
 type PageKey =
-  // ฝ่ายขาย
   | 'sales-admin' | 'sales-customers' | 'sales-customers-problem' | 'sales-crm'
-  // ฝ่ายการตลาด
   | 'marketing-graphic' | 'marketing-ads' | 'marketing-ads-assign'
-  // ฝ่ายสินค้า
   | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
-  // ฝ่ายคลังสินค้า
   | 'orders' | 'flash-export' | 'myorder-export'
   | 'pack-products' | 'requisition'
   | 'stock' | 'purchase-order' | 'suppliers'
-  // ฝ่ายการเงิน
   | 'finance-daily' | 'finance-monthly' | 'finance-yearly'
   | 'finance-expenses' | 'finance-income' | 'finance-cost'
-  // ฝ่าย HR
   | 'hr-recruit' | 'hr' | 'hr-train' | 'hr-kpi' | 'hr-sop';
 
 export default function App() {
-  const [activePage, setActivePage] = useState<PageKey>('orders');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { user, loading, signOut } = useAuth();
+  const [activePage, setActivePage]         = useState<PageKey>('orders');
+  const [sidebarOpen, setSidebarOpen]       = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [packagingOrderIds, setPackagingOrderIds] = useState<string[]>([]);
+  const [packHistoryId, setPackHistoryId]   = useState<string>('');
+  const [codState, setCodState]             = useState<CodFileState>(EMPTY_COD_STATE);
 
-  // ปิด sidebar อัตโนมัติเมื่อเปลี่ยนหน้าบนมือถือ
+  // ── Auth guard ────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"/>
+      </div>
+    );
+  }
+
+  if (!user) return <LoginPage />;
+  // ─────────────────────────────────────────────────────────
+
   const handlePageChange = (page: PageKey) => {
     setActivePage(page);
     setSidebarOpen(false);
   };
-  const [packagingOrderIds, setPackagingOrderIds] = useState<string[]>([]);
-  const [packHistoryId, setPackHistoryId]         = useState<string>('');
-  const [codState, setCodState]                   = useState<CodFileState>(EMPTY_COD_STATE);
 
   const goToPackaging = (ids: string[]) => {
     setPackagingOrderIds(ids);
@@ -67,7 +76,6 @@ export default function App() {
   const renderPage = () => {
     switch (activePage) {
       case 'products':       return <Products />;
-      // ฝ่ายสินค้า
       case 'product-list':   return <ProductList />;
       case 'product-search': return <ComingSoon title="หาสินค้า" description="ค้นหาสินค้าจากแหล่งต่างๆ" />;
       case 'product-kpi':    return <ProductKPI />;
@@ -86,36 +94,30 @@ export default function App() {
       case 'finance-expenses': return <Finance page="expenses" />;
       case 'finance-income':   return <FinanceIncome codState={codState} setCodState={setCodState} />;
       case 'finance-cost':     return <ComingSoon title="ต้นทุนสินค้า" description="วิเคราะห์ต้นทุนและกำไรรายสินค้า" />;
-      // ฝ่าย HR
       case 'hr-recruit': return <ComingSoon title="สรรหาพนักงาน" description="ระบบรับสมัครและคัดเลือกพนักงาน" />;
       case 'hr':         return <HR />;
       case 'hr-train':   return <ComingSoon title="เทรนพนักงาน" description="ระบบฝึกอบรมพนักงาน" />;
       case 'hr-kpi':     return <ComingSoon title="KPI พนักงาน" description="ประเมินผลงานพนักงาน" />;
       case 'hr-sop':     return <ComingSoon title="คู่มือการทำงาน (SOP)" description="Standard Operating Procedures" />;
-      // ฝ่ายขาย
       case 'sales-admin':     return <Marketing page="admin" />;
       case 'sales-customers': return <Customers onGoToProducts={() => setActivePage('products')} />;
       case 'sales-customers-problem': return <ProblemCases />;
       case 'sales-crm':       return <ComingSoon title="CRM" description="ระบบจัดการความสัมพันธ์ลูกค้า" />;
-      // ฝ่ายการตลาด
-      case 'marketing-graphic': return <Marketing page="graphic" />;
+      case 'marketing-graphic':    return <Marketing page="graphic" />;
       case 'marketing-ads-assign': return <AdsAssignment />;
-      case 'marketing-ads':     return <Marketing page="ads" />;
-      default:               return <Products />;
+      case 'marketing-ads':        return <Marketing page="ads" />;
+      default: return <Products />;
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
-      {/* Overlay backdrop บนมือถือ */}
+      {/* Overlay backdrop */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-40 z-30 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black bg-opacity-40 z-30 lg:hidden" onClick={() => setSidebarOpen(false)}/>
       )}
 
-      {/* Sidebar — ซ่อนบนมือถือ, แสดงเมื่อกด hamburger */}
+      {/* Sidebar */}
       <div className={`
         fixed inset-y-0 left-0 z-40 transform transition-all duration-300 ease-in-out shrink-0
         lg:relative lg:translate-x-0 lg:z-auto
@@ -130,23 +132,37 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 min-h-screen">
         {/* Mobile topbar */}
         <div className="lg:hidden shrink-0 flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shadow-sm">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="p-2 rounded-lg hover:bg-slate-100 transition"
-          >
+          <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg hover:bg-slate-100 transition">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round">
               <line x1="3" y1="6" x2="21" y2="6"/>
               <line x1="3" y1="12" x2="21" y2="12"/>
               <line x1="3" y1="18" x2="21" y2="18"/>
             </svg>
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold"
-              style={{background:'linear-gradient(135deg,#0ea5e9,#6366f1)'}}>
+              style={{ background: 'linear-gradient(135deg,#0ea5e9,#6366f1)' }}>
               S
             </div>
             <span className="font-bold text-slate-800 text-sm">SmartOffice</span>
           </div>
+          {/* Sign out — mobile */}
+          <button onClick={() => { if (confirm('ออกจากระบบ?')) signOut(); }}
+            className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-red-500 transition" title="ออกจากระบบ">
+            <LogOut size={17}/>
+          </button>
+        </div>
+
+        {/* Desktop: user badge + sign out (top-right) */}
+        <div className="hidden lg:flex absolute top-3 right-4 z-20 items-center gap-2">
+          <span className="text-xs text-slate-400 bg-white border border-slate-100 px-2 py-1 rounded-lg shadow-sm">
+            {user.email}
+          </span>
+          <button onClick={() => { if (confirm('ออกจากระบบ?')) signOut(); }}
+            className="p-1.5 rounded-lg bg-white border border-slate-100 shadow-sm text-slate-400 hover:text-red-500 hover:border-red-200 transition"
+            title="ออกจากระบบ">
+            <LogOut size={15}/>
+          </button>
         </div>
 
         {/* Page content */}
