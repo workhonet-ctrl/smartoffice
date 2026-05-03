@@ -1123,8 +1123,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               <h2 className="text-lg sm:text-2xl font-bold text-slate-800">จัดการออเดอร์</h2>
               <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">Step 2</span>
               {customerCount !== null && (
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${customerCount > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-600'}`}>
-                  {customerCount > 0 ? `✓ ลูกค้าพร้อม ${customerCount} คน` : '⚠ ยังไม่มีลูกค้า'}
+                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+                  ออเดอร์ {orders.length.toLocaleString()} · ลูกค้า {customerCount.toLocaleString()} คน
                 </span>
               )}
             </div>
@@ -1372,10 +1372,10 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                       // Step 1 เสร็จแล้ว รอ Step 2
                       <div className="text-center max-w-sm">
                         <div className="text-4xl mb-3">📋</div>
-                        <p className="font-bold text-slate-700 text-lg mb-1">ลูกค้าพร้อมแล้ว {customerCount} คน</p>
+                        <p className="font-bold text-slate-700 text-lg mb-1">พร้อมนำเข้าออเดอร์</p>
                         <p className="text-sm text-slate-400 mb-4">ออเดอร์จะถูกบันทึกอัตโนมัติเมื่อนำเข้า Excel ที่หน้าลูกค้า</p>
                         <div className="flex items-center gap-2 justify-center text-sm">
-                          <span className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-bold">✓ ลูกค้าพร้อมแล้ว</span>
+                          <span className="px-3 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold">ลูกค้า {customerCount?.toLocaleString()} คน</span>
                           <span className="text-slate-400">→</span>
                           <span className="px-3 py-2 bg-cyan-100 text-cyan-700 rounded-lg font-bold">นำเข้า Excel ที่หน้าลูกค้า</span>
                         </div>
