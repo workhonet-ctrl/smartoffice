@@ -190,11 +190,9 @@ export default function FlashShippingImport() {
     } catch {}
   }, [trackingMap, topups, fileInfos, matched]);
 
-  // auto-load จาก Supabase เมื่อเปิดหน้า (ถ้าไม่มีข้อมูลใน session)
+  // โหลดจาก DB ทุกครั้งที่เปิดหน้า (ไม่พึ่ง sessionStorage)
   useEffect(() => {
-    if (Object.keys(trackingMap).length === 0) {
-      handleLoad();
-    }
+    handleLoad();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── File handling ───────────────────────────────────────────
