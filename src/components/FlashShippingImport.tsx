@@ -65,7 +65,25 @@ function parseNum(val: unknown): number {
 
 /** ตัดเวลาออก เหลือแค่วันที่ */
 function parseDate(val: unknown): string {
-  return String(val ?? '').split(' ')[0];
+  if (!val) return '';
+  // cellDates: true → XLSX คืน Date object
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  // string เช่น "2026-04-30 15:40:34"
+  if (typeof val === 'string') return val.split(' ')[0];
+  // Excel serial number fallback (กันไว้)
+  if (typeof val === 'number') {
+    const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+    const y = d.getUTCFullYear();
+    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const da = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${mo}-${da}`;
+  }
+  return String(val).split(' ')[0];
 }
 
 /**
@@ -75,7 +93,7 @@ function parseDate(val: unknown): string {
  * FIX 2: นับ dominant type แทน last-row-wins
  */
 function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
-  const wb = XLSX.read(buffer, { type: 'array' });
+  const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const allRows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
