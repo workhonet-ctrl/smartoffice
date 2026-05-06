@@ -18,8 +18,8 @@ const EXP_CATS = ['ค่าวัตถุดิบ/สินค้า','ค่
 const fmt = (n:number) => n.toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtDate = (d:string) => new Date(d).toLocaleDateString('th-TH');
 
-export default function FinanceExpenses() {
-  const [subTab, setSubTab]   = useState<SubTab>('records');
+export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: SubTab }) {
+  const [subTab, setSubTab] = useState<SubTab>(initialSubTab ?? 'records');
   const [records, setRecords] = useState<ExpRecord[]>([]);
   const [pos, setPOs]         = useState<PO[]>([]);
   const [search, setSearch]   = useState('');
