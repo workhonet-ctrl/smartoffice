@@ -17,6 +17,7 @@ type PageKey =
   | 'stock' | 'purchase-order' | 'suppliers'
   | 'finance-daily' | 'finance-monthly' | 'finance-yearly'
   | 'finance-expenses' | 'finance-income' | 'finance-cost'
+  | 'finance-exp-record' | 'finance-exp-po' | 'finance-exp-ads' | 'finance-exp-shipping' | 'finance-exp-all'
   | 'hr-recruit' | 'hr' | 'hr-train' | 'hr-kpi' | 'hr-sop';
 
 type SidebarProps = {
@@ -90,13 +91,19 @@ const GROUPS = [
     key: 'finance', label: 'ฝ่ายการเงิน', icon: DollarSign,
     accent: '#10b981', bg: '#f0fdf4', dot: '#10b981',
     menus: [
-      { key: 'finance-daily',    label: 'บัญชีรายวัน',   icon: BarChart2,       built: true  },
-      { key: 'finance-monthly',  label: 'บัญชีรายเดือน', icon: BarChart2,       built: true  },
-      { key: 'finance-yearly',   label: 'บัญชีรายปี',    icon: BarChart2,       built: true  },
-      { key: 'finance-expenses', label: 'รายจ่าย',        icon: FileText,        built: true  },
-      { key: 'finance-income',   label: 'รายรับ',         icon: ArrowDownCircle, built: true  },
-      { key: 'finance-cost',     label: 'ต้นทุนสินค้า',   icon: DollarSign,      built: false },
-    ] as MenuItem[],
+      // ── บัญชี ──
+      { key: 'finance-daily',   label: 'รายวัน',   icon: BarChart2,  built: true,  group: 'บัญชี'   },
+      { key: 'finance-monthly', label: 'รายเดือน', icon: BarChart2,  built: true,  group: 'บัญชี'   },
+      { key: 'finance-yearly',  label: 'รายปี',    icon: BarChart2,  built: true,  group: 'บัญชี'   },
+      // ── รายรับ ──
+      { key: 'finance-income',  label: 'รายรับ',   icon: ArrowDownCircle, built: true, group: 'รายรับ' },
+      // ── รายจ่าย ──
+      { key: 'finance-exp-record',   label: 'ใบบันทึกรายจ่าย',  icon: FileText,    built: true,  group: 'รายจ่าย' },
+      { key: 'finance-exp-po',       label: 'ใบสั่งซื้อ (PO)',   icon: ShoppingBag, built: true,  group: 'รายจ่าย' },
+      { key: 'finance-exp-ads',      label: 'ค่าโฆษณา',          icon: Megaphone,   built: true,  group: 'รายจ่าย' },
+      { key: 'finance-exp-shipping', label: 'ค่าขนส่ง',           icon: Truck,       built: true,  group: 'รายจ่าย' },
+      { key: 'finance-exp-all',      label: 'ทั้งหมด',            icon: List,        built: true,  group: 'รายจ่าย' },
+    ] as (MenuItem & { group?: string })[],
   },
   {
     key: 'hr', label: 'ฝ่าย HR', icon: Building2,
@@ -238,13 +245,26 @@ export default function Sidebar({ activePage, setActivePage, collapsed = false, 
               {isOpen && (
                 <div className="ml-3 mt-0.5 mb-1 pl-3 space-y-0.5"
                   style={{ borderLeft: `1.5px solid ${group.accent}25` }}>
-                  {group.menus.map(menu => {
+                  {group.menus.map((menu, idx) => {
                     const MIcon = menu.icon;
                     const active = activePage === menu.key;
                     const hasChildren = !!(menu.children && menu.children.length > 0);
                     const submenuOpen = openSubmenus.has(menu.key);
+                    const menuWithGroup = menu as MenuItem & { group?: string };
+
+                    // แสดง sub-group label เมื่อเป็นเมนูแรกของ group หรือ group เปลี่ยน
+                    const prevMenu = idx > 0 ? (group.menus[idx - 1] as MenuItem & { group?: string }) : null;
+                    const showGroupLabel = menuWithGroup.group && menuWithGroup.group !== prevMenu?.group;
+
                     return (
                       <div key={menu.key}>
+                        {/* Sub-group label เช่น บัญชี / รายรับ / รายจ่าย */}
+                        {showGroupLabel && (
+                          <div className="px-2 pt-2 pb-1 text-[9.5px] font-semibold uppercase tracking-wider"
+                            style={{ color: group.accent + 'aa' }}>
+                            {menuWithGroup.group}
+                          </div>
+                        )}
                         <div
                           className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[12.5px] transition-all"
                           style={active
