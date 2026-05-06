@@ -119,6 +119,13 @@ function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
       trackingMap[tracking].total = trackingMap[tracking].base + trackingMap[tracking].extra;
       typeCounts['ค่าพัสดุ'] = (typeCounts['ค่าพัสดุ'] ?? 0) + 1;
 
+    } else if (type === 'คืนเงินสำหรับยกเลิกพัสดุ') {
+      // Flash คืนเงิน = พัสดุถูกยกเลิก ไม่ได้ส่งจริง → ลบออกจาก map
+      if (tracking && trackingMap[tracking]) {
+        delete trackingMap[tracking];
+      }
+      typeCounts['คืนเงินสำหรับยกเลิกพัสดุ'] = (typeCounts['คืนเงินสำหรับยกเลิกพัสดุ'] ?? 0) + 1;
+
     } else if (type === 'ค่าพัสดุเพิ่มเติม') {
       if (!tracking) continue;
       const amount = parseNum(r[9]); // col J
