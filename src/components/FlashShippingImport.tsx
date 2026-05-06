@@ -182,6 +182,9 @@ export default function FlashShippingImport() {
   const [loadingDB, setLoadingDB] = useState(false);
   const [search, setSearch]       = useState('');
   const [error, setError]         = useState<string | null>(null);
+  const [tabView, setTabView]     = useState<'all' | 'matched' | 'unmatched'>('all');
+  const [dateFrom, setDateFrom]   = useState('');
+  const [dateTo, setDateTo]       = useState('');
 
   // บันทึกทุกครั้งที่ state เปลี่ยน
   useEffect(() => {
@@ -405,13 +408,23 @@ export default function FlashShippingImport() {
 
   const filteredRows = rows.filter(r => {
     const q = search.toLowerCase();
-    return (
+    const matchSearch = (
       !q ||
       r.tracking.toLowerCase().includes(q) ||
       (r.order_no ?? '').toLowerCase().includes(q) ||
       (r.customer ?? '').toLowerCase().includes(q) ||
       (r.raw_prod ?? '').toLowerCase().includes(q)
     );
+    const matchTab = (
+      tabView === 'all' ||
+      (tabView === 'matched'   &&  r.matched) ||
+      (tabView === 'unmatched' && !r.matched)
+    );
+    const matchDate = (
+      (!dateFrom || r.date >= dateFrom) &&
+      (!dateTo   || r.date <= dateTo)
+    );
+    return matchSearch && matchTab && matchDate;
   });
 
   const totalBase   = rows.reduce((s, r) => s + r.base,  0);
@@ -495,80 +508,134 @@ export default function FlashShippingImport() {
       )}
 
       {/* Summary cards */}
-      {rows.length > 0 && (
-        <div className="shrink-0 grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-green-50 border border-green-200 rounded-xl p-3">
-            <div className="text-xs text-green-700 font-semibold mb-1">💳 เติม Flash Pay</div>
-            <div className="text-lg font-bold text-green-800">฿{fmt(totalTopup)}</div>
-            <div className="text-xs text-green-500">{topups.length} ครั้ง</div>
+      {rows.length > 0 && (() => {
+        const baseRows   = (dateFrom || dateTo) ? filteredRows : rows;
+        const fBase      = baseRows.reduce((s, r) => s + r.base,  0);
+        const fExtra     = baseRows.reduce((s, r) => s + r.extra, 0);
+        const fTotal     = baseRows.reduce((s, r) => s + r.total, 0);
+        const fMatched   = baseRows.filter(r => r.matched).length;
+        const fUnmatched = baseRows.filter(r => !r.matched).length;
+        return (
+          <div className="shrink-0 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+              <div className="text-xs text-green-700 font-semibold mb-1">💳 เติม Flash Pay</div>
+              <div className="text-lg font-bold text-green-800">฿{fmt(totalTopup)}</div>
+              <div className="text-xs text-green-500">{topups.length} ครั้ง</div>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+              <div className="text-xs text-blue-700 font-semibold mb-1">📦 ค่าพัสดุ</div>
+              <div className="text-lg font-bold text-blue-800">฿{fmt(fBase)}</div>
+              <div className="text-xs text-blue-500">{baseRows.filter(r => r.base > 0).length} tracking</div>
+            </div>
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-3">
+              <div className="text-xs text-orange-700 font-semibold mb-1">➕ ค่าพัสดุเพิ่มเติม</div>
+              <div className="text-lg font-bold text-orange-800">฿{fmt(fExtra)}</div>
+              <div className="text-xs text-orange-500">{baseRows.filter(r => r.extra > 0).length} tracking</div>
+            </div>
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+              <div className="text-xs text-red-700 font-semibold mb-1">🚚 ค่าขนส่งรวม</div>
+              <div className="text-lg font-bold text-red-800">฿{fmt(fTotal)}</div>
+              <div className="text-xs text-red-500 flex items-center gap-2">
+                <span>{baseRows.length} tracking</span>
+                {matched && fMatched > 0 && <span className="text-green-600">✓{fMatched}</span>}
+                {matched && fUnmatched > 0 && <span className="text-red-400">❌{fUnmatched}</span>}
+              </div>
+            </div>
           </div>
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
-            <div className="text-xs text-blue-700 font-semibold mb-1">📦 ค่าพัสดุ</div>
-            <div className="text-lg font-bold text-blue-800">฿{fmt(totalBase)}</div>
-            <div className="text-xs text-blue-500">{rows.filter(r => r.base > 0).length} tracking</div>
-          </div>
-          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3">
-            <div className="text-xs text-orange-700 font-semibold mb-1">➕ ค่าพัสดุเพิ่มเติม</div>
-            <div className="text-lg font-bold text-orange-800">฿{fmt(totalExtra)}</div>
-            <div className="text-xs text-orange-500">{rows.filter(r => r.extra > 0).length} tracking</div>
-          </div>
-          <div className="bg-red-50 border border-red-200 rounded-xl p-3">
-            <div className="text-xs text-red-700 font-semibold mb-1">🚚 ค่าขนส่งรวม</div>
-            <div className="text-lg font-bold text-red-800">฿{fmt(totalShip)}</div>
-            <div className="text-xs text-red-500">{rows.length} tracking</div>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
-      {/* Actions */}
+      {/* ── Date filter + Actions ── */}
       {rows.length > 0 && (
         <div className="shrink-0 flex gap-2 items-center flex-wrap">
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="ค้นหา Tracking / ออเดอร์ / ลูกค้า..."
-              className="pl-8 pr-3 py-2 border rounded-lg text-xs w-56 focus:outline-none focus:ring-2 focus:ring-blue-300"
-            />
+          {/* Date range */}
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <span>📅</span>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+              className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 w-32"/>
+            <span>—</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+              className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 w-32"/>
+            {(dateFrom || dateTo) && (
+              <button onClick={() => { setDateFrom(''); setDateTo(''); }}
+                className="text-slate-400 hover:text-red-500 ml-0.5">
+                <X size={12}/>
+              </button>
+            )}
           </div>
 
-          {matched && (
-            <div className="flex gap-2 text-xs">
-              <span className="bg-green-100 text-green-700 px-3 py-1.5 rounded-full font-medium">
-                ✓ จับคู่ได้ {cntMatched}
-              </span>
-              {cntNotFound > 0 && (
-                <span className="bg-red-100 text-red-600 px-3 py-1.5 rounded-full font-medium">
-                  ❌ ไม่พบ {cntNotFound}
-                </span>
-              )}
-            </div>
-          )}
+          {/* Search */}
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="ค้นหา Tracking / ออเดอร์ / ลูกค้า..."
+              className="pl-8 pr-3 py-2 border rounded-lg text-xs w-52 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+          </div>
 
-          <button
-            onClick={handleMatch}
-            disabled={matching || matched}
-            className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium
-                       hover:bg-blue-600 disabled:opacity-50 flex items-center gap-2"
-          >
-            <RefreshCw size={13} className={matching ? 'animate-spin' : ''} />
+          <div className="flex-1"/>
+
+          {/* Match / Reset */}
+          <button onClick={handleMatch} disabled={matching || matched}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:opacity-50 flex items-center gap-2">
+            <RefreshCw size={13} className={matching ? 'animate-spin' : ''}/>
             {matched ? '✓ จับคู่แล้ว' : matching ? 'กำลังจับคู่...' : '🔗 จับคู่กับออเดอร์'}
           </button>
-
           {matched && (
-            <button
-              onClick={resetMatch}
-              className="px-3 py-2 bg-slate-200 rounded-lg text-xs hover:bg-slate-300"
-            >
+            <button onClick={resetMatch}
+              className="px-3 py-2 bg-slate-200 rounded-lg text-xs hover:bg-slate-300">
               รีเซ็ตจับคู่
             </button>
           )}
-
-          {/* saving indicator */}
+          {/* Export ไม่พบ */}
+          {matched && cntNotFound > 0 && (
+            <button
+              onClick={() => {
+                const notFound = rows.filter(r => !r.matched);
+                const ws = XLSX.utils.json_to_sheet(notFound.map(r => ({
+                  วันที่: r.date, Tracking: r.tracking, ค่าขนส่ง: r.total,
+                })));
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'ไม่พบออเดอร์');
+                XLSX.writeFile(wb, `flash_unmatched_${new Date().toISOString().split('T')[0]}.xlsx`);
+              }}
+              className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs hover:bg-red-100 flex items-center gap-1.5">
+              ⬇ Export ไม่พบ ({cntNotFound})
+            </button>
+          )}
           {saving && (
             <span className="text-xs text-emerald-600 flex items-center gap-1.5 px-3 py-2 bg-emerald-50 rounded-lg">
               <RefreshCw size={12} className="animate-spin"/> กำลังบันทึก...
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ── Tabs ── */}
+      {rows.length > 0 && (
+        <div className="shrink-0 flex items-center gap-1 bg-slate-100 rounded-xl p-1 w-fit">
+          {([
+            { key: 'all',       label: `ทั้งหมด`,         count: rows.length,    color: '' },
+            { key: 'matched',   label: `✓ จับคู่แล้ว`,   count: cntMatched,     color: 'text-green-600' },
+            { key: 'unmatched', label: `❌ ไม่พบออเดอร์`, count: cntNotFound,    color: 'text-red-600' },
+          ] as const).map(t => (
+            <button key={t.key}
+              onClick={() => setTabView(t.key)}
+              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5
+                ${tabView === t.key ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+              <span className={tabView === t.key ? t.color : ''}>{t.label}</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold
+                ${tabView === t.key
+                  ? t.key==='matched'   ? 'bg-green-100 text-green-700'
+                  : t.key==='unmatched' ? 'bg-red-100 text-red-600'
+                  : 'bg-slate-200 text-slate-600'
+                  : 'bg-slate-200 text-slate-500'}`}>
+                {t.count}
+              </span>
+            </button>
+          ))}
+          {(dateFrom || dateTo) && (
+            <span className="ml-2 text-[10px] text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
+              📅 กรองวันที่
             </span>
           )}
         </div>
@@ -593,21 +660,19 @@ export default function FlashShippingImport() {
             </thead>
             <tbody>
               {filteredRows.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="p-8 text-center text-slate-400">
-                    ไม่พบรายการ
-                  </td>
-                </tr>
+                <tr><td colSpan={9} className="p-8 text-center text-slate-400">
+                  {tabView === 'matched'   ? '✓ ยังไม่มีรายการที่จับคู่แล้ว' :
+                   tabView === 'unmatched' ? '🎉 ไม่มีรายการที่หาออเดอร์ไม่พบ' :
+                   'ไม่พบรายการ'}
+                </td></tr>
               )}
               {filteredRows.map(r => (
-                <tr
-                  key={r.tracking}
-                  className={`border-b ${
-                    matched && !r.matched ? 'bg-red-50' :
-                    matched &&  r.matched ? 'hover:bg-green-50' :
+                <tr key={r.tracking}
+                  className={`border-b transition ${
+                    matched && !r.matched ? 'bg-red-50 hover:bg-red-100' :
+                    matched &&  r.matched ? 'bg-green-50 hover:bg-green-100' :
                                             'hover:bg-slate-50'
-                  }`}
-                >
+                  }`}>
                   <td className="p-3 text-slate-500 whitespace-nowrap">{r.date}</td>
                   <td className="p-3 font-mono text-blue-600 whitespace-nowrap">{r.tracking}</td>
                   <td className="p-3 font-mono text-slate-600 whitespace-nowrap">
@@ -626,13 +691,9 @@ export default function FlashShippingImport() {
                   <td className="p-3 text-right font-bold text-red-700">฿{fmt(r.total)}</td>
                   {matched && (
                     <td className="p-3 text-center">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          r.matched
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-red-100 text-red-600'
-                        }`}
-                      >
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        r.matched ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
+                      }`}>
                         {r.matched ? '✓ พบออเดอร์' : '❌ ไม่พบ'}
                       </span>
                     </td>
@@ -642,9 +703,11 @@ export default function FlashShippingImport() {
             </tbody>
             <tfoot className="bg-slate-50 border-t-2 sticky bottom-0 font-bold text-[11px]">
               <tr>
-                <td className="p-3 text-slate-600" colSpan={5}>
+                <td className="p-3 text-slate-600" colSpan={matched ? 4 : 5}>
                   รวม {filteredRows.length} tracking
+                  {(dateFrom || dateTo) && <span className="text-blue-500 ml-2 font-normal">📅 กรองตามวันที่</span>}
                 </td>
+                {matched && <td className="p-3"/>}
                 <td className="p-3 text-right text-blue-700">
                   ฿{fmt(filteredRows.reduce((s, r) => s + r.base, 0))}
                 </td>
@@ -654,7 +717,7 @@ export default function FlashShippingImport() {
                 <td className="p-3 text-right text-red-700">
                   ฿{fmt(filteredRows.reduce((s, r) => s + r.total, 0))}
                 </td>
-                {matched && <td />}
+                {matched && <td/>}
               </tr>
             </tfoot>
           </table>
