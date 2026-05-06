@@ -95,9 +95,21 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const [editOrderDropdownOpen, setEditOrderDropdownOpen] = useState(false);
   const [importResult, setImportResult] = useState<{
     added: number; updated: number; skipped: number;
-    orderAdded: number; repeatOrders: number;
     unmapped: {name:string; qty:string}[];
   } | null>(null);
+
+  // ── ออเดอร์ซ้ำ (Order No. เดิม ข้อมูลต่าง) — รอ user เลือก ──
+  type DupOrderItem = {
+    orderNo: string;
+    oldProd: string; newProd: string;
+    oldTrack: string; newTrack: string;
+    oldAmt: number; newAmt: number;
+    action: 'remove' | 'add';
+    row: any;
+  };
+  const [dupOrderItems, setDupOrderItems]     = useState<DupOrderItem[]>([]);
+  const [showDupOrderModal, setShowDupOrderModal] = useState(false);
+  const [pendingAfterDup, setPendingAfterDup] = useState<(() => Promise<void>) | null>(null);
 
   // mapping modal state
   const [showMappingModal, setShowMappingModal] = useState(false);
@@ -602,9 +614,19 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // ── Step 3: โหลด orders ที่มีอยู่แล้วทั้งหมดครั้งเดียว (by order_no) ─
       const allOrderNos = [...new Set(dataRows.map(r => String(r[1]||'').trim()).filter(Boolean))];
       const existingOrderSet = new Set<string>();
+      const existingOrderMap: Record<string, { raw_prod: string; tracking_no: string; total_thb: number }> = {};
       for (let i=0; i<allOrderNos.length; i+=500) {
-        const { data } = await supabase.from('orders').select('order_no').in('order_no', allOrderNos.slice(i,i+500));
-        (data||[]).forEach((o:any) => existingOrderSet.add(o.order_no));
+        const { data } = await supabase.from('orders')
+          .select('order_no, raw_prod, tracking_no, total_thb')
+          .in('order_no', allOrderNos.slice(i,i+500));
+        (data||[]).forEach((o:any) => {
+          existingOrderSet.add(o.order_no);
+          existingOrderMap[o.order_no] = {
+            raw_prod:    o.raw_prod    || '',
+            tracking_no: o.tracking_no || '',
+            total_thb:   Number(o.total_thb || 0),
+          };
+        });
       }
 
       // ── Step 4: แยก insert vs update — deduplicate by tel ────────────
@@ -664,29 +686,25 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // ── Step 5: batch insert orders ────────────────────────────────────
       const ordersToInsert: any[] = [];
       let orderSkipped = 0;
-      let repeatOrderCount = 0; // นับออเดอร์ "สั่งเพิ่ม"
+      let repeatOrderCount = 0;
+      const dupFound: typeof dupOrderItems = [];
 
       for (const row of dataRows) {
         const orderNo = String(row[1]||'').trim();
         if (!orderNo) continue;
-        if (existingOrderSet.has(orderNo)) { orderSkipped++; continue; }
 
         const tel = String(row[6]||'').trim();
         const customerId = telToId[tel];
         if (!customerId) continue;
 
-        // ถ้า tel มีอยู่ใน existingCustMap = ลูกค้าเก่า → ออเดอร์นี้คือ "สั่งเพิ่ม"
-        const isRepeat = !!existingCustMap[tel];
-        if (isRepeat) repeatOrderCount++;
-
-        const rawDate  = String(row[3]||'');
+        const rawDate   = String(row[3]||'');
         const orderDate = rawDate ? new Date(rawDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
         const timeMatch = rawDate.match(/(\d{1,2}):(\d{2})/);
         const orderTime = timeMatch ? `${timeMatch[1].padStart(2,'0')}:${timeMatch[2]}` : '';
 
-        const rawTrack    = String(row[17]||'');
-        const trackMatch  = rawTrack.match(/^([^\s(]+)/);
-        const trackingNo  = trackMatch ? trackMatch[1] : '';
+        const rawTrack     = String(row[17]||'');
+        const trackMatch   = rawTrack.match(/^([^\s(]+)/);
+        const trackingNo   = trackMatch ? trackMatch[1] : '';
         const courierMatch = rawTrack.match(/\(([^)]+)\)/);
         let courier = '';
         if (courierMatch) {
@@ -696,30 +714,58 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           else courier=courierMatch[1];
         }
 
-        const rawProds = String(row[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
-        const promoIds = rawProds.map(rp=>finalPromoMap[rp]||'').filter(Boolean);
+        const rawProds   = String(row[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
+        const promoIds   = rawProds.map(rp=>finalPromoMap[rp]||'').filter(Boolean);
         const quantities = String(row[15]||'1');
         const weightKg   = (Number(row[16])||0)/1000;
         const postal     = String(row[11]||'').trim();
         const hasTrack   = trackingNo.length>3;
         const isTourist  = TOURIST_ZIPS.has(postal);
-        // route ตาม courier จริง
-        // B = Flash, A = ไปรษณีย์มี tracking, C = ไปรษณีย์นักท่องเที่ยว, ไม่มี tracking = B
-        const route = hasTrack
+        const route      = hasTrack
           ? (courier === 'ไปรษณีย์' ? (isTourist ? 'C' : 'A') : 'B')
           : (isTourist ? 'C' : 'B');
+        const newAmt     = Number(row[21])||0;
+        const newProd    = String(row[14]||'').trim();
+
+        // ── ออเดอร์ซ้ำ: Order No. มีอยู่แล้ว ──
+        if (existingOrderSet.has(orderNo)) {
+          const existing = existingOrderMap[orderNo];
+          const prodChanged  = existing.raw_prod    !== newProd;
+          const trackChanged = existing.tracking_no !== (hasTrack ? trackingNo : '');
+          const amtChanged   = existing.total_thb   !== newAmt;
+
+          if (prodChanged || trackChanged || amtChanged) {
+            // ต่างกัน → เก็บไว้ให้ user เลือก
+            dupFound.push({
+              orderNo,
+              oldProd:  existing.raw_prod,    newProd,
+              oldTrack: existing.tracking_no, newTrack: hasTrack ? trackingNo : '',
+              oldAmt:   existing.total_thb,   newAmt,
+              action:   'add', // default = สั่งเพิ่ม
+              row,
+            });
+          } else {
+            // เหมือนเดิมทุกอย่าง → skip
+            orderSkipped++;
+          }
+          continue;
+        }
+
+        // ── ออเดอร์ใหม่ ──
+        const isRepeat = !!existingCustMap[tel];
+        if (isRepeat) repeatOrderCount++;
 
         ordersToInsert.push({
           order_no: orderNo, customer_id: customerId,
           channel: String(row[2]||'').trim()||null,
           order_date: orderDate, order_time: orderTime||null,
-          raw_prod: String(row[14]||'').trim()||null,
+          raw_prod: newProd||null,
           promo_ids: promoIds,
           quantity: quantities.split('|').reduce((s:number,n:string)=>s+(Number(n.trim())||1),0),
           quantities, weight_kg: weightKg,
           tracking_no: hasTrack?trackingNo:null,
           courier: courier||null,
-          total_thb: Number(row[21])||0,
+          total_thb: newAmt,
           payment_method: String(row[22]||'COD').trim(),
           payment_status: String(row[24]||'รอชำระเงิน').trim(),
           order_status: hasTrack?'รอแพ็ค':'รอคีย์ออเดอร์',
@@ -727,6 +773,89 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           imported_at: new Date().toISOString().split('T')[0],
           note: isRepeat ? '🔁 สั่งเพิ่ม' : null,
         });
+      }
+
+      // ── ถ้ามีออเดอร์ซ้ำ → หยุดก่อน แสดง modal ให้ user เลือก ──
+      if (dupFound.length > 0) {
+        setDupOrderItems(dupFound);
+        setShowDupOrderModal(true);
+        // เก็บ fn ที่จะรันหลัง user ตัดสินใจ
+        setPendingAfterDup(() => async () => {
+          // insert ออเดอร์ปกติที่รวบรวมไว้ + ออเดอร์ "สั่งเพิ่ม" จาก dupFound
+          const extraOrders: any[] = [];
+          for (const d of dupFound) {
+            if (d.action !== 'add') continue;
+            // suffix -1, -2, ... กันซ้ำ
+            let suffix = 1;
+            let newOrderNo = `${d.orderNo}-${suffix}`;
+            while (existingOrderSet.has(newOrderNo)) { suffix++; newOrderNo = `${d.orderNo}-${suffix}`; }
+
+            const row = d.row;
+            const rawDate2   = String(row[3]||'');
+            const orderDate2 = rawDate2 ? new Date(rawDate2).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+            const timeMatch2 = rawDate2.match(/(\d{1,2}):(\d{2})/);
+            const orderTime2 = timeMatch2 ? `${timeMatch2[1].padStart(2,'0')}:${timeMatch2[2]}` : '';
+            const rawTrack2    = String(row[17]||'');
+            const trackMatch2  = rawTrack2.match(/^([^\s(]+)/);
+            const trackingNo2  = trackMatch2 ? trackMatch2[1] : '';
+            const courierMatch2 = rawTrack2.match(/\(([^)]+)\)/);
+            let courier2 = '';
+            if (courierMatch2) {
+              const cv = courierMatch2[1].toUpperCase();
+              if (cv.includes('THAI_POST')||cv.includes('EMS')) courier2='ไปรษณีย์';
+              else if (cv.includes('FLASH')) courier2='FLASH';
+              else courier2=courierMatch2[1];
+            }
+            const rawProds2  = String(row[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
+            const promoIds2  = rawProds2.map(rp=>finalPromoMap[rp]||'').filter(Boolean);
+            const quantities2 = String(row[15]||'1');
+            const weightKg2   = (Number(row[16])||0)/1000;
+            const postal2     = String(row[11]||'').trim();
+            const hasTrack2   = trackingNo2.length>3;
+            const isTourist2  = TOURIST_ZIPS.has(postal2);
+            const route2      = hasTrack2
+              ? (courier2 === 'ไปรษณีย์' ? (isTourist2?'C':'A') : 'B')
+              : (isTourist2?'C':'B');
+            const tel2       = String(row[6]||'').trim();
+            const customerId2 = telToId[tel2];
+            if (!customerId2) continue;
+
+            extraOrders.push({
+              order_no: newOrderNo, customer_id: customerId2,
+              channel: String(row[2]||'').trim()||null,
+              order_date: orderDate2, order_time: orderTime2||null,
+              raw_prod: String(row[14]||'').trim()||null,
+              promo_ids: promoIds2,
+              quantity: quantities2.split('|').reduce((s:number,n:string)=>s+(Number(n.trim())||1),0),
+              quantities: quantities2, weight_kg: weightKg2,
+              tracking_no: hasTrack2?trackingNo2:null,
+              courier: courier2||null,
+              total_thb: Number(row[21])||0,
+              payment_method: String(row[22]||'COD').trim(),
+              payment_status: String(row[24]||'รอชำระเงิน').trim(),
+              order_status: hasTrack2?'รอแพ็ค':'รอคีย์ออเดอร์',
+              route: route2,
+              imported_at: new Date().toISOString().split('T')[0],
+              note: '🔁 สั่งเพิ่ม',
+            });
+          }
+          const allToInsert = [...ordersToInsert, ...extraOrders];
+          let orderAdded2 = 0;
+          for (let i=0; i<allToInsert.length; i+=500) {
+            const { error } = await supabase.from('orders').insert(allToInsert.slice(i,i+500));
+            if (!error) orderAdded2 += Math.min(500, allToInsert.length-i);
+          }
+          const addedDup = dupFound.filter(d=>d.action==='add').length;
+          const removedDup = dupFound.filter(d=>d.action==='remove').length;
+          setImportResult({ added: custAdded, updated: custUpdated, skipped: orderSkipped + removedDup, unmapped: unmappedProds });
+          showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded2}${addedDup>0?` (🔁 สั่งเพิ่ม ${addedDup})`:''}${removedDup>0?` · ข้าม ${orderSkipped+removedDup}`:orderSkipped>0?` · ข้าม ${orderSkipped}`:''}`);
+          loadCustomers();
+          setShowDupOrderModal(false);
+          setImporting(false);
+          if (e?.target) e.target.value = '';
+        });
+        setImporting(false);
+        return; // หยุดรอ user ตัดสินใจ
       }
 
       // batch insert orders (500 ต่อครั้ง)
@@ -784,12 +913,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       }
 
       setImportResult({
-        added:        custAdded,
-        updated:      custUpdated,
-        skipped:      orderSkipped,
-        orderAdded,
-        repeatOrders: repeatOrderCount,
-        unmapped:     unmappedProds,
+        added: custAdded,
+        updated: custUpdated,
+        skipped: orderSkipped,
+        unmapped: unmappedProds,
       });
 
       if (unmappedProds.length > 0) {
@@ -810,7 +937,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         setShowMappingModal(true);
         showToast(`✓ นำเข้าสำเร็จ · พบสินค้า ${unmappedProds.length} รายการยังไม่มีในระบบ`, 'warning');
       } else {
-        showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded}${repeatOrderCount > 0 ? ` (🔁 สั่งเพิ่ม ${repeatOrderCount})` : ''} · ข้าม ${orderSkipped}`);
+        showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded} ข้าม ${orderSkipped}`);
       }
       loadCustomers();
     } catch (err) {
@@ -1166,17 +1293,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           {importResult && (
             <div className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 space-y-0.5">
               <div>👥 ลูกค้า: เพิ่ม <strong>{importResult.added}</strong> · อัพเดต <strong>{importResult.updated}</strong></div>
-              <div>
-                📋 ออเดอร์: บันทึก <strong>{importResult.orderAdded}</strong>
-                {importResult.repeatOrders > 0 && (
-                  <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-bold">
-                    🔁 สั่งเพิ่ม {importResult.repeatOrders}
-                  </span>
-                )}
-                {importResult.skipped > 0 && (
-                  <span className="ml-1 text-slate-400">· ข้าม {importResult.skipped} ซ้ำ</span>
-                )}
-              </div>
+              <div>📋 ออเดอร์: บันทึก <strong>{importResult.added + importResult.updated}</strong> · ข้าม {importResult.skipped} ซ้ำ</div>
               {importResult.unmapped.length > 0 && (
                 <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg text-orange-700">
                   <div className="font-semibold mb-1">⚠ สินค้ายังไม่มีในระบบ ({importResult.unmapped.length} รายการ)</div>
@@ -3004,6 +3121,83 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           </div>
         </>,
         document.body
+      )}
+
+      {/* ── Modal: ออเดอร์ซ้ำ ให้เลือก ลบ หรือ สั่งเพิ่ม ── */}
+      {showDupOrderModal && dupOrderItems.length > 0 && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-[90] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+            <div className="shrink-0 px-6 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center text-xl">⚠️</div>
+                <div>
+                  <h3 className="font-bold text-slate-800">พบออเดอร์ซ้ำ {dupOrderItems.length} รายการ</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Order No. เดิม แต่ข้อมูลเปลี่ยนแปลง — เลือกว่าจะทำอะไรกับแต่ละรายการ</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-auto px-6 py-4 space-y-3">
+              {dupOrderItems.map((d, i) => (
+                <div key={i} className={`rounded-xl border p-4 transition ${d.action === 'remove' ? 'border-slate-200 bg-slate-50 opacity-60' : 'border-blue-200 bg-blue-50'}`}>
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div>
+                      <span className="font-mono text-sm font-bold text-slate-700">{d.orderNo}</span>
+                      {d.action === 'add' && (
+                        <span className="ml-2 text-xs text-blue-600 font-medium">→ จะบันทึกเป็น {d.orderNo}-1</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => setDupOrderItems(prev => prev.map((x,j) => j===i ? {...x, action:'remove'} : x))}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${d.action==='remove' ? 'bg-slate-500 text-white' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-100'}`}>
+                        ลบออก
+                      </button>
+                      <button
+                        onClick={() => setDupOrderItems(prev => prev.map((x,j) => j===i ? {...x, action:'add'} : x))}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${d.action==='add' ? 'bg-blue-500 text-white' : 'bg-white border border-blue-300 text-blue-600 hover:bg-blue-50'}`}>
+                        🔁 สั่งเพิ่ม
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="bg-white rounded-lg p-3 border border-slate-200">
+                      <div className="text-slate-400 font-medium mb-1.5">ข้อมูลเดิมในระบบ</div>
+                      <div className="text-slate-600 mb-1 line-clamp-2">{d.oldProd || '-'}</div>
+                      {d.oldTrack && <div className="font-mono text-slate-500">{d.oldTrack}</div>}
+                      <div className="text-slate-500 mt-1">฿{d.oldAmt.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 border border-blue-200">
+                      <div className="text-blue-500 font-medium mb-1.5">ข้อมูลใหม่จาก Excel</div>
+                      <div className={`mb-1 line-clamp-2 ${d.newProd !== d.oldProd ? 'text-blue-700 font-bold' : 'text-slate-600'}`}>{d.newProd || '-'}</div>
+                      {d.newTrack && <div className={`font-mono ${d.newTrack !== d.oldTrack ? 'text-blue-700 font-bold' : 'text-slate-500'}`}>{d.newTrack}</div>}
+                      <div className={`mt-1 ${d.newAmt !== d.oldAmt ? 'text-blue-700 font-bold' : 'text-slate-500'}`}>฿{d.newAmt.toLocaleString()}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="shrink-0 px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
+              <div className="text-xs text-slate-400">
+                สั่งเพิ่ม {dupOrderItems.filter(d=>d.action==='add').length} · ลบออก {dupOrderItems.filter(d=>d.action==='remove').length}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setShowDupOrderModal(false); setImporting(false); }}
+                  className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-300">
+                  ยกเลิกทั้งหมด
+                </button>
+                <button
+                  onClick={() => { if (pendingAfterDup) pendingAfterDup(); }}
+                  className="px-6 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600">
+                  ✓ ยืนยัน
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {toast && (
