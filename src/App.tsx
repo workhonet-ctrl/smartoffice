@@ -35,6 +35,7 @@ type PageKey =
   | 'stock' | 'purchase-order' | 'suppliers'
   | 'finance-daily' | 'finance-monthly' | 'finance-yearly'
   | 'finance-expenses' | 'finance-income' | 'finance-cost'
+  | 'finance-exp-record' | 'finance-exp-po' | 'finance-exp-ads' | 'finance-exp-shipping' | 'finance-exp-all'
   | 'hr-recruit' | 'hr' | 'hr-train' | 'hr-kpi' | 'hr-sop';
 
 export default function App() {
@@ -91,9 +92,15 @@ export default function App() {
       case 'finance-daily':    return <Finance page="daily" />;
       case 'finance-monthly':  return <Finance page="monthly" />;
       case 'finance-yearly':   return <Finance page="yearly" />;
-      case 'finance-expenses': return <Finance page="expenses" />;
       case 'finance-income':   return <FinanceIncome codState={codState} setCodState={setCodState} />;
+      case 'finance-expenses': return <Finance page="expenses" />;
       case 'finance-cost':     return <ComingSoon title="ต้นทุนสินค้า" description="วิเคราะห์ต้นทุนและกำไรรายสินค้า" />;
+      // รายจ่าย sub-pages
+      case 'finance-exp-record':   return <Finance page="expenses" subTab="records" />;
+      case 'finance-exp-po':       return <Finance page="expenses" subTab="po" />;
+      case 'finance-exp-ads':      return <Finance page="expenses" subTab="ads" />;
+      case 'finance-exp-shipping': return <Finance page="expenses" subTab="shipping" />;
+      case 'finance-exp-all':      return <Finance page="expenses" subTab="all" />;
       case 'hr-recruit': return <ComingSoon title="สรรหาพนักงาน" description="ระบบรับสมัครและคัดเลือกพนักงาน" />;
       case 'hr':         return <HR />;
       case 'hr-train':   return <ComingSoon title="เทรนพนักงาน" description="ระบบฝึกอบรมพนักงาน" />;
