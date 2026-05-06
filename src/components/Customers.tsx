@@ -95,6 +95,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const [editOrderDropdownOpen, setEditOrderDropdownOpen] = useState(false);
   const [importResult, setImportResult] = useState<{
     added: number; updated: number; skipped: number;
+    orderAdded: number; repeatOrders: number;
     unmapped: {name:string; qty:string}[];
   } | null>(null);
 
@@ -663,6 +664,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // ── Step 5: batch insert orders ────────────────────────────────────
       const ordersToInsert: any[] = [];
       let orderSkipped = 0;
+      let repeatOrderCount = 0; // นับออเดอร์ "สั่งเพิ่ม"
 
       for (const row of dataRows) {
         const orderNo = String(row[1]||'').trim();
@@ -672,6 +674,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const tel = String(row[6]||'').trim();
         const customerId = telToId[tel];
         if (!customerId) continue;
+
+        // ถ้า tel มีอยู่ใน existingCustMap = ลูกค้าเก่า → ออเดอร์นี้คือ "สั่งเพิ่ม"
+        const isRepeat = !!existingCustMap[tel];
+        if (isRepeat) repeatOrderCount++;
 
         const rawDate  = String(row[3]||'');
         const orderDate = rawDate ? new Date(rawDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
@@ -719,6 +725,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           order_status: hasTrack?'รอแพ็ค':'รอคีย์ออเดอร์',
           route,
           imported_at: new Date().toISOString().split('T')[0],
+          note: isRepeat ? '🔁 สั่งเพิ่ม' : null,
         });
       }
 
@@ -777,10 +784,12 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       }
 
       setImportResult({
-        added: custAdded,
-        updated: custUpdated,
-        skipped: orderSkipped,
-        unmapped: unmappedProds,
+        added:        custAdded,
+        updated:      custUpdated,
+        skipped:      orderSkipped,
+        orderAdded,
+        repeatOrders: repeatOrderCount,
+        unmapped:     unmappedProds,
       });
 
       if (unmappedProds.length > 0) {
@@ -801,7 +810,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         setShowMappingModal(true);
         showToast(`✓ นำเข้าสำเร็จ · พบสินค้า ${unmappedProds.length} รายการยังไม่มีในระบบ`, 'warning');
       } else {
-        showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded} ข้าม ${orderSkipped}`);
+        showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded}${repeatOrderCount > 0 ? ` (🔁 สั่งเพิ่ม ${repeatOrderCount})` : ''} · ข้าม ${orderSkipped}`);
       }
       loadCustomers();
     } catch (err) {
@@ -1157,7 +1166,17 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           {importResult && (
             <div className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 space-y-0.5">
               <div>👥 ลูกค้า: เพิ่ม <strong>{importResult.added}</strong> · อัพเดต <strong>{importResult.updated}</strong></div>
-              <div>📋 ออเดอร์: บันทึก <strong>{importResult.added + importResult.updated}</strong> · ข้าม {importResult.skipped} ซ้ำ</div>
+              <div>
+                📋 ออเดอร์: บันทึก <strong>{importResult.orderAdded}</strong>
+                {importResult.repeatOrders > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-bold">
+                    🔁 สั่งเพิ่ม {importResult.repeatOrders}
+                  </span>
+                )}
+                {importResult.skipped > 0 && (
+                  <span className="ml-1 text-slate-400">· ข้าม {importResult.skipped} ซ้ำ</span>
+                )}
+              </div>
               {importResult.unmapped.length > 0 && (
                 <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg text-orange-700">
                   <div className="font-semibold mb-1">⚠ สินค้ายังไม่มีในระบบ ({importResult.unmapped.length} รายการ)</div>
