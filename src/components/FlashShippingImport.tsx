@@ -288,7 +288,7 @@ export default function FlashShippingImport() {
       for (const r of data ?? []) {
         loaded[r.tracking] = {
           tracking: r.tracking,
-          date:     r.ship_date ?? '',
+          date:     r.invoice_date ?? r.ship_date ?? '',  // ใช้ invoice_date ก่อน fallback ship_date
           base:     Number(r.base_thb),
           extra:    Number(r.extra_thb),
           total:    Number(r.total_thb),
@@ -316,14 +316,15 @@ export default function FlashShippingImport() {
     setSaving(true);
     try {
       const flashRows = Object.values(map).map(r => ({
-        tracking:  r.tracking,
-        base_thb:  r.base,
-        extra_thb: r.extra,
-        total_thb: r.total,
-        order_no:  r.order_no ?? null,
-        customer:  r.customer ?? null,
-        raw_prod:  r.raw_prod ?? null,
-        matched:   r.matched,
+        tracking:     r.tracking,
+        base_thb:     r.base,
+        extra_thb:    r.extra,
+        total_thb:    r.total,
+        order_no:     r.order_no ?? null,
+        customer:     r.customer ?? null,
+        raw_prod:     r.raw_prod ?? null,
+        matched:      r.matched,
+        invoice_date: r.date || null,   // วันที่จากไฟล์ Excel (เวลาแก้ไข)
       }));
       await supabase.from('shipping_flash').upsert(flashRows, { onConflict: 'tracking' });
 
