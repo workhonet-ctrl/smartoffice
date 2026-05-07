@@ -98,18 +98,23 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     unmapped: {name:string; qty:string}[];
   } | null>(null);
 
-  // ── ออเดอร์ซ้ำ (Order No. เดิม ข้อมูลต่าง) — รอ user เลือก ──
-  type DupOrderItem = {
-    orderNo: string;
-    oldProd: string; newProd: string;
-    oldTrack: string; newTrack: string;
-    oldAmt: number; newAmt: number;
-    action: 'remove' | 'add';
-    row: any;
-  };
-  const [dupOrderItems, setDupOrderItems]     = useState<DupOrderItem[]>([]);
-  const [showDupOrderModal, setShowDupOrderModal] = useState(false);
-  const [pendingAfterDup, setPendingAfterDup] = useState<(() => Promise<void>) | null>(null);
+  // ── ยอดซื้อรวม: กรองตามวันที่ ──────────────────────────────
+  const [spentDateFrom, setSpentDateFrom] = useState('');
+  const [spentDateTo,   setSpentDateTo]   = useState('');
+  const [spentFiltered, setSpentFiltered] = useState<number | null>(null);
+  const [loadingSpent,  setLoadingSpent]  = useState(false);
+
+  // ── ประวัติตีกลับ: สำหรับแจ้งเตือนตอน import ──────────────
+  // tel → จำนวนออเดอร์ตีกลับ
+  const [returnHistory, setReturnHistory] = useState<Record<string, number>>({});
+  // ออเดอร์ที่จะ import และมีประวัติตีกลับ — รอ user เลือก
+  type ReturnAlertItem = { idx: number; tel: string; name: string; returnCount: number; action: 'proceed' | 'cancel' };
+  const [returnAlertItems, setReturnAlertItems] = useState<ReturnAlertItem[]>([]);
+  const [showReturnAlert,  setShowReturnAlert]  = useState(false);
+  const [pendingAfterReturn, setPendingAfterReturn] = useState<(() => Promise<void>) | null>(null);
+
+  // ── filter เคยตีกลับ ──────────────────────────────────────
+  const [filterReturn, setFilterReturn] = useState(false);
 
   // mapping modal state
   const [showMappingModal, setShowMappingModal] = useState(false);
@@ -143,7 +148,35 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const PAGE_SIZE = 500;
   const [pageView, setPageView] = useState<'all' | number>(0);
 
-  useEffect(() => { loadCustomers(); }, []);
+  useEffect(() => { loadCustomers(); loadReturnHistory(); }, []);
+
+  // โหลดประวัติตีกลับทั้งหมด tel → count
+  const loadReturnHistory = async () => {
+    const { data } = await supabase
+      .from('orders')
+      .select('customers(tel)')
+      .in('order_status', ['ตีกลับ', 'ส่งคืน', 'ไม่มีคนรับ']);
+    const map: Record<string, number> = {};
+    for (const o of data || []) {
+      const tel = (o.customers as any)?.tel;
+      if (tel) map[tel] = (map[tel] || 0) + 1;
+    }
+    setReturnHistory(map);
+  };
+
+  // กรองยอดซื้อตามวันที่
+  const loadSpentByDate = async () => {
+    if (!spentDateFrom && !spentDateTo) { setSpentFiltered(null); return; }
+    setLoadingSpent(true);
+    let q = supabase.from('orders').select('total_thb')
+      .not('order_status', 'in', '(ยกเลิก,รอคีย์ออเดอร์)');
+    if (spentDateFrom) q = q.gte('order_date', spentDateFrom);
+    if (spentDateTo)   q = q.lte('order_date', spentDateTo);
+    const { data } = await q;
+    const total = (data || []).reduce((s, o) => s + Number(o.total_thb), 0);
+    setSpentFiltered(total);
+    setLoadingSpent(false);
+  };
 
   // reset กลับหน้าแรกเมื่อ filter หรือ search เปลี่ยน
   useEffect(() => { if (pageView !== 'all') setPageView(0); }, [search, tagFilter, sortBy, filterMinOrders, filterChannel, searchProduct]);
@@ -614,19 +647,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // ── Step 3: โหลด orders ที่มีอยู่แล้วทั้งหมดครั้งเดียว (by order_no) ─
       const allOrderNos = [...new Set(dataRows.map(r => String(r[1]||'').trim()).filter(Boolean))];
       const existingOrderSet = new Set<string>();
-      const existingOrderMap: Record<string, { raw_prod: string; tracking_no: string; total_thb: number }> = {};
       for (let i=0; i<allOrderNos.length; i+=500) {
-        const { data } = await supabase.from('orders')
-          .select('order_no, raw_prod, tracking_no, total_thb')
-          .in('order_no', allOrderNos.slice(i,i+500));
-        (data||[]).forEach((o:any) => {
-          existingOrderSet.add(o.order_no);
-          existingOrderMap[o.order_no] = {
-            raw_prod:    o.raw_prod    || '',
-            tracking_no: o.tracking_no || '',
-            total_thb:   Number(o.total_thb || 0),
-          };
-        });
+        const { data } = await supabase.from('orders').select('order_no').in('order_no', allOrderNos.slice(i,i+500));
+        (data||[]).forEach((o:any) => existingOrderSet.add(o.order_no));
       }
 
       // ── Step 4: แยก insert vs update — deduplicate by tel ────────────
@@ -686,25 +709,25 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // ── Step 5: batch insert orders ────────────────────────────────────
       const ordersToInsert: any[] = [];
       let orderSkipped = 0;
-      let repeatOrderCount = 0;
-      const dupFound: typeof dupOrderItems = [];
+      const returnAlertBuffer: ReturnAlertItem[] = []; // เก็บออเดอร์ที่มีประวัติตีกลับ
 
       for (const row of dataRows) {
         const orderNo = String(row[1]||'').trim();
         if (!orderNo) continue;
+        if (existingOrderSet.has(orderNo)) { orderSkipped++; continue; }
 
         const tel = String(row[6]||'').trim();
         const customerId = telToId[tel];
         if (!customerId) continue;
 
-        const rawDate   = String(row[3]||'');
+        const rawDate  = String(row[3]||'');
         const orderDate = rawDate ? new Date(rawDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
         const timeMatch = rawDate.match(/(\d{1,2}):(\d{2})/);
         const orderTime = timeMatch ? `${timeMatch[1].padStart(2,'0')}:${timeMatch[2]}` : '';
 
-        const rawTrack     = String(row[17]||'');
-        const trackMatch   = rawTrack.match(/^([^\s(]+)/);
-        const trackingNo   = trackMatch ? trackMatch[1] : '';
+        const rawTrack    = String(row[17]||'');
+        const trackMatch  = rawTrack.match(/^([^\s(]+)/);
+        const trackingNo  = trackMatch ? trackMatch[1] : '';
         const courierMatch = rawTrack.match(/\(([^)]+)\)/);
         let courier = '';
         if (courierMatch) {
@@ -714,46 +737,24 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           else courier=courierMatch[1];
         }
 
-        const rawProds   = String(row[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
-        const promoIds   = rawProds.map(rp=>finalPromoMap[rp]||'').filter(Boolean);
+        const rawProds = String(row[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
+        const promoIds = rawProds.map(rp=>finalPromoMap[rp]||'').filter(Boolean);
         const quantities = String(row[15]||'1');
         const weightKg   = (Number(row[16])||0)/1000;
         const postal     = String(row[11]||'').trim();
         const hasTrack   = trackingNo.length>3;
         const isTourist  = TOURIST_ZIPS.has(postal);
-        const route      = hasTrack
+        // route ตาม courier จริง
+        // B = Flash, A = ไปรษณีย์มี tracking, C = ไปรษณีย์นักท่องเที่ยว, ไม่มี tracking = B
+        const route = hasTrack
           ? (courier === 'ไปรษณีย์' ? (isTourist ? 'C' : 'A') : 'B')
           : (isTourist ? 'C' : 'B');
-        const newAmt     = Number(row[21])||0;
-        const newProd    = String(row[14]||'').trim();
 
-        // ── ออเดอร์ซ้ำ: Order No. มีอยู่แล้ว ──
-        if (existingOrderSet.has(orderNo)) {
-          const existing = existingOrderMap[orderNo];
-          const prodChanged  = existing.raw_prod    !== newProd;
-          const trackChanged = existing.tracking_no !== (hasTrack ? trackingNo : '');
-          const amtChanged   = existing.total_thb   !== newAmt;
-
-          if (prodChanged || trackChanged || amtChanged) {
-            // ต่างกัน → เก็บไว้ให้ user เลือก
-            dupFound.push({
-              orderNo,
-              oldProd:  existing.raw_prod,    newProd,
-              oldTrack: existing.tracking_no, newTrack: hasTrack ? trackingNo : '',
-              oldAmt:   existing.total_thb,   newAmt,
-              action:   'add', // default = สั่งเพิ่ม
-              row,
-            });
-          } else {
-            // เหมือนเดิมทุกอย่าง → skip
-            orderSkipped++;
-          }
-          continue;
-        }
-
-        // ── ออเดอร์ใหม่ ──
+        const newProd = String(row[14]||'').trim();
         const isRepeat = !!existingCustMap[tel];
-        if (isRepeat) repeatOrderCount++;
+
+        // ── ตรวจประวัติตีกลับ ──────────────────────────────────
+        const hasReturn = (returnHistory[tel] ?? 0) > 0;
 
         ordersToInsert.push({
           order_no: orderNo, customer_id: customerId,
@@ -765,7 +766,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           quantities, weight_kg: weightKg,
           tracking_no: hasTrack?trackingNo:null,
           courier: courier||null,
-          total_thb: newAmt,
+          total_thb: Number(row[21])||0,
           payment_method: String(row[22]||'COD').trim(),
           payment_status: String(row[24]||'รอชำระเงิน').trim(),
           order_status: hasTrack?'รอแพ็ค':'รอคีย์ออเดอร์',
@@ -773,89 +774,39 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           imported_at: new Date().toISOString().split('T')[0],
           note: isRepeat ? '🔁 สั่งเพิ่ม' : null,
         });
+
+        // เก็บไว้แจ้งเตือนภายหลัง (ไม่ block loop)
+        if (hasReturn) {
+          returnAlertBuffer.push({
+            idx: ordersToInsert.length - 1,
+            tel, name: String(row[4]||'').trim(),
+            returnCount: returnHistory[tel],
+            action: 'proceed' as const,
+          });
+        }
       }
 
-      // ── ถ้ามีออเดอร์ซ้ำ → หยุดก่อน แสดง modal ให้ user เลือก ──
-      if (dupFound.length > 0) {
-        setDupOrderItems(dupFound);
-        setShowDupOrderModal(true);
-        // เก็บ fn ที่จะรันหลัง user ตัดสินใจ
-        setPendingAfterDup(() => async () => {
-          // insert ออเดอร์ปกติที่รวบรวมไว้ + ออเดอร์ "สั่งเพิ่ม" จาก dupFound
-          const extraOrders: any[] = [];
-          for (const d of dupFound) {
-            if (d.action !== 'add') continue;
-            // suffix -1, -2, ... กันซ้ำ
-            let suffix = 1;
-            let newOrderNo = `${d.orderNo}-${suffix}`;
-            while (existingOrderSet.has(newOrderNo)) { suffix++; newOrderNo = `${d.orderNo}-${suffix}`; }
-
-            const row = d.row;
-            const rawDate2   = String(row[3]||'');
-            const orderDate2 = rawDate2 ? new Date(rawDate2).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-            const timeMatch2 = rawDate2.match(/(\d{1,2}):(\d{2})/);
-            const orderTime2 = timeMatch2 ? `${timeMatch2[1].padStart(2,'0')}:${timeMatch2[2]}` : '';
-            const rawTrack2    = String(row[17]||'');
-            const trackMatch2  = rawTrack2.match(/^([^\s(]+)/);
-            const trackingNo2  = trackMatch2 ? trackMatch2[1] : '';
-            const courierMatch2 = rawTrack2.match(/\(([^)]+)\)/);
-            let courier2 = '';
-            if (courierMatch2) {
-              const cv = courierMatch2[1].toUpperCase();
-              if (cv.includes('THAI_POST')||cv.includes('EMS')) courier2='ไปรษณีย์';
-              else if (cv.includes('FLASH')) courier2='FLASH';
-              else courier2=courierMatch2[1];
-            }
-            const rawProds2  = String(row[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
-            const promoIds2  = rawProds2.map(rp=>finalPromoMap[rp]||'').filter(Boolean);
-            const quantities2 = String(row[15]||'1');
-            const weightKg2   = (Number(row[16])||0)/1000;
-            const postal2     = String(row[11]||'').trim();
-            const hasTrack2   = trackingNo2.length>3;
-            const isTourist2  = TOURIST_ZIPS.has(postal2);
-            const route2      = hasTrack2
-              ? (courier2 === 'ไปรษณีย์' ? (isTourist2?'C':'A') : 'B')
-              : (isTourist2?'C':'B');
-            const tel2       = String(row[6]||'').trim();
-            const customerId2 = telToId[tel2];
-            if (!customerId2) continue;
-
-            extraOrders.push({
-              order_no: newOrderNo, customer_id: customerId2,
-              channel: String(row[2]||'').trim()||null,
-              order_date: orderDate2, order_time: orderTime2||null,
-              raw_prod: String(row[14]||'').trim()||null,
-              promo_ids: promoIds2,
-              quantity: quantities2.split('|').reduce((s:number,n:string)=>s+(Number(n.trim())||1),0),
-              quantities: quantities2, weight_kg: weightKg2,
-              tracking_no: hasTrack2?trackingNo2:null,
-              courier: courier2||null,
-              total_thb: Number(row[21])||0,
-              payment_method: String(row[22]||'COD').trim(),
-              payment_status: String(row[24]||'รอชำระเงิน').trim(),
-              order_status: hasTrack2?'รอแพ็ค':'รอคีย์ออเดอร์',
-              route: route2,
-              imported_at: new Date().toISOString().split('T')[0],
-              note: '🔁 สั่งเพิ่ม',
-            });
-          }
-          const allToInsert = [...ordersToInsert, ...extraOrders];
+      // ── ถ้ามีประวัติตีกลับ → หยุดก่อน แสดง modal ────────────────────
+      if (returnAlertBuffer.length > 0) {
+        setReturnAlertItems(returnAlertBuffer);
+        setShowReturnAlert(true);
+        setPendingAfterReturn(() => async () => {
+          // กรองออเดอร์ที่ user เลือก cancel ออก
+          const cancelledIdxs = new Set(returnAlertBuffer.filter(r => r.action === 'cancel').map(r => r.idx));
+          const finalOrders = ordersToInsert.filter((_, idx) => !cancelledIdxs.has(idx));
           let orderAdded2 = 0;
-          for (let i=0; i<allToInsert.length; i+=500) {
-            const { error } = await supabase.from('orders').insert(allToInsert.slice(i,i+500));
-            if (!error) orderAdded2 += Math.min(500, allToInsert.length-i);
+          for (let i = 0; i < finalOrders.length; i += 500) {
+            const { error } = await supabase.from('orders').insert(finalOrders.slice(i, i + 500));
+            if (!error) orderAdded2 += Math.min(500, finalOrders.length - i);
           }
-          const addedDup = dupFound.filter(d=>d.action==='add').length;
-          const removedDup = dupFound.filter(d=>d.action==='remove').length;
-          setImportResult({ added: custAdded, updated: custUpdated, skipped: orderSkipped + removedDup, unmapped: unmappedProds });
-          showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded2}${addedDup>0?` (🔁 สั่งเพิ่ม ${addedDup})`:''}${removedDup>0?` · ข้าม ${orderSkipped+removedDup}`:orderSkipped>0?` · ข้าม ${orderSkipped}`:''}`);
-          loadCustomers();
-          setShowDupOrderModal(false);
-          setImporting(false);
+          setImportResult({ added: custAdded, updated: custUpdated, skipped: orderSkipped, unmapped: unmappedProds });
+          showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded2} · ข้าม ${orderSkipped}`);
+          loadCustomers(); loadReturnHistory();
+          setShowReturnAlert(false); setImporting(false);
           if (e?.target) e.target.value = '';
         });
         setImporting(false);
-        return; // หยุดรอ user ตัดสินใจ
+        return;
       }
 
       // batch insert orders (500 ต่อครั้ง)
@@ -1243,7 +1194,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       || (c.facebook_name || '').toLowerCase().includes(search.toLowerCase())
       || c.tel.includes(search)
       || (c.province || '').includes(search);
-    return matchTag && matchOrders && matchChannel && matchProduct && matchSearch;
+    const matchReturn  = !filterReturn || (returnHistory[c.tel] ?? 0) > 0;
+    return matchTag && matchOrders && matchChannel && matchProduct && matchSearch && matchReturn;
   });
 
   // unique channels สำหรับ dropdown
@@ -1367,9 +1319,27 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
               <div className="text-xs text-purple-500">3–9 ออเดอร์</div>
             </div>
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-              <div className="text-xs font-semibold text-emerald-600 mb-1">ยอดซื้อรวม</div>
-              <div className="text-lg font-bold text-emerald-700">฿{fmt(totalSpent)}</div>
-              <div className="text-xs text-emerald-500">ทุกลูกค้า</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-xs font-semibold text-emerald-600">ยอดซื้อรวม</div>
+                {(spentDateFrom || spentDateTo) && (
+                  <button onClick={() => { setSpentDateFrom(''); setSpentDateTo(''); setSpentFiltered(null); }}
+                    className="text-emerald-400 hover:text-red-400 text-xs">✕</button>
+                )}
+              </div>
+              <div className="text-lg font-bold text-emerald-700">
+                {loadingSpent ? '...' : `฿${fmt(spentFiltered ?? totalSpent)}`}
+              </div>
+              <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                <input type="date" value={spentDateFrom} onChange={e => setSpentDateFrom(e.target.value)}
+                  className="border rounded px-1.5 py-0.5 text-[10px] text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-300 w-[100px]"/>
+                <span className="text-slate-300 text-[10px]">—</span>
+                <input type="date" value={spentDateTo} onChange={e => setSpentDateTo(e.target.value)}
+                  className="border rounded px-1.5 py-0.5 text-[10px] text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-300 w-[100px]"/>
+                <button onClick={loadSpentByDate} disabled={loadingSpent}
+                  className="px-2 py-0.5 bg-emerald-500 text-white rounded text-[10px] hover:bg-emerald-600 disabled:opacity-50">
+                  ดู
+                </button>
+              </div>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
               <div className="text-xs font-semibold text-blue-600 mb-1">เพจยอดนิยม</div>
@@ -1426,9 +1396,15 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           <option value="order_count">เรียงตามจำนวนครั้ง</option>
           <option value="updated_at">เรียงตามล่าสุด</option>
         </select>
+        {/* Filter ตีกลับ */}
+        <button onClick={() => setFilterReturn(f => !f)}
+          className={`px-3 py-2 rounded-lg text-sm border transition flex items-center gap-1.5 ${filterReturn ? 'bg-red-50 border-red-300 text-red-600 font-medium' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+          🔄 เคยตีกลับ
+          {filterReturn && <span className="text-xs">({filtered.length})</span>}
+        </button>
         {/* ล้าง filter */}
-        {(filterMinOrders > 0 || filterChannel || searchProduct) && (
-          <button onClick={() => { setFilterMinOrders(0); setFilterChannel(''); setSearchProduct(''); }}
+        {(filterMinOrders > 0 || filterChannel || searchProduct || filterReturn) && (
+          <button onClick={() => { setFilterMinOrders(0); setFilterChannel(''); setSearchProduct(''); setFilterReturn(false); }}
             className="text-xs text-slate-400 hover:text-red-500 px-2 py-1 rounded border hover:border-red-300 transition">
             ✕ ล้างตัวกรอง
           </button>
@@ -1493,9 +1469,14 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         {filtered.map(c => {
           const tagColor = TAG_COLORS[c.tag||'ใหม่'] || 'bg-slate-100 text-slate-600';
           const isSelected = selectedIds.has(c.id);
+          const hasReturnHist = (returnHistory[c.tel] ?? 0) > 0;
+          const isExpanded = expanded === c.id;
           return (
             <div key={c.id}
-              className={`bg-white rounded-xl border shadow-sm p-3 transition ${isSelected ? 'border-cyan-400 bg-cyan-50/30' : 'border-slate-200'}`}>
+              className={`bg-white rounded-xl border shadow-sm p-3 transition ${
+                isSelected ? 'border-cyan-400 bg-cyan-50/30' :
+                hasReturnHist ? 'border-red-200 bg-red-50/30' : 'border-slate-200'
+              }`}>
               <div className="flex items-start gap-2">
                 <input type="checkbox"
                   checked={isSelected}
@@ -1515,6 +1496,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                       {c.facebook_name && c.facebook_name !== c.name && (
                         <div className="text-xs text-blue-600 truncate">{c.facebook_name}</div>
                       )}
+                      {hasReturnHist && (
+                        <div className="text-[10px] text-red-600 font-bold mt-0.5">🔄 มีประวัติตีกลับ {returnHistory[c.tel]} ครั้ง</div>
+                      )}
                     </div>
                     <button onClick={() => setEditTag({id:c.id, tag:c.tag||'ใหม่'})}
                       className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold ${tagColor}`}>
@@ -1526,8 +1510,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                     <span className="font-mono">{c.tel}</span>
                     {c.province && <span>· {c.province}</span>}
                   </div>
-                  {/* Row 3: stats */}
-                  <div className="flex items-center gap-3 text-xs">
+                  {/* Row 3: stats + ออเดอร์ (แสดงเสมอ คลิกขยาย/ย่อ) */}
+                  <div className="flex items-center gap-3 text-xs mb-2">
                     <div className="flex items-center gap-1">
                       <span className="text-slate-400">ออเดอร์</span>
                       <span className={`px-2 py-0.5 rounded-full font-bold ${
@@ -1537,21 +1521,44 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                         'bg-slate-100 text-slate-400'
                       }`}>{c.order_count}</span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-slate-400">·</span>
-                      <span className="font-bold text-emerald-600">฿{fmt2(Number(c.total_spent))}</span>
-                    </div>
+                    <span className="text-slate-400">·</span>
+                    <span className="font-bold text-emerald-600">฿{fmt2(Number(c.total_spent))}</span>
                     {c.channel && (
                       <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded truncate max-w-[80px]">
                         {c.channel}
                       </span>
                     )}
                   </div>
-                  {/* Action: ดูออเดอร์ */}
-                  <button onClick={() => setExpanded(expanded === c.id ? null : c.id)}
-                    className="mt-2 w-full text-xs py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition flex items-center justify-center gap-1">
-                    {expanded === c.id ? '▲ ซ่อนออเดอร์' : `▼ ดูออเดอร์ (${c.order_count})`}
-                  </button>
+                  {/* ออเดอร์ — แสดงเสมอถ้าค้นหา, toggle ด้วย button */}
+                  {c.order_count > 0 && (
+                    <button onClick={() => toggleExpand(c.id)}
+                      className="w-full text-xs py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition flex items-center justify-center gap-1">
+                      {isExpanded ? '▲ ซ่อนออเดอร์' : `▼ ดูออเดอร์ (${c.order_count})`}
+                    </button>
+                  )}
+                  {/* Expanded orders */}
+                  {isExpanded && custOrders.length > 0 && (
+                    <div className="mt-2 space-y-1.5">
+                      {custOrders.map(o => (
+                        <div key={o.id} className="bg-slate-50 rounded-lg p-2 text-xs">
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="font-mono text-blue-600 text-[10px]">{o.order_no}</span>
+                            <span className="text-slate-400">{o.order_date}</span>
+                          </div>
+                          <div className="text-slate-600 truncate">{o.raw_prod || '-'}</div>
+                          <div className="flex items-center justify-between mt-1">
+                            <span className="font-bold text-emerald-600">฿{fmt2(Number(o.total_thb))}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              o.order_status === 'ตีกลับ' ? 'bg-red-100 text-red-700' :
+                              o.order_status === 'ส่งสินค้าแล้ว' ? 'bg-green-100 text-green-700' :
+                              'bg-slate-100 text-slate-600'}`}>
+                              {o.order_status}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1599,7 +1606,11 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
             {pagedCustomers.map(c => (
               <>
                 <tr key={c.id} onClick={() => toggleExpand(c.id)}
-                  className={`border-b cursor-pointer hover:bg-cyan-50 transition ${expanded===c.id?'bg-cyan-50':''}`}>
+                  className={`border-b cursor-pointer transition ${
+                    expanded===c.id ? 'bg-cyan-50' :
+                    (returnHistory[c.tel] ?? 0) > 0 ? 'bg-red-50 hover:bg-red-100' :
+                    'hover:bg-cyan-50'
+                  }`}>
                   <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
                     <input type="checkbox"
                       checked={selectedIds.has(c.id)}
@@ -1615,8 +1626,14 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                     {expanded===c.id ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
                   </td>
                   <td className="p-3 whitespace-nowrap" style={{minWidth:'140px'}}>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-slate-800">{c.name}</span>
+                      {(returnHistory[c.tel] ?? 0) > 0 && (
+                        <span className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-bold whitespace-nowrap"
+                          title={`มีประวัติตีกลับ ${returnHistory[c.tel]} ครั้ง`}>
+                          🔄 ตีกลับ {returnHistory[c.tel]}
+                        </span>
+                      )}
                       {problemOnly && problemOrderCount[c.id] > 0 && (
                         <span className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-bold whitespace-nowrap"
                           title={`มีออเดอร์สถานะปัญหา ${problemOrderCount[c.id]} รายการ`}>
@@ -3123,74 +3140,58 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         document.body
       )}
 
-      {/* ── Modal: ออเดอร์ซ้ำ ให้เลือก ลบ หรือ สั่งเพิ่ม ── */}
-      {showDupOrderModal && dupOrderItems.length > 0 && (
+      {/* ── Modal: แจ้งเตือนประวัติตีกลับ ── */}
+      {showReturnAlert && returnAlertItems.length > 0 && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-[90] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
             <div className="shrink-0 px-6 py-4 border-b border-slate-100">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center text-xl">⚠️</div>
+                <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center text-xl">🔄</div>
                 <div>
-                  <h3 className="font-bold text-slate-800">พบออเดอร์ซ้ำ {dupOrderItems.length} รายการ</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Order No. เดิม แต่ข้อมูลเปลี่ยนแปลง — เลือกว่าจะทำอะไรกับแต่ละรายการ</p>
+                  <h3 className="font-bold text-slate-800">พบประวัติตีกลับ {returnAlertItems.length} รายการ</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">ลูกค้าเหล่านี้เคยมีพัสดุตีกลับในระบบ — เลือกว่าจะดำเนินการต่อหรือยกเลิก</p>
                 </div>
               </div>
             </div>
-
             <div className="flex-1 overflow-auto px-6 py-4 space-y-3">
-              {dupOrderItems.map((d, i) => (
-                <div key={i} className={`rounded-xl border p-4 transition ${d.action === 'remove' ? 'border-slate-200 bg-slate-50 opacity-60' : 'border-blue-200 bg-blue-50'}`}>
-                  <div className="flex items-start justify-between gap-3 mb-3">
+              {returnAlertItems.map((item, i) => (
+                <div key={i} className={`rounded-xl border p-4 transition ${item.action === 'cancel' ? 'border-slate-200 bg-slate-50 opacity-60' : 'border-red-200 bg-red-50'}`}>
+                  <div className="flex items-center justify-between gap-3">
                     <div>
-                      <span className="font-mono text-sm font-bold text-slate-700">{d.orderNo}</span>
-                      {d.action === 'add' && (
-                        <span className="ml-2 text-xs text-blue-600 font-medium">→ จะบันทึกเป็น {d.orderNo}-1</span>
-                      )}
+                      <div className="font-semibold text-slate-800">{item.name}</div>
+                      <div className="font-mono text-xs text-slate-500">{item.tel}</div>
+                      <div className="text-xs text-red-600 font-medium mt-1">
+                        🔄 มีประวัติตีกลับ {item.returnCount} ครั้ง
+                      </div>
                     </div>
                     <div className="flex gap-2 shrink-0">
                       <button
-                        onClick={() => setDupOrderItems(prev => prev.map((x,j) => j===i ? {...x, action:'remove'} : x))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${d.action==='remove' ? 'bg-slate-500 text-white' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-100'}`}>
-                        ลบออก
+                        onClick={() => setReturnAlertItems(prev => prev.map((x,j) => j===i ? {...x, action:'cancel'} : x))}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${item.action==='cancel' ? 'bg-slate-500 text-white' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-100'}`}>
+                        ยกเลิก
                       </button>
                       <button
-                        onClick={() => setDupOrderItems(prev => prev.map((x,j) => j===i ? {...x, action:'add'} : x))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${d.action==='add' ? 'bg-blue-500 text-white' : 'bg-white border border-blue-300 text-blue-600 hover:bg-blue-50'}`}>
-                        🔁 สั่งเพิ่ม
+                        onClick={() => setReturnAlertItems(prev => prev.map((x,j) => j===i ? {...x, action:'proceed'} : x))}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${item.action==='proceed' ? 'bg-emerald-500 text-white' : 'bg-white border border-emerald-300 text-emerald-600 hover:bg-emerald-50'}`}>
+                        ✓ ส่งต่อ
                       </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="bg-white rounded-lg p-3 border border-slate-200">
-                      <div className="text-slate-400 font-medium mb-1.5">ข้อมูลเดิมในระบบ</div>
-                      <div className="text-slate-600 mb-1 line-clamp-2">{d.oldProd || '-'}</div>
-                      {d.oldTrack && <div className="font-mono text-slate-500">{d.oldTrack}</div>}
-                      <div className="text-slate-500 mt-1">฿{d.oldAmt.toLocaleString()}</div>
-                    </div>
-                    <div className="bg-white rounded-lg p-3 border border-blue-200">
-                      <div className="text-blue-500 font-medium mb-1.5">ข้อมูลใหม่จาก Excel</div>
-                      <div className={`mb-1 line-clamp-2 ${d.newProd !== d.oldProd ? 'text-blue-700 font-bold' : 'text-slate-600'}`}>{d.newProd || '-'}</div>
-                      {d.newTrack && <div className={`font-mono ${d.newTrack !== d.oldTrack ? 'text-blue-700 font-bold' : 'text-slate-500'}`}>{d.newTrack}</div>}
-                      <div className={`mt-1 ${d.newAmt !== d.oldAmt ? 'text-blue-700 font-bold' : 'text-slate-500'}`}>฿{d.newAmt.toLocaleString()}</div>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
-
             <div className="shrink-0 px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
               <div className="text-xs text-slate-400">
-                สั่งเพิ่ม {dupOrderItems.filter(d=>d.action==='add').length} · ลบออก {dupOrderItems.filter(d=>d.action==='remove').length}
+                ส่งต่อ {returnAlertItems.filter(r=>r.action==='proceed').length} · ยกเลิก {returnAlertItems.filter(r=>r.action==='cancel').length}
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={() => { setShowDupOrderModal(false); setImporting(false); }}
+                  onClick={() => { setShowReturnAlert(false); setImporting(false); }}
                   className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-300">
                   ยกเลิกทั้งหมด
                 </button>
                 <button
-                  onClick={() => { if (pendingAfterDup) pendingAfterDup(); }}
+                  onClick={() => { if (pendingAfterReturn) pendingAfterReturn(); }}
                   className="px-6 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600">
                   ✓ ยืนยัน
                 </button>
