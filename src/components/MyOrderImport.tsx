@@ -58,17 +58,25 @@ function parseNum(val: unknown): number {
 /**
  * MYORDER format:
  *   Sheet "Total Charge Detail"
- *   Row 0  = header (ไม่ต้อง skip)
+ *   Row 0  = header (skip)
  *   Row 1+ = data
  *
- *   col[5]  F = Tracking No.
+ *   col[0]  A = Email
+ *   col[1]  B = Tel
+ *   col[2]  C = Team Name
+ *   col[3]  D = Team Percent COD Fee
  *   col[4]  E = Page (ชื่อเพจ)
+ *   col[5]  F = Tracking No.
  *   col[6]  G = Consignee
- *   col[10] K = Weight (kg)
- *   col[12] M = COD Amount
- *   col[13] N = Total COD Fee
- *   col[15] P = Freight  ← ค่าขนส่งหลัก
- *   col[16] Q = Total Charge
+ *   col[7]  H = Phone number
+ *   col[8]  I = Address
+ *   col[9]  J = Weight (kg)       ← แก้จาก [10]
+ *   col[10] K = COD Amount        ← แก้จาก [12]
+ *   col[11] L = Total COD Fee 2%  ← แก้จาก [13]
+ *   col[12] M = COD VAT 7%
+ *   col[13] N = พื้นที่พิเศษ
+ *   col[14] O = Freight           ← แก้จาก [15]
+ *   col[15] P = Total Charge      ← แก้จาก [16]
  */
 function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
   const wb    = XLSX.read(buffer, { type: 'array' });
@@ -89,19 +97,19 @@ function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
         tracking,
         page:      String(r[4]  ?? '').trim(),
         consignee: String(r[6]  ?? '').trim(),
-        weight:    parseNum(r[10]),
-        cod:       parseNum(r[12]),
-        cod_fee:   parseNum(r[13]),
-        freight:   parseNum(r[15]),
-        total:     parseNum(r[16]),
+        weight:    parseNum(r[9]),   // col J
+        cod:       parseNum(r[10]),  // col K
+        cod_fee:   parseNum(r[12]),  // col M = COD VAT 7% (ที่แสดงในระบบ = ฿8.50)
+        freight:   parseNum(r[14]),  // col O
+        total:     parseNum(r[15]),  // col P
         matched:   false,
       };
     } else {
-      // กรณีมี tracking ซ้ำ (พิเศษ) — บวกรวม
-      trackingMap[tracking].freight += parseNum(r[15]);
-      trackingMap[tracking].total   += parseNum(r[16]);
-      trackingMap[tracking].cod     += parseNum(r[12]);
-      trackingMap[tracking].cod_fee += parseNum(r[13]);
+      // กรณีมี tracking ซ้ำ — บวกรวม
+      trackingMap[tracking].freight += parseNum(r[14]);
+      trackingMap[tracking].total   += parseNum(r[15]);
+      trackingMap[tracking].cod     += parseNum(r[10]);
+      trackingMap[tracking].cod_fee += parseNum(r[12]);
     }
   }
 
@@ -453,9 +461,9 @@ export default function MyOrderImport() {
             <div className="text-xs text-blue-500">{rows.filter(r => r.cod > 0).length} รายการ</div>
           </div>
           <div className="bg-orange-50 border border-orange-200 rounded-xl p-3">
-            <div className="text-xs text-orange-700 font-semibold mb-1">➕ ค่า COD Fee</div>
+            <div className="text-xs text-orange-700 font-semibold mb-1">➕ ค่า COD Fee VAT 7%</div>
             <div className="text-lg font-bold text-orange-800">฿{fmt(totalCodFee)}</div>
-            <div className="text-xs text-orange-500">รวม VAT 7%</div>
+            <div className="text-xs text-orange-500">รวมใน Total Charge</div>
           </div>
           <div className="bg-red-50 border border-red-200 rounded-xl p-3">
             <div className="text-xs text-red-700 font-semibold mb-1">🧾 Total Charge</div>
