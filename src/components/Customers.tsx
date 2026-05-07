@@ -116,6 +116,31 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   // ── filter เคยตีกลับ ──────────────────────────────────────
   const [filterReturn, setFilterReturn] = useState(false);
 
+  // ── กรองตามวันที่สั่งซื้อ ──────────────────────────────────
+  const [orderDateFrom, setOrderDateFrom] = useState('');
+  const [orderDateTo,   setOrderDateTo]   = useState('');
+  const [dateFilteredIds, setDateFilteredIds] = useState<Set<string> | null>(null);
+  const [loadingDateFilter, setLoadingDateFilter] = useState(false);
+
+  const applyDateFilter = async () => {
+    if (!orderDateFrom && !orderDateTo) { setDateFilteredIds(null); return; }
+    setLoadingDateFilter(true);
+    let q = supabase.from('orders').select('customer_id')
+      .not('customer_id', 'is', null);
+    if (orderDateFrom) q = q.gte('order_date', orderDateFrom);
+    if (orderDateTo)   q = q.lte('order_date', orderDateTo);
+    const { data } = await q;
+    const ids = new Set((data || []).map((o: any) => o.customer_id as string));
+    setDateFilteredIds(ids);
+    setLoadingDateFilter(false);
+    setPageView(0);
+  };
+
+  const clearDateFilter = () => {
+    setOrderDateFrom(''); setOrderDateTo('');
+    setDateFilteredIds(null);
+  };
+
   // mapping modal state
   const [showMappingModal, setShowMappingModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
@@ -179,7 +204,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   };
 
   // reset กลับหน้าแรกเมื่อ filter หรือ search เปลี่ยน
-  useEffect(() => { if (pageView !== 'all') setPageView(0); }, [search, tagFilter, sortBy, filterMinOrders, filterChannel, searchProduct]);
+  useEffect(() => { if (pageView !== 'all') setPageView(0); }, [search, tagFilter, sortBy, filterMinOrders, filterChannel, searchProduct, filterReturn, dateFilteredIds]);
 
   // ── ค้นหาสินค้า: query orders แล้ว collect customer_id ──
   useEffect(() => {
@@ -1197,7 +1222,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       || c.tel.includes(search)
       || (c.province || '').includes(search);
     const matchReturn  = !filterReturn || (returnHistory[c.tel] ?? 0) > 0;
-    return matchTag && matchOrders && matchChannel && matchProduct && matchSearch && matchReturn;
+    const matchDate    = !dateFilteredIds || dateFilteredIds.has(c.id);
+    return matchTag && matchOrders && matchChannel && matchProduct && matchSearch && matchReturn && matchDate;
   });
 
   // unique channels สำหรับ dropdown
@@ -1398,6 +1424,26 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           <option value="order_count">เรียงตามจำนวนครั้ง</option>
           <option value="updated_at">เรียงตามล่าสุด</option>
         </select>
+        {/* Filter วันที่สั่งซื้อ */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-slate-400 whitespace-nowrap">📅 สั่งซื้อ</span>
+          <input type="date" value={orderDateFrom} onChange={e => setOrderDateFrom(e.target.value)}
+            className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 w-[120px]"/>
+          <span className="text-slate-300 text-xs">—</span>
+          <input type="date" value={orderDateTo} onChange={e => setOrderDateTo(e.target.value)}
+            className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 w-[120px]"/>
+          <button onClick={applyDateFilter} disabled={loadingDateFilter || (!orderDateFrom && !orderDateTo)}
+            className="px-3 py-1.5 bg-cyan-500 text-white rounded-lg text-xs hover:bg-cyan-600 disabled:opacity-40 whitespace-nowrap">
+            {loadingDateFilter ? '...' : 'กรอง'}
+          </button>
+          {dateFilteredIds && (
+            <button onClick={clearDateFilter}
+              className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50">
+              <X size={13}/>
+            </button>
+          )}
+        </div>
+
         {/* Filter ตีกลับ */}
         <button onClick={() => setFilterReturn(f => !f)}
           className={`px-3 py-2 rounded-lg text-sm border transition flex items-center gap-1.5 ${filterReturn ? 'bg-red-50 border-red-300 text-red-600 font-medium' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
@@ -1405,13 +1451,18 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           {filterReturn && <span className="text-xs">({filtered.length})</span>}
         </button>
         {/* ล้าง filter */}
-        {(filterMinOrders > 0 || filterChannel || searchProduct || filterReturn) && (
-          <button onClick={() => { setFilterMinOrders(0); setFilterChannel(''); setSearchProduct(''); setFilterReturn(false); }}
+        {(filterMinOrders > 0 || filterChannel || searchProduct || filterReturn || dateFilteredIds) && (
+          <button onClick={() => { setFilterMinOrders(0); setFilterChannel(''); setSearchProduct(''); setFilterReturn(false); clearDateFilter(); }}
             className="text-xs text-slate-400 hover:text-red-500 px-2 py-1 rounded border hover:border-red-300 transition">
             ✕ ล้างตัวกรอง
           </button>
         )}
         <span className="text-xs text-slate-400">{filtered.length} คน</span>
+        {dateFilteredIds && (
+          <span className="text-xs bg-cyan-50 text-cyan-600 border border-cyan-200 px-2 py-0.5 rounded-lg">
+            📅 {orderDateFrom || '...'} — {orderDateTo || '...'} · {filtered.length} คน
+          </span>
+        )}
         {/* Pagination buttons */}
         <div className="flex items-center gap-1 ml-2">
           {Array.from({ length: totalPages }, (_, i) => (
