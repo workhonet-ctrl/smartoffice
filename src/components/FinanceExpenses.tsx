@@ -20,6 +20,11 @@ const fmtDate = (d:string) => new Date(d).toLocaleDateString('th-TH');
 
 export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: SubTab } = {}) {
   const [subTab, setSubTab] = useState<SubTab>(initialSubTab ?? 'records');
+
+  // sync เมื่อ prop เปลี่ยน (Sidebar กด tab ใหม่)
+  useEffect(() => {
+    if (initialSubTab) setSubTab(initialSubTab);
+  }, [initialSubTab]);
   const [records, setRecords] = useState<ExpRecord[]>([]);
   const [pos, setPOs]         = useState<PO[]>([]);
   const [adsData, setAdsData]           = useState<{date:string; total:number}[]>([]);
