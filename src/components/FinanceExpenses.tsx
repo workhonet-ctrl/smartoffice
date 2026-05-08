@@ -22,6 +22,8 @@ export default function FinanceExpenses() {
   const [subTab, setSubTab]   = useState<SubTab>('records');
   const [records, setRecords] = useState<ExpRecord[]>([]);
   const [pos, setPOs]         = useState<PO[]>([]);
+  const [adsData, setAdsData]           = useState<{date:string; total:number}[]>([]);
+  const [shippingData, setShippingData] = useState<{date:string; total:number}[]>([]);
   const [search, setSearch]   = useState('');
   const [catFilter, setCatFilter] = useState('ทั้งหมด');
   const [dateFrom, setDateFrom] = useState(() => { const d=new Date(); d.setDate(1); return d.toISOString().split('T')[0]; });
@@ -35,7 +37,7 @@ export default function FinanceExpenses() {
   const [toast, setToast]     = useState<string|null>(null);
   const showToast = (msg:string) => { setToast(msg); setTimeout(()=>setToast(null),4000); };
 
-  useEffect(() => { loadRecords(); loadPOs(); }, [dateFrom, dateTo]);
+  useEffect(() => { loadRecords(); loadPOs(); loadAdsData(); loadShippingData(); }, [dateFrom, dateTo]);
 
   const loadRecords = async () => {
     setLoading(true);
@@ -51,6 +53,36 @@ export default function FinanceExpenses() {
       .gte('po_date', dateFrom).lte('po_date', dateTo)
       .order('po_date', { ascending:false });
     if (data) setPOs(data);
+  };
+
+  // ค่าโฆษณา — สรุปรายวัน จาก finance_expense category=ค่าโฆษณา
+  const loadAdsData = async () => {
+    const { data } = await supabase.from('finance_expense')
+      .select('expense_date, amount_thb')
+      .eq('category', 'ค่าโฆษณา')
+      .gte('expense_date', dateFrom).lte('expense_date', dateTo);
+    const byDay: Record<string, number> = {};
+    for (const r of data || []) {
+      byDay[r.expense_date] = (byDay[r.expense_date] || 0) + Number(r.amount_thb);
+    }
+    setAdsData(Object.entries(byDay).sort((a,b) => b[0].localeCompare(a[0])).map(([date,total]) => ({date,total})));
+  };
+
+  // ค่าขนส่ง — สรุปรายวัน จาก shipping_flash + shipping_myorder
+  const loadShippingData = async () => {
+    const [{ data: flash }, { data: myorder }] = await Promise.all([
+      supabase.from('shipping_flash').select('invoice_date, total_thb')
+        .gte('invoice_date', dateFrom).lte('invoice_date', dateTo),
+      supabase.from('shipping_myorder').select('invoice_date, total_thb')
+        .gte('invoice_date', dateFrom).lte('invoice_date', dateTo),
+    ]);
+    const byDay: Record<string, number> = {};
+    for (const r of [...(flash||[]), ...(myorder||[])]) {
+      if (!r.invoice_date) continue;
+      const d = String(r.invoice_date).split('T')[0];
+      byDay[d] = (byDay[d] || 0) + Number(r.total_thb);
+    }
+    setShippingData(Object.entries(byDay).sort((a,b) => b[0].localeCompare(a[0])).map(([date,total]) => ({date,total})));
   };
 
   const handleAdd = async () => {
@@ -357,94 +389,156 @@ export default function FinanceExpenses() {
         <ShippingPage />
       </div>
 
-      {/* ── Tab: ทั้งหมด — รวม records + PO ── */}
+      {/* ── Tab: ทั้งหมด — รวมทุก source ── */}
       {subTab === 'all' && (() => {
         const q = search.toLowerCase();
-        // รวม expense_records
         const expRows = records.filter(r =>
           !q || r.description.toLowerCase().includes(q) || (r.doc_no||'').toLowerCase().includes(q)
-        ).map(r => ({
-          id: r.id, doc_no: r.doc_no||'-', date: r.expense_date,
-          description: r.description, category: r.category,
-          amount: Number(r.amount_thb), note: r.note||'', source: 'expense' as const,
-        }));
-        // รวม POs
+        );
         const poRows = pos.filter(p =>
           !q || (p.supplier_name||'').toLowerCase().includes(q) || p.po_no.toLowerCase().includes(q)
-        ).map(p => ({
-          id: p.id, doc_no: p.po_no, date: p.po_date,
-          description: `PO: ${p.supplier_name||'-'}`, category: 'ใบสั่งซื้อ',
-          amount: Number(p.total_thb), note: p.status, source: 'po' as const,
-        }));
-        const allRows = [...expRows, ...poRows].sort((a, b) =>
-          b.date.localeCompare(a.date)
         );
-        const allTotal = allRows.reduce((s, r) => s + r.amount, 0);
+        const totalExp  = expRows.reduce((s,r) => s + Number(r.amount_thb), 0);
+        const totalPO   = poRows.reduce((s,p)  => s + Number(p.total_thb), 0);
+        const totalAds  = adsData.reduce((s,r)  => s + r.total, 0);
+        const totalShip = shippingData.reduce((s,r) => s + r.total, 0);
+        const grandTotal = totalExp + totalPO + totalAds + totalShip;
+
         return (
-          <>
-            <div className="shrink-0 flex gap-3 mb-3 flex-wrap items-center">
-              <div className="rounded-xl px-4 py-3 border bg-slate-50 border-slate-200">
-                <div className="text-xs text-slate-500 font-semibold mb-0.5">ยอดรวมทั้งหมด</div>
-                <div className="text-xl font-bold text-red-600">฿{fmt(allTotal)}</div>
-                <div className="text-xs text-slate-400">{allRows.length} รายการ</div>
-              </div>
-              <div className="flex gap-2 text-xs flex-wrap">
-                <span className="px-2 py-1 bg-red-50 text-red-600 rounded-lg border border-red-100">
-                  ใบบันทึก {expRows.length} รายการ · ฿{fmt(expRows.reduce((s,r)=>s+r.amount,0))}
-                </span>
-                <span className="px-2 py-1 bg-purple-50 text-purple-600 rounded-lg border border-purple-100">
-                  PO {poRows.length} ใบ · ฿{fmt(poRows.reduce((s,r)=>s+r.amount,0))}
-                </span>
-              </div>
-              <div className="relative">
-                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                <input value={search} onChange={e=>setSearch(e.target.value)}
-                  placeholder="ค้นหา..."
-                  className="pl-8 pr-3 py-2 border rounded-lg text-xs w-48 focus:outline-none focus:ring-2 focus:ring-slate-300"/>
-              </div>
+          <div className="flex-1 overflow-auto min-h-0 space-y-4">
+            {/* Grand total */}
+            <div className="shrink-0 grid grid-cols-2 sm:grid-cols-5 gap-3">
+              {[
+                { label:'รวมทั้งหมด', value: grandTotal, color:'text-red-600', bg:'bg-red-50 border-red-200' },
+                { label:'📄 ใบบันทึก', value: totalExp,  color:'text-slate-700', bg:'bg-slate-50 border-slate-200' },
+                { label:'🛒 PO',        value: totalPO,   color:'text-purple-700', bg:'bg-purple-50 border-purple-200' },
+                { label:'📢 โฆษณา',    value: totalAds,  color:'text-pink-700', bg:'bg-pink-50 border-pink-200' },
+                { label:'🚚 ขนส่ง',    value: totalShip, color:'text-blue-700', bg:'bg-blue-50 border-blue-200' },
+              ].map(c => (
+                <div key={c.label} className={`rounded-xl border px-4 py-3 ${c.bg}`}>
+                  <div className="text-xs text-slate-500 mb-0.5">{c.label}</div>
+                  <div className={`text-lg font-bold ${c.color}`}>฿{fmt(c.value)}</div>
+                </div>
+              ))}
             </div>
-            <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-              <table className="text-sm w-full" style={{minWidth:'650px'}}>
-                <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0">
+
+            {/* ── 📄 ใบบันทึกรายจ่าย ── */}
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50">
+                <span className="font-semibold text-slate-700 text-sm">📄 ใบบันทึกรายจ่าย</span>
+                <span className="text-xs text-slate-400">{expRows.length} รายการ · ฿{fmt(totalExp)}</span>
+              </div>
+              <table className="text-xs w-full" style={{minWidth:'550px'}}>
+                <thead className="bg-slate-100 text-slate-500">
                   <tr>
-                    <th className="p-3 text-left">เลขที่</th>
-                    <th className="p-3 text-left whitespace-nowrap">วันที่</th>
-                    <th className="p-3 text-left">รายการ</th>
-                    <th className="p-3 text-center whitespace-nowrap">หมวด</th>
-                    <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
-                    <th className="p-3 text-left">หมายเหตุ</th>
+                    <th className="px-4 py-2 text-left">เลขที่</th>
+                    <th className="px-4 py-2 text-left whitespace-nowrap">วันที่</th>
+                    <th className="px-4 py-2 text-left">รายการ</th>
+                    <th className="px-4 py-2 text-center">หมวด</th>
+                    <th className="px-4 py-2 text-right">ยอด (฿)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {allRows.length===0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">ไม่มีรายการในช่วงวันที่นี้</td></tr>}
-                  {allRows.map(r => (
-                    <tr key={`${r.source}-${r.id}`} className={`border-b hover:bg-slate-50 ${r.source==='po'?'bg-purple-50/30':''}`}>
-                      <td className="p-3 font-mono text-xs text-slate-500">{r.doc_no}</td>
-                      <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{fmtDate(r.date)}</td>
-                      <td className="p-3 font-medium">{r.description}</td>
-                      <td className="p-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                          r.category==='ค่าโฆษณา' ? 'bg-pink-100 text-pink-700' :
-                          r.category==='ใบสั่งซื้อ' ? 'bg-purple-100 text-purple-700' :
-                          r.category==='ค่าจัดส่ง' ? 'bg-blue-100 text-blue-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>{r.category}</span>
+                  {expRows.length===0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-300">ไม่มีรายการ</td></tr>}
+                  {expRows.map(r => (
+                    <tr key={r.id} className="border-t hover:bg-slate-50">
+                      <td className="px-4 py-2 font-mono text-slate-400">{r.doc_no||'-'}</td>
+                      <td className="px-4 py-2 text-slate-400 whitespace-nowrap">{fmtDate(r.expense_date)}</td>
+                      <td className="px-4 py-2 font-medium">{r.description}</td>
+                      <td className="px-4 py-2 text-center">
+                        <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-bold">{r.category}</span>
                       </td>
-                      <td className="p-3 text-right font-bold text-red-600">฿{fmt(r.amount)}</td>
-                      <td className="p-3 text-xs text-slate-400">{r.note||'-'}</td>
+                      <td className="px-4 py-2 text-right font-bold text-red-600">฿{fmt(Number(r.amount_thb))}</td>
                     </tr>
                   ))}
                 </tbody>
-                <tfoot className="bg-slate-50 border-t-2 sticky bottom-0">
-                  <tr>
-                    <td colSpan={4} className="p-3 text-right font-semibold text-slate-600">รวม {allRows.length} รายการ</td>
-                    <td className="p-3 text-right font-bold text-red-600 text-base">฿{fmt(allTotal)}</td>
-                    <td/>
-                  </tr>
-                </tfoot>
               </table>
             </div>
-          </>
+
+            {/* ── 🛒 ใบสั่งซื้อ (PO) ── */}
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50">
+                <span className="font-semibold text-slate-700 text-sm">🛒 ใบสั่งซื้อ (PO)</span>
+                <span className="text-xs text-slate-400">{poRows.length} ใบ · ฿{fmt(totalPO)}</span>
+              </div>
+              <table className="text-xs w-full" style={{minWidth:'450px'}}>
+                <thead className="bg-slate-100 text-slate-500">
+                  <tr>
+                    <th className="px-4 py-2 text-left">เลข PO</th>
+                    <th className="px-4 py-2 text-left whitespace-nowrap">วันที่</th>
+                    <th className="px-4 py-2 text-left">ผู้ขาย</th>
+                    <th className="px-4 py-2 text-center">สถานะ</th>
+                    <th className="px-4 py-2 text-right">ยอด (฿)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {poRows.length===0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-300">ไม่มี PO</td></tr>}
+                  {poRows.map(p => (
+                    <tr key={p.id} className="border-t hover:bg-purple-50">
+                      <td className="px-4 py-2 font-mono text-purple-600">{p.po_no}</td>
+                      <td className="px-4 py-2 text-slate-400 whitespace-nowrap">{fmtDate(p.po_date)}</td>
+                      <td className="px-4 py-2 font-medium">{p.supplier_name||'-'}</td>
+                      <td className="px-4 py-2 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${p.status==='approved'?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}`}>{p.status}</span>
+                      </td>
+                      <td className="px-4 py-2 text-right font-bold text-purple-700">฿{fmt(Number(p.total_thb))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* ── 📢 ค่าโฆษณา (สรุปรายวัน) ── */}
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50">
+                <span className="font-semibold text-slate-700 text-sm">📢 ค่าโฆษณา (สรุปรายวัน)</span>
+                <span className="text-xs text-slate-400">{adsData.length} วัน · ฿{fmt(totalAds)}</span>
+              </div>
+              <table className="text-xs w-full" style={{minWidth:'300px'}}>
+                <thead className="bg-slate-100 text-slate-500">
+                  <tr>
+                    <th className="px-4 py-2 text-left whitespace-nowrap">วันที่</th>
+                    <th className="px-4 py-2 text-right">ยอดรวม (฿)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adsData.length===0 && <tr><td colSpan={2} className="px-4 py-6 text-center text-slate-300">ไม่มีข้อมูลค่าโฆษณา</td></tr>}
+                  {adsData.map(r => (
+                    <tr key={r.date} className="border-t hover:bg-pink-50">
+                      <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{fmtDate(r.date)}</td>
+                      <td className="px-4 py-2 text-right font-bold text-pink-600">฿{fmt(r.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* ── 🚚 ค่าขนส่ง (สรุปรายวัน) ── */}
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50">
+                <span className="font-semibold text-slate-700 text-sm">🚚 ค่าขนส่ง (สรุปรายวัน)</span>
+                <span className="text-xs text-slate-400">{shippingData.length} วัน · ฿{fmt(totalShip)}</span>
+              </div>
+              <table className="text-xs w-full" style={{minWidth:'300px'}}>
+                <thead className="bg-slate-100 text-slate-500">
+                  <tr>
+                    <th className="px-4 py-2 text-left whitespace-nowrap">วันที่</th>
+                    <th className="px-4 py-2 text-right">ยอดรวม (฿)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shippingData.length===0 && <tr><td colSpan={2} className="px-4 py-6 text-center text-slate-300">ไม่มีข้อมูลค่าขนส่ง</td></tr>}
+                  {shippingData.map(r => (
+                    <tr key={r.date} className="border-t hover:bg-blue-50">
+                      <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{fmtDate(r.date)}</td>
+                      <td className="px-4 py-2 text-right font-bold text-blue-600">฿{fmt(r.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+          </div>
         );
       })()}
 
