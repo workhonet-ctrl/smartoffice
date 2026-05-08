@@ -794,8 +794,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           total_thb: Number(row[21])||0,
           payment_method: String(row[22]||'COD').trim(),
           payment_status: String(row[24]||'รอชำระเงิน').trim(),
-          order_status: (Number(row[21])||0) === 0 ? 'เคลม'
-            : hasTrack ? 'รอแพ็ค' : 'รอคีย์ออเดอร์',
+          order_status: hasTrack ? 'รอแพ็ค' : 'รอคีย์ออเดอร์',
           route,
           imported_at: new Date().toISOString().split('T')[0],
           note: isRepeat ? '🔁 สั่งเพิ่ม' : (Number(row[21])||0) === 0 ? '🔄 เคลมสินค้า' : null,
