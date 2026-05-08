@@ -418,14 +418,17 @@ export default function FlashShippingImport() {
     });
   };
 
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
   const clearAll = () => {
     sessionStorage.removeItem(STORAGE_KEY);
     setTrackingMap({});
     setTopups([]);
     setFileInfos([]);
     setMatched(false);
-    setSearch('');
+    setSearch('');\
     setError(null);
+    setShowClearConfirm(false);
   };
 
   // ── Derived values ──────────────────────────────────────────
@@ -524,7 +527,7 @@ export default function FlashShippingImport() {
             </span>
           ))}
           <button
-            onClick={clearAll}
+            onClick={() => setShowClearConfirm(true)}
             className="px-3 py-1.5 rounded-full text-xs bg-slate-100 text-slate-500
                        hover:bg-red-100 hover:text-red-600 flex items-center gap-1"
           >
@@ -776,6 +779,51 @@ export default function FlashShippingImport() {
           <span className="text-xs text-slate-400">
             {loadingDB ? '⏳ กำลังโหลดข้อมูล...' : 'ไม่มีข้อมูล — อัพโหลดไฟล์ใหม่ได้เลย'}
           </span>
+        </div>
+      )}
+
+      {/* ── Confirm Clear Popup ── */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+            style={{ animation: 'popIn .18s cubic-bezier(.34,1.56,.64,1)' }}>
+            {/* Top accent */}
+            <div className="h-1.5 w-full" style={{ background: 'linear-gradient(90deg,#ef4444,#f97316)' }}/>
+            <div className="px-6 pt-6 pb-5">
+              {/* Icon */}
+              <div className="flex justify-center mb-4">
+                <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center shadow-inner">
+                  <span className="text-2xl">🗑️</span>
+                </div>
+              </div>
+              {/* Text */}
+              <h3 className="text-center text-lg font-bold text-slate-800 mb-1">
+                ล้างข้อมูลทั้งหมด?
+              </h3>
+              <p className="text-center text-sm text-slate-400 mb-5">
+                ข้อมูล Flash Express ทั้งหมดจะถูกลบออก<br/>
+                <span className="text-red-400 font-medium">การกระทำนี้ไม่สามารถย้อนกลับได้</span>
+              </p>
+              {/* Buttons */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowClearConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600
+                    text-sm font-medium hover:bg-slate-50 transition">
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={clearAll}
+                  className="flex-1 py-2.5 rounded-xl text-white text-sm font-bold transition
+                    hover:opacity-90 shadow-lg shadow-red-100"
+                  style={{ background: 'linear-gradient(135deg,#ef4444,#f97316)' }}>
+                  ล้างทั้งหมด
+                </button>
+              </div>
+            </div>
+          </div>
+          <style>{`@keyframes popIn{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}`}</style>
         </div>
       )}
 
