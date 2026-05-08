@@ -426,7 +426,7 @@ export default function FlashShippingImport() {
     setTopups([]);
     setFileInfos([]);
     setMatched(false);
-    setSearch('');\
+    setSearch('');
     setError(null);
     setShowClearConfirm(false);
   };
