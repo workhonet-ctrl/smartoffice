@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Upload, RefreshCw, X } from 'lucide-react';
+import { Upload, RefreshCw, X, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 // ── Constants ─────────────────────────────────────────────────
@@ -419,6 +419,17 @@ export default function FlashShippingImport() {
   };
 
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  const deleteTracking = async (tracking: string) => {
+    await supabase.from('shipping_flash').delete().eq('tracking', tracking);
+    setTrackingMap(prev => {
+      const next = { ...prev };
+      delete next[tracking];
+      return next;
+    });
+    setDeleteTarget(null);
+  };
 
   const clearAll = () => {
     sessionStorage.removeItem(STORAGE_KEY);
@@ -685,6 +696,7 @@ export default function FlashShippingImport() {
                 <th className="p-3 text-right whitespace-nowrap">ค่าเพิ่มเติม</th>
                 <th className="p-3 text-right whitespace-nowrap">รวม</th>
                 {matched && <th className="p-3 text-center whitespace-nowrap">สถานะ</th>}
+                {tabView === 'unmatched' && <th className="p-3 w-10"/>}
               </tr>
             </thead>
             <tbody>
@@ -725,6 +737,16 @@ export default function FlashShippingImport() {
                       }`}>
                         {r.matched ? '✓ พบออเดอร์' : '❌ ไม่พบ'}
                       </span>
+                    </td>
+                  )}
+                  {tabView === 'unmatched' && (
+                    <td className="p-3 text-center">
+                      <button
+                        onClick={() => setDeleteTarget(r.tracking)}
+                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                        title="ลบออก">
+                        <Trash2 size={14}/>
+                      </button>
                     </td>
                   )}
                 </tr>
@@ -779,6 +801,51 @@ export default function FlashShippingImport() {
           <span className="text-xs text-slate-400">
             {loadingDB ? '⏳ กำลังโหลดข้อมูล...' : 'ไม่มีข้อมูล — อัพโหลดไฟล์ใหม่ได้เลย'}
           </span>
+        </div>
+      )}
+
+      {/* ── Confirm Delete Single Tracking ── */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+            style={{ animation: 'popIn .18s cubic-bezier(.34,1.56,.64,1)' }}>
+            <div className="h-1.5 w-full" style={{ background: 'linear-gradient(90deg,#ef4444,#dc2626)' }}/>
+            <div className="px-6 pt-6 pb-5">
+              <div className="flex justify-center mb-4">
+                <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center shadow-inner">
+                  <Trash2 size={26} className="text-red-500"/>
+                </div>
+              </div>
+              <h3 className="text-center text-lg font-bold text-slate-800 mb-1">
+                ยืนยันลบข้อมูล?
+              </h3>
+              <p className="text-center text-xs text-slate-400 mb-1">Tracking No.</p>
+              <p className="text-center font-mono text-sm font-bold text-blue-600 bg-blue-50
+                px-3 py-1.5 rounded-lg mb-4 break-all">
+                {deleteTarget}
+              </p>
+              <p className="text-center text-xs text-red-400 mb-5">
+                ข้อมูลจะถูกลบออกจากระบบถาวร
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteTarget(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600
+                    text-sm font-medium hover:bg-slate-50 transition">
+                  ไม่
+                </button>
+                <button
+                  onClick={() => deleteTracking(deleteTarget)}
+                  className="flex-1 py-2.5 rounded-xl text-white text-sm font-bold transition
+                    hover:opacity-90 shadow-lg shadow-red-100"
+                  style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
+                  ยืนยัน
+                </button>
+              </div>
+            </div>
+          </div>
+          <style>{`@keyframes popIn{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}`}</style>
         </div>
       )}
 
