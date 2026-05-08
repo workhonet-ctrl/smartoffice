@@ -18,8 +18,8 @@ const EXP_CATS = ['ค่าวัตถุดิบ/สินค้า','ค่
 const fmt = (n:number) => n.toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtDate = (d:string) => new Date(d).toLocaleDateString('th-TH');
 
-export default function FinanceExpenses() {
-  const [subTab, setSubTab]   = useState<SubTab>('records');
+export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: SubTab } = {}) {
+  const [subTab, setSubTab] = useState<SubTab>(initialSubTab ?? 'records');
   const [records, setRecords] = useState<ExpRecord[]>([]);
   const [pos, setPOs]         = useState<PO[]>([]);
   const [adsData, setAdsData]           = useState<{date:string; total:number}[]>([]);
@@ -170,25 +170,6 @@ export default function FinanceExpenses() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Sub-tabs */}
-      <div className="shrink-0 flex gap-1 bg-slate-100 p-1 rounded-xl w-fit mb-4 flex-wrap">
-        <button onClick={()=>setSubTab('records')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='records'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
-          📄 ใบบันทึกรายจ่าย <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='records'?'bg-red-100 text-red-700':'bg-slate-200 text-slate-500'}`}>{records.length}</span>
-        </button>
-        <button onClick={()=>setSubTab('po')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='po'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
-          🛒 ใบสั่งซื้อ (PO) <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='po'?'bg-purple-100 text-purple-700':'bg-slate-200 text-slate-500'}`}>{pos.length}</span>
-        </button>
-        <button onClick={()=>setSubTab('ads')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='ads'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
-          📢 ค่าโฆษณา <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='ads'?'bg-pink-100 text-pink-700':'bg-slate-200 text-slate-500'}`}>{records.filter(r=>r.category==='ค่าโฆษณา').length}</span>
-        </button>
-        <button onClick={()=>setSubTab('shipping')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='shipping'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
-          🚚 ค่าขนส่ง <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='shipping'?'bg-blue-100 text-blue-700':'bg-slate-200 text-slate-500'}`}>{records.filter(r=>r.category==='ค่าจัดส่ง').length}</span>
-        </button>
-        <button onClick={()=>setSubTab('all')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='all'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
-          📋 ทั้งหมด
-        </button>
-      </div>
-
       {/* Date filter — ซ่อนเมื่ออยู่ใน tab ค่าขนส่ง (ShippingPage มี state ของตัวเอง) */}
       {subTab !== 'shipping' && (
         <div className="shrink-0 flex gap-2 mb-3 flex-wrap items-center">
