@@ -217,7 +217,7 @@ export default function Packaging({
     const snap = (item.summary_snapshot || []) as any[];
     const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
     const rows = snap.map((s: any) => ({
-      product: s.short_name || s.name || '-',
+      product: s.short_name ? s.short_name + ' ' + s.name : (s.name || '-'),
       promo:   s.name || '',
       count:   s.count || 1,
       box:     s.box || '-',
@@ -234,8 +234,8 @@ export default function Packaging({
         ? r.promos.map((p: any, pi: number) => `
             <div style="margin-bottom:2px">
               ${r.promos.length > 1 ? '<span style="background:#e0f2fe;color:#0369a1;border-radius:3px;padding:0 4px;font-size:10px;margin-right:3px">' + (pi+1) + '</span>' : ''}
-              <span style="font-weight:600;color:#1e293b">${p.short_name || p.name}</span>
-              <span style="color:#64748b;font-size:11px"> / ${p.name}</span>
+              <span style="font-weight:600;color:#1e293b">${p.short_name ? p.short_name + " " + p.name : p.name}</span>
+              
             </div>`).join('')
         : `<span style="color:#1e293b">${r.product}</span>`;
       const channelBadge = r.isFlash
@@ -318,8 +318,8 @@ export default function Packaging({
         type:'single'
       })),
       ...summaryGroups.multiOrders.map(o => ({
-        name: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
-        short_name: o.promos.map(p => p.short_name || p.name).join(' + '),
+        name: o.promos.map(p => `${p.short_name ? p.short_name + ' ' + p.name : p.name}×${p.qty}`).join(', '),
+        short_name: o.promos.map(p => p.short_name ? p.short_name + ' ' + p.name : p.name).join(' + '),
         count: 1,
         box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '',
         bubble: (() => {
@@ -331,7 +331,7 @@ export default function Packaging({
     ];
     const ordersSnapshot = orders.map(o => ({
       order_no: o.order_no, customer: o.customers?.name,
-      promos: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
+      promos: o.promos.map(p => `${p.short_name ? p.short_name + ' ' + p.name : p.name}×${p.qty}`).join(', '),
     }));
 
     const { error: phError } = await supabase.from('pack_history').insert([{
@@ -371,7 +371,7 @@ export default function Packaging({
       for (const g of grouped) {
         html2 += `<tr>
           <td class="num">${idx++}</td>
-          <td><div style="font-weight:700">${g.short_name || g.promo_name}</div>
+          <td><div style="font-weight:700">${g.short_name ? g.short_name + " " + g.promo_name : g.promo_name}</div>
               <div style="font-size:11px;color:#64748b">${g.promo_name}</div></td>
           <td style="text-align:center"><span class="badge">${g.count} ออเดอร์</span></td>
           <td style="text-align:center">${g.box}</td>
@@ -465,13 +465,13 @@ export default function Packaging({
     try {
       const ordersSnapshot = orders.map(o => ({
         order_no: o.order_no, customer: o.customers?.name,
-        promos: o.promos.map(p => ({ name: p.short_name||p.name, qty: p.qty })),
+        promos: o.promos.map(p => ({ name: p.short_name ? p.short_name + " " + p.name : p.name, qty: p.qty })),
         is_multi: isMulti(o),
       }));
       const summarySnapshot = [
         ...summaryGroups.grouped.map(g => ({ name: g.short_name||g.promo_name, count: g.count, box: g.box_name, type:'single' })),
         ...summaryGroups.multiOrders.map(o => ({
-          name: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
+          name: o.promos.map(p => `${p.short_name ? p.short_name + ' ' + p.name : p.name}×${p.qty}`).join(', '),
           count: 1, box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '', type:'multi'
         })),
       ];
