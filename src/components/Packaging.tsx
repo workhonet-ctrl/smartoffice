@@ -205,7 +205,7 @@ export default function Packaging({
     setLoadingHistory(true);
     const { data } = await supabase
       .from('pack_history')
-      .select('id, pack_date, responsible_person, order_count, status, created_at, summary_snapshot')
+      .select('id, pack_date, responsible_person, order_count, status, created_at, summary_snapshot, orders_snapshot')
       .in('status', ['printed', 'approved'])
       .order('created_at', { ascending: false })
       .limit(50);
@@ -214,15 +214,40 @@ export default function Packaging({
   };
 
   const handleReprintFromHistory = (item: any) => {
+    const ordersSnap = (item.orders_snapshot || []) as any[];
+    const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    // ถ้ามี orders_snapshot แบบใหม่ (มี promos array) ใช้เลย
+    if (ordersSnap.length > 0 && Array.isArray(ordersSnap[0]?.promos)) {
+      const rows = ordersSnap.map((o: any) => ({
+        customerName: o.customerName || '-',
+        tel:          o.tel || '',
+        isFlash:      o.isFlash || false,
+        isMulti:      o.isMulti || false,
+        box:          o.box || '-',
+        bubble:       o.bubble || '-',
+        promos:       (o.promos || []).map((p: any) => ({
+          short_name:  p.short_name || null,
+          name:        p.name || '',
+          qty:         p.qty || 1,
+          box_name:    p.box_name || '-',
+          bubble_name: p.bubble_name || '-',
+        })),
+      }));
+      openPrintWindow(rows, today, item.responsible_person || '-', item.order_count || 0);
+      return;
+    }
+
+    // fallback: snapshot เก่า (summary format) — แสดงเหมือนเดิม
     const snap = (item.summary_snapshot || []) as any[];
-    const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
     const rows = snap.map((s: any) => ({
-      product: s.short_name ? s.short_name + ' ' + s.name : (s.name || '-'),
-      promo:   s.name || '',
-      count:   s.count || 1,
-      box:     s.box || '-',
-      bubble:  s.bubble || '-',
-      note:    s.type === 'multi' ? 'แพ็คพิเศษ' : '',
+      customerName: '-',
+      tel: '',
+      isFlash: false,
+      isMulti: s.type === 'multi',
+      box: s.box || '-',
+      bubble: s.bubble || '-',
+      promos: [{ short_name: s.short_name || null, name: s.name || s.promo_name || '-', qty: s.count || 1, box_name: s.box || '-', bubble_name: s.bubble || '-' }],
     }));
     openPrintWindow(rows, today, item.responsible_person || '-', item.order_count || 0);
   };
@@ -234,8 +259,8 @@ export default function Packaging({
         ? r.promos.map((p: any, pi: number) => `
             <div style="margin-bottom:2px">
               ${r.promos.length > 1 ? '<span style="background:#e0f2fe;color:#0369a1;border-radius:3px;padding:0 4px;font-size:10px;margin-right:3px">' + (pi+1) + '</span>' : ''}
-              <span style="font-weight:600;color:#1e293b">${p.short_name ? p.short_name + " " + p.name : p.name}</span>
-              
+              <span style="font-weight:600;color:#1e293b">${p.short_name || p.name}</span>
+              <span style="color:#64748b;font-size:11px"> / ${p.name}</span>
             </div>`).join('')
         : `<span style="color:#1e293b">${r.product}</span>`;
       const channelBadge = r.isFlash
@@ -318,8 +343,8 @@ export default function Packaging({
         type:'single'
       })),
       ...summaryGroups.multiOrders.map(o => ({
-        name: o.promos.map(p => `${p.short_name ? p.short_name + ' ' + p.name : p.name}×${p.qty}`).join(', '),
-        short_name: o.promos.map(p => p.short_name ? p.short_name + ' ' + p.name : p.name).join(' + '),
+        name: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
+        short_name: o.promos.map(p => p.short_name || p.name).join(' + '),
         count: 1,
         box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '',
         bubble: (() => {
@@ -330,8 +355,20 @@ export default function Packaging({
       })),
     ];
     const ordersSnapshot = orders.map(o => ({
-      order_no: o.order_no, customer: o.customers?.name,
-      promos: o.promos.map(p => `${p.short_name ? p.short_name + ' ' + p.name : p.name}×${p.qty}`).join(', '),
+      order_no: o.order_no,
+      customerName: (o.customers as any)?.name || '-',
+      tel: (o.customers as any)?.tel || '',
+      isFlash: isFlash(o),
+      isMulti: isMulti(o),
+      box: o.promos[0]?.box_name || '-',
+      bubble: o.promos[0]?.bubble_name || '-',
+      promos: o.promos.map(p => ({
+        short_name: p.short_name || null,
+        name: p.name,
+        qty: p.qty,
+        box_name: p.box_name,
+        bubble_name: p.bubble_name,
+      })),
     }));
 
     const { error: phError } = await supabase.from('pack_history').insert([{
@@ -371,7 +408,7 @@ export default function Packaging({
       for (const g of grouped) {
         html2 += `<tr>
           <td class="num">${idx++}</td>
-          <td><div style="font-weight:700">${g.short_name ? g.short_name + " " + g.promo_name : g.promo_name}</div>
+          <td><div style="font-weight:700">${g.short_name || g.promo_name}</div>
               <div style="font-size:11px;color:#64748b">${g.promo_name}</div></td>
           <td style="text-align:center"><span class="badge">${g.count} ออเดอร์</span></td>
           <td style="text-align:center">${g.box}</td>
@@ -465,13 +502,13 @@ export default function Packaging({
     try {
       const ordersSnapshot = orders.map(o => ({
         order_no: o.order_no, customer: o.customers?.name,
-        promos: o.promos.map(p => ({ name: p.short_name ? p.short_name + " " + p.name : p.name, qty: p.qty })),
+        promos: o.promos.map(p => ({ name: p.short_name||p.name, qty: p.qty })),
         is_multi: isMulti(o),
       }));
       const summarySnapshot = [
         ...summaryGroups.grouped.map(g => ({ name: g.short_name||g.promo_name, count: g.count, box: g.box_name, type:'single' })),
         ...summaryGroups.multiOrders.map(o => ({
-          name: o.promos.map(p => `${p.short_name ? p.short_name + ' ' + p.name : p.name}×${p.qty}`).join(', '),
+          name: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
           count: 1, box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '', type:'multi'
         })),
       ];
