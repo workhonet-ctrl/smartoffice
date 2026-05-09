@@ -44,7 +44,7 @@ export default function FinanceDaily() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [{ data: orders }, { data: adCosts }, { data: otherExp }, { data: flashShip }, { data: myordShip }] = await Promise.all([
+      const [{ data: orders }, { data: adCosts }, { data: otherExp }] = await Promise.all([
         supabase.from('orders')
           .select('id, order_no, order_date, total_thb, shipping_thb, raw_prod, promo_ids, quantities, quantity, tracking_no, box_id, bubble_id_pack, customers(name), boxes(price_thb), bubbles_pack:bubble_id_pack(price_thb, length_cm)')
           .gte('order_date', dateFrom).lte('order_date', dateTo).order('order_date'),
@@ -52,17 +52,23 @@ export default function FinanceDaily() {
           .eq('category', 'ค่าโฆษณา').gte('expense_date', dateFrom).lte('expense_date', dateTo),
         supabase.from('finance_expense').select('expense_date, amount_thb')
           .neq('category', 'ค่าโฆษณา').gte('expense_date', dateFrom).lte('expense_date', dateTo),
-        supabase.from('shipping_flash').select('tracking, total_thb')
-          .gte('invoice_date', dateFrom).lte('invoice_date', dateTo),
-        supabase.from('shipping_myorder').select('tracking, total_thb')
-          .not('invoice_date', 'is', null)
-          .gte('invoice_date', dateFrom).lte('invoice_date', dateTo),
       ]);
 
-      // build shipCostMap: tracking → ค่าส่งจริง
+      // build shipCostMap จาก tracking ที่มีใน orders ช่วงนั้น
+      const trackingNos = (orders||[]).map((o:any) => o.tracking_no).filter(Boolean);
       const shipMap: Record<string, number> = {};
-      for (const r of [...(flashShip||[]), ...(myordShip||[])]) {
-        if (r.tracking) shipMap[r.tracking] = Number(r.total_thb || 0);
+      if (trackingNos.length > 0) {
+        const CHUNK = 500;
+        for (let i = 0; i < trackingNos.length; i += CHUNK) {
+          const chunk = trackingNos.slice(i, i + CHUNK);
+          const [{ data: flashData }, { data: myordData }] = await Promise.all([
+            supabase.from('shipping_flash').select('tracking, total_thb').in('tracking', chunk),
+            supabase.from('shipping_myorder').select('tracking, total_thb').in('tracking', chunk),
+          ]);
+          for (const r of [...(flashData||[]), ...(myordData||[])]) {
+            if (r.tracking) shipMap[r.tracking] = Number(r.total_thb || 0);
+          }
+        }
       }
       setShipCostMap(shipMap);
 
@@ -267,6 +273,7 @@ export default function FinanceDaily() {
                     <thead>
                       <tr className="bg-slate-50 text-slate-400">
                         <th className="px-4 py-2 text-left text-[10px] font-semibold">เลขออเดอร์</th>
+                        <th className="px-3 py-2 text-left text-[10px] font-semibold">Tracking</th>
                         <th className="px-3 py-2 text-left text-[10px] font-semibold">ลูกค้า</th>
                         <th className="px-3 py-2 text-left text-[10px] font-semibold">สินค้า</th>
                         <th className="px-3 py-2 text-center text-[10px] font-semibold">จำนวน</th>
@@ -293,6 +300,14 @@ export default function FinanceDaily() {
                         return (
                           <tr key={o.id} className="border-t border-slate-50 hover:bg-slate-50">
                             <td className="px-4 py-2 font-mono text-blue-600 whitespace-nowrap">{o.order_no}</td>
+                            <td className="px-3 py-2 font-mono text-[11px] whitespace-nowrap">
+                              {(o as any).tracking_no
+                                ? <span className={`${shipCostMap[(o as any).tracking_no] ? 'text-emerald-600 font-medium' : 'text-slate-400'}`}>
+                                    {(o as any).tracking_no}
+                                  </span>
+                                : <span className="text-slate-300">-</span>
+                              }
+                            </td>
                             <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{o.customers?.name||'-'}</td>
                             <td className="px-3 py-2 text-slate-500 max-w-[120px]">
                               {(o.raw_prod||'').split('|').map((p:string,i:number) => {
