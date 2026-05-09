@@ -53,6 +53,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const [editTag, setEditTag]       = useState<{id: string; tag: string} | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  // ── ประวัติตีกลับ tel → count ──────────────────────────────
+  const [returnHistory, setReturnHistory] = useState<Record<string, number>>({});
   const [importing, setImporting]   = useState(false);
   // Flash Import
   const [showFlashImport, setShowFlashImport] = useState(false);
@@ -131,7 +134,20 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const PAGE_SIZE = 500;
   const [pageView, setPageView] = useState<'all' | number>(0);
 
-  useEffect(() => { loadCustomers(); }, []);
+  useEffect(() => { loadCustomers(); loadReturnHistory(); }, []);
+
+  const loadReturnHistory = async () => {
+    const { data } = await supabase
+      .from('orders')
+      .select('customers(tel)')
+      .in('order_status', ['ตีกลับ', 'ส่งคืน', 'ไม่มีคนรับ']);
+    const map: Record<string, number> = {};
+    for (const o of data || []) {
+      const tel = (o.customers as any)?.tel;
+      if (tel) map[tel] = (map[tel] || 0) + 1;
+    }
+    setReturnHistory(map);
+  };
 
   // reset กลับหน้าแรกเมื่อ filter หรือ search เปลี่ยน
   useEffect(() => { if (pageView !== 'all') setPageView(0); }, [search, tagFilter, sortBy, filterMinOrders, filterChannel, searchProduct]);
