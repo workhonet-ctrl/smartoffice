@@ -1358,9 +1358,14 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         {filtered.map(c => {
           const tagColor = TAG_COLORS[c.tag||'ใหม่'] || 'bg-slate-100 text-slate-600';
           const isSelected = selectedIds.has(c.id);
+          const hasReturnHist = (returnHistory[c.tel] ?? 0) > 0;
+          const isExpanded = expanded === c.id;
           return (
             <div key={c.id}
-              className={`bg-white rounded-xl border shadow-sm p-3 transition ${isSelected ? 'border-cyan-400 bg-cyan-50/30' : 'border-slate-200'}`}>
+              className={`bg-white rounded-xl border shadow-sm p-3 transition ${
+                isSelected ? 'border-cyan-400 bg-cyan-50/30' :
+                hasReturnHist ? 'border-red-200 bg-red-50/30' : 'border-slate-200'
+              }`}>
               <div className="flex items-start gap-2">
                 <input type="checkbox"
                   checked={isSelected}
@@ -1380,6 +1385,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                       {c.facebook_name && c.facebook_name !== c.name && (
                         <div className="text-xs text-blue-600 truncate">{c.facebook_name}</div>
                       )}
+                      {hasReturnHist && (
+                        <div className="text-[10px] text-red-600 font-bold mt-0.5">🔄 ตีกลับ {returnHistory[c.tel]} ครั้ง</div>
+                      )}
                     </div>
                     <button onClick={() => setEditTag({id:c.id, tag:c.tag||'ใหม่'})}
                       className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold ${tagColor}`}>
@@ -1392,7 +1400,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                     {c.province && <span>· {c.province}</span>}
                   </div>
                   {/* Row 3: stats */}
-                  <div className="flex items-center gap-3 text-xs">
+                  <div className="flex items-center gap-3 text-xs mb-2">
                     <div className="flex items-center gap-1">
                       <span className="text-slate-400">ออเดอร์</span>
                       <span className={`px-2 py-0.5 rounded-full font-bold ${
@@ -1402,21 +1410,76 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                         'bg-slate-100 text-slate-400'
                       }`}>{c.order_count}</span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-slate-400">·</span>
-                      <span className="font-bold text-emerald-600">฿{fmt2(Number(c.total_spent))}</span>
-                    </div>
+                    <span className="text-slate-400">·</span>
+                    <span className="font-bold text-emerald-600">฿{fmt2(Number(c.total_spent))}</span>
                     {c.channel && (
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded truncate max-w-[80px]">
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
                         {c.channel}
                       </span>
                     )}
                   </div>
-                  {/* Action: ดูออเดอร์ */}
-                  <button onClick={() => setExpanded(expanded === c.id ? null : c.id)}
-                    className="mt-2 w-full text-xs py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition flex items-center justify-center gap-1">
-                    {expanded === c.id ? '▲ ซ่อนออเดอร์' : `▼ ดูออเดอร์ (${c.order_count})`}
-                  </button>
+                  {/* ปุ่มดูออเดอร์ — ใช้ toggleExpand ที่ loadOrders ด้วย */}
+                  {c.order_count > 0 && (
+                    <button onClick={() => toggleExpand(c.id)}
+                      className="w-full text-xs py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition flex items-center justify-center gap-1">
+                      {isExpanded ? '▲ ซ่อนออเดอร์' : `▼ ดูออเดอร์ (${c.order_count})`}
+                    </button>
+                  )}
+                  {/* Expanded orders — แสดงออเดอร์แต่ละรายการ */}
+                  {isExpanded && (
+                    <div className="mt-2">
+                      {loadingOrders ? (
+                        <div className="text-xs text-slate-400 text-center py-2">กำลังโหลด...</div>
+                      ) : custOrders.length === 0 ? (
+                        <div className="text-xs text-slate-400 text-center py-2">ยังไม่มีออเดอร์</div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {custOrders.map(o => (
+                            <div key={o.id} className="bg-slate-50 rounded-lg p-2.5 text-xs border border-slate-100">
+                              {/* Order No + วันที่ */}
+                              <div className="flex items-center justify-between gap-2 mb-1.5">
+                                <span className="font-mono text-cyan-600 text-[11px]">{o.order_no}</span>
+                                <span className="text-slate-400">{o.order_date}</span>
+                              </div>
+                              {/* ช่องทาง + วิธีชำระ ของออเดอร์นี้ */}
+                              <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                                {o.channel && (
+                                  <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px]">
+                                    {o.channel}
+                                  </span>
+                                )}
+                                {o.payment_method && (
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                    o.payment_method === 'COD' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
+                                  }`}>
+                                    {o.payment_method}
+                                  </span>
+                                )}
+                                {o.note && (
+                                  <span className="text-blue-500 text-[10px]">{o.note}</span>
+                                )}
+                              </div>
+                              {/* สินค้า */}
+                              <div className="text-slate-600 mb-1.5 line-clamp-2">{o.raw_prod || '-'}</div>
+                              {/* ยอด + สถานะ + tracking */}
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <span className="font-bold text-emerald-600">฿{fmt2(Number(o.total_thb))}</span>
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  o.order_status === 'ตีกลับ' ? 'bg-red-100 text-red-700' :
+                                  o.order_status === 'ส่งสินค้าแล้ว' ? 'bg-green-100 text-green-700' :
+                                  o.order_status === 'รอแพ็ค' ? 'bg-yellow-100 text-yellow-700' :
+                                  'bg-slate-100 text-slate-600'
+                                }`}>{o.order_status}</span>
+                                {o.tracking_no && (
+                                  <span className="font-mono text-blue-500 text-[10px]">{o.tracking_no}</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
