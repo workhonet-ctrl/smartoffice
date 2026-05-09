@@ -54,7 +54,12 @@ const fmt = (n: number) =>
   n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function parseNum(val: unknown): number {
-  return Math.abs(parseFloat(String(val ?? '0').replace(/[^0-9.-]/g, '')) || 0);
+  const s = String(val ?? '').trim();
+  // ถ้าเป็น dimension string เช่น "24×17×16" หรือ "20x14x12" → 0
+  if (/\d+\s*[×x×✕]\s*\d+/i.test(s)) return 0;
+  // ถ้าเป็น text ที่ไม่ใช่ตัวเลข เช่น "Dry food", "Thailand" → 0
+  if (/[a-zA-Z\u0E00-\u0E7F]{3,}/.test(s)) return 0;
+  return Math.abs(parseFloat(s.replace(/[^0-9.-]/g, '')) || 0);
 }
 
 /**
@@ -81,6 +86,28 @@ function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
   const dateMatch = fileName.match(/(\d{4}-\d{2}-\d{2})/);
   const invoiceDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
 
+  // ── Auto-detect column positions จาก header row ──────────────
+  const header = (rows[0] as string[]) || [];
+  const findCol = (keywords: string[]) =>
+    header.findIndex(h => h && keywords.some(k => String(h).toLowerCase().includes(k.toLowerCase())));
+
+  const colWeight  = findCol(['weight']);                           // น้ำหนัก
+  const colCod     = findCol(['cod amount', 'cod_amount']);         // COD Amount
+  const colCodFee  = findCol(['total cod fee', 'cod fee 2']);       // COD Fee 2%
+  const colVat7    = findCol(['cod vat', 'vat 7']);                 // COD VAT 7%
+  const colSpecial = findCol(['พื้นที่พิเศษ', 'special']);          // พื้นที่พิเศษ
+  const colFreight = findCol(['freight']);                          // Freight
+  const colTotal   = findCol(['total charge', 'total_charge']);     // Total Charge
+
+  // fallback ถ้า header ไม่ตรง (16-col format เดิม)
+  const W  = colWeight  >= 0 ? colWeight  : 9;
+  const C  = colCod     >= 0 ? colCod     : 10;
+  const CF = colCodFee  >= 0 ? colCodFee  : 11;
+  const V7 = colVat7    >= 0 ? colVat7    : 12;
+  const SP = colSpecial >= 0 ? colSpecial : 13;
+  const FR = colFreight >= 0 ? colFreight : 14;
+  const TC = colTotal   >= 0 ? colTotal   : 15;
+
   // skip header row (index 0); กรองแถวที่ไม่มี tracking
   const dataRows = rows.slice(1).filter(r => (r as unknown[])[5]);
 
@@ -95,23 +122,23 @@ function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
         tracking,
         page:         String(r[4]  ?? '').trim(),
         consignee:    String(r[6]  ?? '').trim(),
-        weight:       parseNum(r[9]),
-        cod:          parseNum(r[10]),
-        cod_fee:      parseNum(r[11]),
-        cod_vat7:     parseNum(r[12]),
-        special_area: parseNum(r[13]),
-        freight:      parseNum(r[14]),
-        total:        parseNum(r[15]),
+        weight:       parseNum(r[W]),
+        cod:          parseNum(r[C]),
+        cod_fee:      parseNum(r[CF]),
+        cod_vat7:     parseNum(r[V7]),
+        special_area: parseNum(r[SP]),
+        freight:      parseNum(r[FR]),
+        total:        parseNum(r[TC]),
         invoice_date: invoiceDate,
         matched:      false,
       };
     } else {
-      trackingMap[tracking].freight      += parseNum(r[14]);
-      trackingMap[tracking].total        += parseNum(r[15]);
-      trackingMap[tracking].cod          += parseNum(r[10]);
-      trackingMap[tracking].cod_fee      += parseNum(r[11]);
-      trackingMap[tracking].cod_vat7     += parseNum(r[12]);
-      trackingMap[tracking].special_area += parseNum(r[13]);
+      trackingMap[tracking].freight      += parseNum(r[FR]);
+      trackingMap[tracking].total        += parseNum(r[TC]);
+      trackingMap[tracking].cod          += parseNum(r[C]);
+      trackingMap[tracking].cod_fee      += parseNum(r[CF]);
+      trackingMap[tracking].cod_vat7     += parseNum(r[V7]);
+      trackingMap[tracking].special_area += parseNum(r[SP]);
     }
   }
 
@@ -128,17 +155,8 @@ function mergeResults(
   const merged = { ...prev };
   for (const result of results) {
     for (const [key, incoming] of Object.entries(result.trackingMap)) {
-      if (!merged[key]) {
-        merged[key] = { ...incoming };
-      } else {
-        merged[key] = {
-          ...merged[key],
-          freight:  merged[key].freight  + incoming.freight,
-          total:    merged[key].total    + incoming.total,
-          cod:      merged[key].cod      + incoming.cod,
-          cod_fee:  merged[key].cod_fee  + incoming.cod_fee,
-        };
-      }
+      // replace ทุกครั้ง — ไฟล์ใหม่ override ค่าเก่าเสมอ ไม่บวกซ้ำ
+      merged[key] = { ...incoming, matched: merged[key]?.matched ?? false };
     }
   }
   return merged;
