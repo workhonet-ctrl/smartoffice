@@ -19,6 +19,7 @@ type Order = {
   id: string; order_no: string; order_date: string; raw_prod: string | null;
   promo_ids?: string[] | null; quantities?: string | null;
   total_thb: number; order_status: string; tracking_no: string | null; ship_date?: string | null;
+  channel?: string | null; payment_method?: string | null; note?: string | null;
 };
 
 const TAG_COLORS: Record<string, string> = {
@@ -98,49 +99,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     unmapped: {name:string; qty:string}[];
   } | null>(null);
 
-  // ── ยอดซื้อรวม: กรองตามวันที่ ──────────────────────────────
-  const [spentDateFrom, setSpentDateFrom] = useState('');
-  const [spentDateTo,   setSpentDateTo]   = useState('');
-  const [spentFiltered, setSpentFiltered] = useState<number | null>(null);
-  const [loadingSpent,  setLoadingSpent]  = useState(false);
-
-  // ── ประวัติตีกลับ: สำหรับแจ้งเตือนตอน import ──────────────
-  // tel → จำนวนออเดอร์ตีกลับ
-  const [returnHistory, setReturnHistory] = useState<Record<string, number>>({});
-  // ออเดอร์ที่จะ import และมีประวัติตีกลับ — รอ user เลือก
-  type ReturnAlertItem = { idx: number; tel: string; name: string; returnCount: number; action: 'proceed' | 'cancel' };
-  const [returnAlertItems, setReturnAlertItems] = useState<ReturnAlertItem[]>([]);
-  const [showReturnAlert,  setShowReturnAlert]  = useState(false);
-  const [pendingAfterReturn, setPendingAfterReturn] = useState<(() => Promise<void>) | null>(null);
-
-  // ── filter เคยตีกลับ ──────────────────────────────────────
-  const [filterReturn, setFilterReturn] = useState(false);
-
-  // ── กรองตามวันที่สั่งซื้อ ──────────────────────────────────
-  const [orderDateFrom, setOrderDateFrom] = useState('');
-  const [orderDateTo,   setOrderDateTo]   = useState('');
-  const [dateFilteredIds, setDateFilteredIds] = useState<Set<string> | null>(null);
-  const [loadingDateFilter, setLoadingDateFilter] = useState(false);
-
-  const applyDateFilter = async () => {
-    if (!orderDateFrom && !orderDateTo) { setDateFilteredIds(null); return; }
-    setLoadingDateFilter(true);
-    let q = supabase.from('orders').select('customer_id')
-      .not('customer_id', 'is', null);
-    if (orderDateFrom) q = q.gte('order_date', orderDateFrom);
-    if (orderDateTo)   q = q.lte('order_date', orderDateTo);
-    const { data } = await q;
-    const ids = new Set((data || []).map((o: any) => o.customer_id as string));
-    setDateFilteredIds(ids);
-    setLoadingDateFilter(false);
-    setPageView(0);
-  };
-
-  const clearDateFilter = () => {
-    setOrderDateFrom(''); setOrderDateTo('');
-    setDateFilteredIds(null);
-  };
-
   // mapping modal state
   const [showMappingModal, setShowMappingModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
@@ -173,38 +131,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const PAGE_SIZE = 500;
   const [pageView, setPageView] = useState<'all' | number>(0);
 
-  useEffect(() => { loadCustomers(); loadReturnHistory(); }, []);
-
-  // โหลดประวัติตีกลับทั้งหมด tel → count
-  const loadReturnHistory = async () => {
-    const { data } = await supabase
-      .from('orders')
-      .select('customers(tel)')
-      .in('order_status', ['ตีกลับ', 'ส่งคืน', 'ไม่มีคนรับ']);
-    const map: Record<string, number> = {};
-    for (const o of data || []) {
-      const tel = (o.customers as any)?.tel;
-      if (tel) map[tel] = (map[tel] || 0) + 1;
-    }
-    setReturnHistory(map);
-  };
-
-  // กรองยอดซื้อตามวันที่
-  const loadSpentByDate = async () => {
-    if (!spentDateFrom && !spentDateTo) { setSpentFiltered(null); return; }
-    setLoadingSpent(true);
-    let q = supabase.from('orders').select('total_thb')
-      .not('order_status', 'in', '(ยกเลิก,รอคีย์ออเดอร์)');
-    if (spentDateFrom) q = q.gte('order_date', spentDateFrom);
-    if (spentDateTo)   q = q.lte('order_date', spentDateTo);
-    const { data } = await q;
-    const total = (data || []).reduce((s, o) => s + Number(o.total_thb), 0);
-    setSpentFiltered(total);
-    setLoadingSpent(false);
-  };
+  useEffect(() => { loadCustomers(); }, []);
 
   // reset กลับหน้าแรกเมื่อ filter หรือ search เปลี่ยน
-  useEffect(() => { if (pageView !== 'all') setPageView(0); }, [search, tagFilter, sortBy, filterMinOrders, filterChannel, searchProduct, filterReturn, dateFilteredIds]);
+  useEffect(() => { if (pageView !== 'all') setPageView(0); }, [search, tagFilter, sortBy, filterMinOrders, filterChannel, searchProduct]);
 
   // ── ค้นหาสินค้า: query orders แล้ว collect customer_id ──
   useEffect(() => {
@@ -552,7 +482,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const loadOrders = async (customerId: string) => {
     setLoadingOrders(true);
     const { data } = await supabase.from('orders')
-      .select('id, order_no, order_date, raw_prod, promo_ids, quantities, total_thb, order_status, tracking_no, ship_date')
+      .select('id, order_no, order_date, raw_prod, promo_ids, quantities, total_thb, order_status, tracking_no, ship_date, channel, payment_method, note')
       .eq('customer_id', customerId)
       .order('order_date', { ascending: false });
     if (data) setCustOrders(data);
@@ -734,7 +664,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // ── Step 5: batch insert orders ────────────────────────────────────
       const ordersToInsert: any[] = [];
       let orderSkipped = 0;
-      const returnAlertBuffer: ReturnAlertItem[] = []; // เก็บออเดอร์ที่มีประวัติตีกลับ
 
       for (const row of dataRows) {
         const orderNo = String(row[1]||'').trim();
@@ -775,17 +704,11 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           ? (courier === 'ไปรษณีย์' ? (isTourist ? 'C' : 'A') : 'B')
           : (isTourist ? 'C' : 'B');
 
-        const newProd = String(row[14]||'').trim();
-        const isRepeat = !!existingCustMap[tel];
-
-        // ── ตรวจประวัติตีกลับ ──────────────────────────────────
-        const hasReturn = (returnHistory[tel] ?? 0) > 0;
-
         ordersToInsert.push({
           order_no: orderNo, customer_id: customerId,
           channel: String(row[2]||'').trim()||null,
           order_date: orderDate, order_time: orderTime||null,
-          raw_prod: newProd||null,
+          raw_prod: String(row[14]||'').trim()||null,
           promo_ids: promoIds,
           quantity: quantities.split('|').reduce((s:number,n:string)=>s+(Number(n.trim())||1),0),
           quantities, weight_kg: weightKg,
@@ -794,44 +717,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           total_thb: Number(row[21])||0,
           payment_method: String(row[22]||'COD').trim(),
           payment_status: String(row[24]||'รอชำระเงิน').trim(),
-          order_status: hasTrack ? 'รอแพ็ค' : 'รอคีย์ออเดอร์',
+          order_status: hasTrack?'รอแพ็ค':'รอคีย์ออเดอร์',
           route,
           imported_at: new Date().toISOString().split('T')[0],
-          note: isRepeat ? '🔁 สั่งเพิ่ม' : (Number(row[21])||0) === 0 ? '🔄 เคลมสินค้า' : null,
         });
-
-        // เก็บไว้แจ้งเตือนภายหลัง (ไม่ block loop)
-        if (hasReturn) {
-          returnAlertBuffer.push({
-            idx: ordersToInsert.length - 1,
-            tel, name: String(row[4]||'').trim(),
-            returnCount: returnHistory[tel],
-            action: 'proceed' as const,
-          });
-        }
-      }
-
-      // ── ถ้ามีประวัติตีกลับ → หยุดก่อน แสดง modal ────────────────────
-      if (returnAlertBuffer.length > 0) {
-        setReturnAlertItems(returnAlertBuffer);
-        setShowReturnAlert(true);
-        setPendingAfterReturn(() => async () => {
-          // กรองออเดอร์ที่ user เลือก cancel ออก
-          const cancelledIdxs = new Set(returnAlertBuffer.filter(r => r.action === 'cancel').map(r => r.idx));
-          const finalOrders = ordersToInsert.filter((_, idx) => !cancelledIdxs.has(idx));
-          let orderAdded2 = 0;
-          for (let i = 0; i < finalOrders.length; i += 500) {
-            const { error } = await supabase.from('orders').insert(finalOrders.slice(i, i + 500));
-            if (!error) orderAdded2 += Math.min(500, finalOrders.length - i);
-          }
-          setImportResult({ added: custAdded, updated: custUpdated, skipped: orderSkipped, unmapped: unmappedProds });
-          showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded2} · ข้าม ${orderSkipped}`);
-          loadCustomers(); loadReturnHistory();
-          setShowReturnAlert(false); setImporting(false);
-          if (e?.target) e.target.value = '';
-        });
-        setImporting(false);
-        return;
       }
 
       // batch insert orders (500 ต่อครั้ง)
@@ -1119,7 +1008,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     setEditOrder(data);
     setEditOrderItems(items);
     setEditOrderForm({
-      order_date:     data.order_date || '',
       total_thb:      String(data.total_thb || 0),
       tracking_no:    data.tracking_no || '',
       courier:        data.courier || '',
@@ -1154,7 +1042,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         quantities,
         quantity:       qtySum,
         raw_prod:       rawProd,
-        order_date:     editOrderForm.order_date || null,
         total_thb:      Number(editOrderForm.total_thb) || 0,
         tracking_no:    editOrderForm.tracking_no?.trim() || null,
         courier:        editOrderForm.courier?.trim() || null,
@@ -1221,9 +1108,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       || (c.facebook_name || '').toLowerCase().includes(search.toLowerCase())
       || c.tel.includes(search)
       || (c.province || '').includes(search);
-    const matchReturn  = !filterReturn || (returnHistory[c.tel] ?? 0) > 0;
-    const matchDate    = !dateFilteredIds || dateFilteredIds.has(c.id);
-    return matchTag && matchOrders && matchChannel && matchProduct && matchSearch && matchReturn && matchDate;
+    return matchTag && matchOrders && matchChannel && matchProduct && matchSearch;
   });
 
   // unique channels สำหรับ dropdown
@@ -1347,27 +1232,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
               <div className="text-xs text-purple-500">3–9 ออเดอร์</div>
             </div>
             <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-1">
-                <div className="text-xs font-semibold text-emerald-600">ยอดซื้อรวม</div>
-                {(spentDateFrom || spentDateTo) && (
-                  <button onClick={() => { setSpentDateFrom(''); setSpentDateTo(''); setSpentFiltered(null); }}
-                    className="text-emerald-400 hover:text-red-400 text-xs">✕</button>
-                )}
-              </div>
-              <div className="text-lg font-bold text-emerald-700">
-                {loadingSpent ? '...' : `฿${fmt(spentFiltered ?? totalSpent)}`}
-              </div>
-              <div className="flex items-center gap-1 mt-1.5 flex-wrap">
-                <input type="date" value={spentDateFrom} onChange={e => setSpentDateFrom(e.target.value)}
-                  className="border rounded px-1.5 py-0.5 text-[10px] text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-300 w-[100px]"/>
-                <span className="text-slate-300 text-[10px]">—</span>
-                <input type="date" value={spentDateTo} onChange={e => setSpentDateTo(e.target.value)}
-                  className="border rounded px-1.5 py-0.5 text-[10px] text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-300 w-[100px]"/>
-                <button onClick={loadSpentByDate} disabled={loadingSpent}
-                  className="px-2 py-0.5 bg-emerald-500 text-white rounded text-[10px] hover:bg-emerald-600 disabled:opacity-50">
-                  ดู
-                </button>
-              </div>
+              <div className="text-xs font-semibold text-emerald-600 mb-1">ยอดซื้อรวม</div>
+              <div className="text-lg font-bold text-emerald-700">฿{fmt(totalSpent)}</div>
+              <div className="text-xs text-emerald-500">ทุกลูกค้า</div>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
               <div className="text-xs font-semibold text-blue-600 mb-1">เพจยอดนิยม</div>
@@ -1424,45 +1291,14 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           <option value="order_count">เรียงตามจำนวนครั้ง</option>
           <option value="updated_at">เรียงตามล่าสุด</option>
         </select>
-        {/* Filter วันที่สั่งซื้อ */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-slate-400 whitespace-nowrap">📅 สั่งซื้อ</span>
-          <input type="date" value={orderDateFrom} onChange={e => setOrderDateFrom(e.target.value)}
-            className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 w-[120px]"/>
-          <span className="text-slate-300 text-xs">—</span>
-          <input type="date" value={orderDateTo} onChange={e => setOrderDateTo(e.target.value)}
-            className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 w-[120px]"/>
-          <button onClick={applyDateFilter} disabled={loadingDateFilter || (!orderDateFrom && !orderDateTo)}
-            className="px-3 py-1.5 bg-cyan-500 text-white rounded-lg text-xs hover:bg-cyan-600 disabled:opacity-40 whitespace-nowrap">
-            {loadingDateFilter ? '...' : 'กรอง'}
-          </button>
-          {dateFilteredIds && (
-            <button onClick={clearDateFilter}
-              className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50">
-              <X size={13}/>
-            </button>
-          )}
-        </div>
-
-        {/* Filter ตีกลับ */}
-        <button onClick={() => setFilterReturn(f => !f)}
-          className={`px-3 py-2 rounded-lg text-sm border transition flex items-center gap-1.5 ${filterReturn ? 'bg-red-50 border-red-300 text-red-600 font-medium' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
-          🔄 เคยตีกลับ
-          {filterReturn && <span className="text-xs">({filtered.length})</span>}
-        </button>
         {/* ล้าง filter */}
-        {(filterMinOrders > 0 || filterChannel || searchProduct || filterReturn || dateFilteredIds) && (
-          <button onClick={() => { setFilterMinOrders(0); setFilterChannel(''); setSearchProduct(''); setFilterReturn(false); clearDateFilter(); }}
+        {(filterMinOrders > 0 || filterChannel || searchProduct) && (
+          <button onClick={() => { setFilterMinOrders(0); setFilterChannel(''); setSearchProduct(''); }}
             className="text-xs text-slate-400 hover:text-red-500 px-2 py-1 rounded border hover:border-red-300 transition">
             ✕ ล้างตัวกรอง
           </button>
         )}
         <span className="text-xs text-slate-400">{filtered.length} คน</span>
-        {dateFilteredIds && (
-          <span className="text-xs bg-cyan-50 text-cyan-600 border border-cyan-200 px-2 py-0.5 rounded-lg">
-            📅 {orderDateFrom || '...'} — {orderDateTo || '...'} · {filtered.length} คน
-          </span>
-        )}
         {/* Pagination buttons */}
         <div className="flex items-center gap-1 ml-2">
           {Array.from({ length: totalPages }, (_, i) => (
@@ -1522,14 +1358,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         {filtered.map(c => {
           const tagColor = TAG_COLORS[c.tag||'ใหม่'] || 'bg-slate-100 text-slate-600';
           const isSelected = selectedIds.has(c.id);
-          const hasReturnHist = (returnHistory[c.tel] ?? 0) > 0;
-          const isExpanded = expanded === c.id;
           return (
             <div key={c.id}
-              className={`bg-white rounded-xl border shadow-sm p-3 transition ${
-                isSelected ? 'border-cyan-400 bg-cyan-50/30' :
-                hasReturnHist ? 'border-red-200 bg-red-50/30' : 'border-slate-200'
-              }`}>
+              className={`bg-white rounded-xl border shadow-sm p-3 transition ${isSelected ? 'border-cyan-400 bg-cyan-50/30' : 'border-slate-200'}`}>
               <div className="flex items-start gap-2">
                 <input type="checkbox"
                   checked={isSelected}
@@ -1549,9 +1380,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                       {c.facebook_name && c.facebook_name !== c.name && (
                         <div className="text-xs text-blue-600 truncate">{c.facebook_name}</div>
                       )}
-                      {hasReturnHist && (
-                        <div className="text-[10px] text-red-600 font-bold mt-0.5">🔄 มีประวัติตีกลับ {returnHistory[c.tel]} ครั้ง</div>
-                      )}
                     </div>
                     <button onClick={() => setEditTag({id:c.id, tag:c.tag||'ใหม่'})}
                       className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold ${tagColor}`}>
@@ -1563,8 +1391,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                     <span className="font-mono">{c.tel}</span>
                     {c.province && <span>· {c.province}</span>}
                   </div>
-                  {/* Row 3: stats + ออเดอร์ (แสดงเสมอ คลิกขยาย/ย่อ) */}
-                  <div className="flex items-center gap-3 text-xs mb-2">
+                  {/* Row 3: stats */}
+                  <div className="flex items-center gap-3 text-xs">
                     <div className="flex items-center gap-1">
                       <span className="text-slate-400">ออเดอร์</span>
                       <span className={`px-2 py-0.5 rounded-full font-bold ${
@@ -1574,44 +1402,21 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                         'bg-slate-100 text-slate-400'
                       }`}>{c.order_count}</span>
                     </div>
-                    <span className="text-slate-400">·</span>
-                    <span className="font-bold text-emerald-600">฿{fmt2(Number(c.total_spent))}</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400">·</span>
+                      <span className="font-bold text-emerald-600">฿{fmt2(Number(c.total_spent))}</span>
+                    </div>
                     {c.channel && (
                       <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded truncate max-w-[80px]">
                         {c.channel}
                       </span>
                     )}
                   </div>
-                  {/* ออเดอร์ — แสดงเสมอถ้าค้นหา, toggle ด้วย button */}
-                  {c.order_count > 0 && (
-                    <button onClick={() => toggleExpand(c.id)}
-                      className="w-full text-xs py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition flex items-center justify-center gap-1">
-                      {isExpanded ? '▲ ซ่อนออเดอร์' : `▼ ดูออเดอร์ (${c.order_count})`}
-                    </button>
-                  )}
-                  {/* Expanded orders */}
-                  {isExpanded && custOrders.length > 0 && (
-                    <div className="mt-2 space-y-1.5">
-                      {custOrders.map(o => (
-                        <div key={o.id} className="bg-slate-50 rounded-lg p-2 text-xs">
-                          <div className="flex items-center justify-between gap-2 mb-1">
-                            <span className="font-mono text-blue-600 text-[10px]">{o.order_no}</span>
-                            <span className="text-slate-400">{o.order_date}</span>
-                          </div>
-                          <div className="text-slate-600 truncate">{o.raw_prod || '-'}</div>
-                          <div className="flex items-center justify-between mt-1">
-                            <span className="font-bold text-emerald-600">฿{fmt2(Number(o.total_thb))}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                              o.order_status === 'ตีกลับ' ? 'bg-red-100 text-red-700' :
-                              o.order_status === 'ส่งสินค้าแล้ว' ? 'bg-green-100 text-green-700' :
-                              'bg-slate-100 text-slate-600'}`}>
-                              {o.order_status}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {/* Action: ดูออเดอร์ */}
+                  <button onClick={() => setExpanded(expanded === c.id ? null : c.id)}
+                    className="mt-2 w-full text-xs py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition flex items-center justify-center gap-1">
+                    {expanded === c.id ? '▲ ซ่อนออเดอร์' : `▼ ดูออเดอร์ (${c.order_count})`}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1659,11 +1464,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
             {pagedCustomers.map(c => (
               <>
                 <tr key={c.id} onClick={() => toggleExpand(c.id)}
-                  className={`border-b cursor-pointer transition ${
-                    expanded===c.id ? 'bg-cyan-50' :
-                    (returnHistory[c.tel] ?? 0) > 0 ? 'bg-red-50 hover:bg-red-100' :
-                    'hover:bg-cyan-50'
-                  }`}>
+                  className={`border-b cursor-pointer hover:bg-cyan-50 transition ${expanded===c.id?'bg-cyan-50':''}`}>
                   <td className="p-3 text-center" onClick={e => e.stopPropagation()}>
                     <input type="checkbox"
                       checked={selectedIds.has(c.id)}
@@ -1679,14 +1480,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                     {expanded===c.id ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
                   </td>
                   <td className="p-3 whitespace-nowrap" style={{minWidth:'140px'}}>
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
                       <span className="font-medium text-slate-800">{c.name}</span>
-                      {(returnHistory[c.tel] ?? 0) > 0 && (
-                        <span className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-bold whitespace-nowrap"
-                          title={`มีประวัติตีกลับ ${returnHistory[c.tel]} ครั้ง`}>
-                          🔄 ตีกลับ {returnHistory[c.tel]}
-                        </span>
-                      )}
                       {problemOnly && problemOrderCount[c.id] > 0 && (
                         <span className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-bold whitespace-nowrap"
                           title={`มีออเดอร์สถานะปัญหา ${problemOrderCount[c.id]} รายการ`}>
@@ -1745,18 +1540,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                 {expanded === c.id && (
                   <tr key={`${c.id}-detail`}>
                     <td colSpan={13} className="bg-cyan-50 px-6 py-4 border-b">
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                         <div>
                           <div className="text-xs text-slate-400 mb-0.5">ที่อยู่</div>
                           <div className="text-xs text-slate-700">{[c.address, c.subdistrict, c.district, c.province, c.postal_code].filter(Boolean).join(' ') || '-'}</div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-slate-400 mb-0.5">ช่องทาง</div>
-                          <div className="text-xs text-slate-700">{c.channel || '-'}</div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-slate-400 mb-0.5">วิธีชำระ</div>
-                          <div className="text-xs text-slate-700">{c.payment_method || '-'}</div>
                         </div>
                         <div>
                           <div className="text-xs text-slate-400 mb-0.5">ลูกค้าตั้งแต่</div>
@@ -1773,6 +1560,19 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                             <div key={o.id} className="flex items-center gap-3 text-xs bg-white rounded-lg px-3 py-2">
                               <span className="font-mono text-cyan-600 w-32 shrink-0">{o.order_no}</span>
                               <span className="text-slate-400 w-20 shrink-0">{o.order_date}</span>
+                              {/* ช่องทาง + วิธีชำระ ของออเดอร์นี้ */}
+                              {o.channel && (
+                                <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">
+                                  {o.channel}
+                                </span>
+                              )}
+                              {o.payment_method && (
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                                  o.payment_method === 'COD' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
+                                }`}>
+                                  {o.payment_method}
+                                </span>
+                              )}
                               {o.ship_date && (
                                 <span className="text-blue-600 text-xs font-medium w-24 shrink-0">
                                   🚚 {o.ship_date.split('-').reverse().join('-')}
@@ -3019,12 +2819,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
               {/* ข้อมูลอื่นๆ */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t">
                 <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">📅 วันที่สั่งซื้อ</label>
-                  <input type="date" value={editOrderForm.order_date || ''}
-                    onChange={e => setEditOrderForm((p: any) => ({...p, order_date: e.target.value}))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-                </div>
-                <div>
                   <label className="text-xs font-semibold text-slate-500 block mb-1">ยอดรวม (฿) *</label>
                   <input type="number" value={editOrderForm.total_thb || '0'}
                     onChange={e => setEditOrderForm((p: any) => ({...p, total_thb: e.target.value}))}
@@ -3197,67 +2991,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           </div>
         </>,
         document.body
-      )}
-
-      {/* ── Modal: แจ้งเตือนประวัติตีกลับ ── */}
-      {showReturnAlert && returnAlertItems.length > 0 && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-[90] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
-            <div className="shrink-0 px-6 py-4 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center text-xl">🔄</div>
-                <div>
-                  <h3 className="font-bold text-slate-800">พบประวัติตีกลับ {returnAlertItems.length} รายการ</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">ลูกค้าเหล่านี้เคยมีพัสดุตีกลับในระบบ — เลือกว่าจะดำเนินการต่อหรือยกเลิก</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex-1 overflow-auto px-6 py-4 space-y-3">
-              {returnAlertItems.map((item, i) => (
-                <div key={i} className={`rounded-xl border p-4 transition ${item.action === 'cancel' ? 'border-slate-200 bg-slate-50 opacity-60' : 'border-red-200 bg-red-50'}`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-semibold text-slate-800">{item.name}</div>
-                      <div className="font-mono text-xs text-slate-500">{item.tel}</div>
-                      <div className="text-xs text-red-600 font-medium mt-1">
-                        🔄 มีประวัติตีกลับ {item.returnCount} ครั้ง
-                      </div>
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      <button
-                        onClick={() => setReturnAlertItems(prev => prev.map((x,j) => j===i ? {...x, action:'cancel'} : x))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${item.action==='cancel' ? 'bg-slate-500 text-white' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-100'}`}>
-                        ยกเลิก
-                      </button>
-                      <button
-                        onClick={() => setReturnAlertItems(prev => prev.map((x,j) => j===i ? {...x, action:'proceed'} : x))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${item.action==='proceed' ? 'bg-emerald-500 text-white' : 'bg-white border border-emerald-300 text-emerald-600 hover:bg-emerald-50'}`}>
-                        ✓ ส่งต่อ
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="shrink-0 px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
-              <div className="text-xs text-slate-400">
-                ส่งต่อ {returnAlertItems.filter(r=>r.action==='proceed').length} · ยกเลิก {returnAlertItems.filter(r=>r.action==='cancel').length}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { setShowReturnAlert(false); setImporting(false); }}
-                  className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-300">
-                  ยกเลิกทั้งหมด
-                </button>
-                <button
-                  onClick={() => { if (pendingAfterReturn) pendingAfterReturn(); }}
-                  className="px-6 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600">
-                  ✓ ยืนยัน
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
 
       {toast && (
