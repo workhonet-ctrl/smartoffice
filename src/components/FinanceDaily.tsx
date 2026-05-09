@@ -44,10 +44,24 @@ export default function FinanceDaily() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [{ data: orders }, { data: adCosts }, { data: otherExp }] = await Promise.all([
-        supabase.from('orders')
+      // ── โหลด orders ทั้งหมด (pagination 1000/ครั้ง) ──────────────────
+      const allOrders: any[] = [];
+      let page = 0;
+      const PAGE = 1000;
+      while (true) {
+        const { data: chunk, error } = await supabase.from('orders')
           .select('id, order_no, order_date, total_thb, shipping_thb, raw_prod, promo_ids, quantities, quantity, tracking_no, box_id, bubble_id_pack, customers(name), boxes(price_thb), bubbles_pack:bubble_id_pack(price_thb, length_cm)')
-          .gte('order_date', dateFrom).lte('order_date', dateTo).order('order_date'),
+          .gte('order_date', dateFrom).lte('order_date', dateTo)
+          .order('order_date')
+          .range(page * PAGE, (page + 1) * PAGE - 1);
+        if (error || !chunk || chunk.length === 0) break;
+        allOrders.push(...chunk);
+        if (chunk.length < PAGE) break;
+        page++;
+      }
+      const orders = allOrders;
+
+      const [{ data: adCosts }, { data: otherExp }] = await Promise.all([
         supabase.from('finance_expense').select('expense_date, amount_thb')
           .eq('category', 'ค่าโฆษณา').gte('expense_date', dateFrom).lte('expense_date', dateTo),
         supabase.from('finance_expense').select('expense_date, amount_thb')
