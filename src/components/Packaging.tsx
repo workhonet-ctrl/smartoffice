@@ -317,6 +317,8 @@ export default function Packaging({
   <script>window.onload=()=>{window.print()}</script>
 </body></html>`;
   };
+
+  const handleReprintFromHistory = (item: any) => {
     const ordersSnap = (item.orders_snapshot || []) as any[];
     const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
