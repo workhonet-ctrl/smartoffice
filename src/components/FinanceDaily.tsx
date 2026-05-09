@@ -93,9 +93,11 @@ export default function FinanceDaily() {
           const rev = Number(o.total_thb) || 0;
           const vat = rev * VAT_RATE;
           const com = rev * COM_RATE;
-          const ship = Number(o.shipping_thb) || 0;
+          const shipEst  = Number(o.shipping_thb) || 0;
+          const shipReal = (o as any).tracking_no ? (shipMap[(o as any).tracking_no] || 0) : 0;
+          const ship     = shipReal > 0 ? shipReal : shipEst;
           o._vat  = vat; o._com  = com; o._ship = ship;
-          sumVat  += vat; sumCom  += com; sumShip += ship;
+          sumVat  += vat; sumCom  += com;
 
           if (o.promo_ids?.length) {
             const qtys = String(o.quantities||o.quantity||'1').split('|');
@@ -291,12 +293,15 @@ export default function FinanceDaily() {
                     </thead>
                     <tbody>
                       {day.orders.map(o => {
-                        const vat    = o._vat         || 0;
-                        const com    = o._com         || 0;
-                        const ship   = o._ship        || 0;
-                        const box    = o._cost_box    || 0;
-                        const bubble = o._cost_bubble || 0;
-                        const oProfit = Number(o.total_thb) - (o._cost_goods||0) - vat - com - ship - box - bubble;
+                        const vat      = o._vat         || 0;
+                        const com      = o._com         || 0;
+                        const ship     = o._ship        || 0;
+                        const box      = o._cost_box    || 0;
+                        const bubble   = o._cost_bubble || 0;
+                        const shipReal = (o as any).tracking_no ? (shipCostMap[(o as any).tracking_no] || 0) : 0;
+                        // ใช้ค่าส่งจริง ถ้ามี ไม่งั้นใช้ประมาณ
+                        const shipUsed = shipReal > 0 ? shipReal : ship;
+                        const oProfit  = Number(o.total_thb) - (o._cost_goods||0) - vat - com - shipUsed - box - bubble;
                         return (
                           <tr key={o.id} className="border-t border-slate-50 hover:bg-slate-50">
                             <td className="px-4 py-2 font-mono text-blue-600 whitespace-nowrap">{o.order_no}</td>
