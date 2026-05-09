@@ -320,41 +320,38 @@ export default function Packaging({
 
   const handleReprintFromHistory = (item: any) => {
     const ordersSnap = (item.orders_snapshot || []) as any[];
-    const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const today = new Date().toLocaleDateString('th-TH', {
+      year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
 
-    // ถ้ามี orders_snapshot แบบใหม่ (มี promos array) ใช้เลย
     if (ordersSnap.length > 0 && Array.isArray(ordersSnap[0]?.promos)) {
-      const rows = ordersSnap.map((o: any) => ({
-        customerName: o.customerName || '-',
-        tel:          o.tel || '',
-        isFlash:      o.isFlash || false,
-        isMulti:      o.isMulti || false,
-        box:          o.box || '-',
-        bubble:       o.bubble || '-',
-        promos:       (o.promos || []).map((p: any) => ({
-          short_name:  p.short_name || null,
-          name:        p.name || '',
-          qty:         p.qty || 1,
-          box_name:    p.box_name || '-',
-          bubble_name: p.bubble_name || '-',
-        })),
-      }));
-      openPrintWindow(rows, today, item.responsible_person || '-', item.order_count || 0);
+      // snapshot ใหม่ — แยก flash/myorder แล้ว build summary เหมือนปริ้นปกติ
+      const flashSnap = ordersSnap.filter((o: any) => o.isFlash);
+      const myordSnap = ordersSnap.filter((o: any) => !o.isFlash);
+      const html = buildSummaryPrintHtml(
+        flashSnap, myordSnap, today,
+        item.responsible_person || '-',
+        item.order_count || ordersSnap.length
+      );
+      const w = window.open('', '_blank', 'width=1000,height=700');
+      if (w) { w.document.write(html); w.document.close(); }
       return;
     }
 
-    // fallback: snapshot เก่า (summary format) — แสดงเหมือนเดิม
+    // fallback: snapshot เก่า — ใช้ summary_snapshot
     const snap = (item.summary_snapshot || []) as any[];
-    const rows = snap.map((s: any) => ({
-      customerName: '-',
-      tel: '',
+    const allSnap = snap.map((s: any) => ({
       isFlash: false,
-      isMulti: s.type === 'multi',
-      box: s.box || '-',
-      bubble: s.bubble || '-',
       promos: [{ short_name: s.short_name || null, name: s.name || s.promo_name || '-', qty: s.count || 1, box_name: s.box || '-', bubble_name: s.bubble || '-' }],
+      box: s.box || '-', bubble: s.bubble || '-',
     }));
-    openPrintWindow(rows, today, item.responsible_person || '-', item.order_count || 0);
+    const html = buildSummaryPrintHtml(
+      [], allSnap, today,
+      item.responsible_person || '-',
+      item.order_count || snap.length
+    );
+    const w = window.open('', '_blank', 'width=1000,height=700');
+    if (w) { w.document.write(html); w.document.close(); }
   };
 
   const openPrintWindow = (rows: any[], today: string, resp: string, orderCount: number) => {
