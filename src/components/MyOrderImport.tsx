@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Upload, RefreshCw, X, Trash2 } from 'lucide-react';
+import { Upload, RefreshCw, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 // ── Constants ─────────────────────────────────────────────────
@@ -26,11 +26,12 @@ type TrackingRow = {
   consignee:    string;
   weight:       number;
   cod:          number;
-  cod_fee:      number;   // Total COD Fee 2%  col[11]
-  cod_vat7:     number;   // COD VAT 7%         col[12]
-  special_area: number;   // พื้นที่พิเศษ        col[13]
+  cod_fee:      number;
+  cod_vat7:     number;
+  special_area: number;
   freight:      number;
   total:        number;
+  invoice_date?: string;
   order_no?:    string;
   customer?:    string;
   raw_prod?:    string;
@@ -59,30 +60,26 @@ function parseNum(val: unknown): number {
 /**
  * MYORDER format:
  *   Sheet "Total Charge Detail"
- *   Row 0  = header (skip)
+ *   Row 0  = header (ไม่ต้อง skip)
  *   Row 1+ = data
  *
- *   col[0]  A = Email
- *   col[1]  B = Tel
- *   col[2]  C = Team Name
- *   col[3]  D = Team Percent COD Fee
- *   col[4]  E = Page (ชื่อเพจ)
  *   col[5]  F = Tracking No.
+ *   col[4]  E = Page (ชื่อเพจ)
  *   col[6]  G = Consignee
- *   col[7]  H = Phone number
- *   col[8]  I = Address
- *   col[9]  J = Weight (kg)       ← แก้จาก [10]
- *   col[10] K = COD Amount        ← แก้จาก [12]
- *   col[11] L = Total COD Fee 2%  ← แก้จาก [13]
- *   col[12] M = COD VAT 7%
- *   col[13] N = พื้นที่พิเศษ
- *   col[14] O = Freight           ← แก้จาก [15]
- *   col[15] P = Total Charge      ← แก้จาก [16]
+ *   col[10] K = Weight (kg)
+ *   col[12] M = COD Amount
+ *   col[13] N = Total COD Fee
+ *   col[15] P = Freight  ← ค่าขนส่งหลัก
+ *   col[16] Q = Total Charge
  */
 function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
   const wb    = XLSX.read(buffer, { type: 'array' });
   const ws    = wb.Sheets[wb.SheetNames[0]];
   const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+  // ดึงวันที่จากชื่อไฟล์ เช่น khamjira_2026-04-03-10-04.xlsx → 2026-04-03
+  const dateMatch = fileName.match(/(\d{4}-\d{2}-\d{2})/);
+  const invoiceDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
 
   // skip header row (index 0); กรองแถวที่ไม่มี tracking
   const dataRows = rows.slice(1).filter(r => (r as unknown[])[5]);
@@ -98,13 +95,14 @@ function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
         tracking,
         page:         String(r[4]  ?? '').trim(),
         consignee:    String(r[6]  ?? '').trim(),
-        weight:       parseNum(r[9]),   // col J
-        cod:          parseNum(r[10]),  // col K = COD Amount
-        cod_fee:      parseNum(r[11]),  // col L = Total COD Fee 2%
-        cod_vat7:     parseNum(r[12]),  // col M = COD VAT 7%
-        special_area: parseNum(r[13]),  // col N = พื้นที่พิเศษ
-        freight:      parseNum(r[14]),  // col O
-        total:        parseNum(r[15]),  // col P
+        weight:       parseNum(r[9]),
+        cod:          parseNum(r[10]),
+        cod_fee:      parseNum(r[11]),
+        cod_vat7:     parseNum(r[12]),
+        special_area: parseNum(r[13]),
+        freight:      parseNum(r[14]),
+        total:        parseNum(r[15]),
+        invoice_date: invoiceDate,
         matched:      false,
       };
     } else {
@@ -135,12 +133,10 @@ function mergeResults(
       } else {
         merged[key] = {
           ...merged[key],
-          freight:      merged[key].freight      + incoming.freight,
-          total:        merged[key].total        + incoming.total,
-          cod:          merged[key].cod          + incoming.cod,
-          cod_fee:      merged[key].cod_fee      + incoming.cod_fee,
-          cod_vat7:     merged[key].cod_vat7     + incoming.cod_vat7,
-          special_area: merged[key].special_area + incoming.special_area,
+          freight:  merged[key].freight  + incoming.freight,
+          total:    merged[key].total    + incoming.total,
+          cod:      merged[key].cod      + incoming.cod,
+          cod_fee:  merged[key].cod_fee  + incoming.cod_fee,
         };
       }
     }
@@ -163,20 +159,6 @@ export default function MyOrderImport() {
   const [matched, setMatched] = useState<boolean>(
     () => readStorage(STORAGE_KEY)?.matched ?? false
   );
-  const [tabView, setTabView] = useState<'all' | 'matched' | 'unmatched'>('all');
-
-  // ลบ tracking ที่ไม่มีคู่ออกจาก DB + state
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-
-  const deleteTracking = async (tracking: string) => {
-    await supabase.from('shipping_myorder').delete().eq('tracking', tracking);
-    setTrackingMap(prev => {
-      const next = { ...prev };
-      delete next[tracking];
-      return next;
-    });
-    setDeleteTarget(null);
-  };
 
   const [matching, setMatching]   = useState(false);
   const [saving, setSaving]       = useState(false);
@@ -254,20 +236,21 @@ export default function MyOrderImport() {
       const loaded: Record<string, TrackingRow> = {};
       for (const r of data ?? []) {
         loaded[r.tracking] = {
-          tracking:  r.tracking,
-          page:      r.page       ?? '',
-          consignee: r.consignee  ?? '',
-          weight:    Number(r.weight_kg),
-          cod:       Number(r.cod_thb),
+          tracking:     r.tracking,
+          page:         r.page       ?? '',
+          consignee:    r.consignee  ?? '',
+          weight:       Number(r.weight_kg),
+          cod:          Number(r.cod_thb),
           cod_fee:      Number(r.cod_fee_thb),
           cod_vat7:     Number(r.cod_vat7_thb   ?? 0),
           special_area: Number(r.special_area_thb ?? 0),
-          freight:   Number(r.freight_thb),
-          total:     Number(r.total_thb),
-          order_no:  r.order_no   ?? undefined,
-          customer:  r.customer   ?? undefined,
-          raw_prod:  r.raw_prod   ?? undefined,
-          matched:   r.matched    ?? false,
+          freight:      Number(r.freight_thb),
+          total:        Number(r.total_thb),
+          invoice_date: r.invoice_date ?? undefined,
+          order_no:     r.order_no  ?? undefined,
+          customer:     r.customer  ?? undefined,
+          raw_prod:     r.raw_prod  ?? undefined,
+          matched:      r.matched   ?? false,
         };
       }
 
@@ -287,20 +270,21 @@ export default function MyOrderImport() {
     setSaving(true);
     try {
       const rows = Object.values(map).map(r => ({
-        tracking:    r.tracking,
-        page:        r.page      || null,
-        consignee:   r.consignee || null,
-        weight_kg:   r.weight,
-        cod_thb:     r.cod,
+        tracking:         r.tracking,
+        page:             r.page      || null,
+        consignee:        r.consignee || null,
+        weight_kg:        r.weight,
+        cod_thb:          r.cod,
         cod_fee_thb:      r.cod_fee,
         cod_vat7_thb:     r.cod_vat7,
         special_area_thb: r.special_area,
-        freight_thb: r.freight,
-        total_thb:   r.total,
-        order_no:    r.order_no ?? null,
-        customer:    r.customer ?? null,
-        raw_prod:    r.raw_prod ?? null,
-        matched:     r.matched,
+        freight_thb:      r.freight,
+        total_thb:        r.total,
+        invoice_date:     r.invoice_date || null,
+        order_no:         r.order_no ?? null,
+        customer:         r.customer ?? null,
+        raw_prod:         r.raw_prod ?? null,
+        matched:          r.matched,
       }));
       await supabase.from('shipping_myorder').upsert(rows, { onConflict: 'tracking' });
 
@@ -375,9 +359,6 @@ export default function MyOrderImport() {
     });
   };
 
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [showFiles, setShowFiles] = useState(false);
-
   const clearAll = () => {
     sessionStorage.removeItem(STORAGE_KEY);
     setTrackingMap({});
@@ -385,7 +366,6 @@ export default function MyOrderImport() {
     setMatched(false);
     setSearch('');
     setError(null);
-    setShowClearConfirm(false);
   };
 
   // ── Derived values ──────────────────────────────────────────
@@ -394,21 +374,15 @@ export default function MyOrderImport() {
 
   const filteredRows = rows.filter(r => {
     const q = search.toLowerCase();
-    const matchSearch = (!q || r.tracking.toLowerCase().includes(q) || r.page.toLowerCase().includes(q) || r.consignee.toLowerCase().includes(q) || (r.order_no ?? "").toLowerCase().includes(q) || (r.customer ?? "").toLowerCase().includes(q) || (r.raw_prod ?? "").toLowerCase().includes(q));
-    const matchTab = tabView === "all" || (tabView === "matched" && r.matched) || (tabView === "unmatched" && !r.matched);
-    return matchSearch && matchTab;
+    return (
+      !q ||
+      r.tracking.toLowerCase().includes(q) ||
+      r.page.toLowerCase().includes(q) ||
+      (r.order_no ?? '').toLowerCase().includes(q) ||
+      (r.customer ?? '').toLowerCase().includes(q) ||
+      (r.raw_prod ?? '').toLowerCase().includes(q)
+    );
   });
-
-
-
-
-
-
-
-
-
-
-
 
   const totalFreight  = rows.reduce((s, r) => s + r.freight,  0);
   const totalCod      = rows.reduce((s, r) => s + r.cod,      0);
@@ -422,45 +396,33 @@ export default function MyOrderImport() {
   return (
     <div className="flex flex-col h-full gap-3">
 
-      {/* Upload zone — ซ่อนเมื่อมีข้อมูลแล้ว */}
-      {rows.length === 0 && (
-        <div className="shrink-0 flex gap-3 items-stretch">
-          <div
-            className="flex-1 border-2 border-dashed border-slate-200 rounded-xl p-4 flex items-center gap-4
-                       hover:border-purple-400 hover:bg-purple-50 transition cursor-pointer"
-            onClick={() => fileRef.current?.click()}
-          >
-            <Upload size={22} className="text-slate-400 shrink-0" />
-            <div className="flex-1">
-              <p className="font-medium text-slate-600 text-sm">
-                อัพโหลดไฟล์ MYORDER Excel (เลือกได้หลายไฟล์พร้อมกัน)
-              </p>
-              <p className="text-xs text-slate-400 mt-0.5">
-                รองรับ: Total Charge Detail report · Sheet แรกของไฟล์
-              </p>
-            </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".xlsx,.xls"
-              multiple
-              className="hidden"
-              onChange={handleFiles}
-            />
+      {/* Upload zone + วันที่จัดส่ง */}
+      <div className="shrink-0 flex gap-3 items-stretch">
+        <div
+          className="flex-1 border-2 border-dashed border-slate-200 rounded-xl p-4 flex items-center gap-4
+                     hover:border-purple-400 hover:bg-purple-50 transition cursor-pointer"
+          onClick={() => fileRef.current?.click()}
+        >
+          <Upload size={22} className="text-slate-400 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium text-slate-600 text-sm">
+              อัพโหลดไฟล์ MYORDER Excel (เลือกได้หลายไฟล์พร้อมกัน)
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              รองรับ: Total Charge Detail report · Sheet แรกของไฟล์
+            </p>
           </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls"
+            multiple
+            className="hidden"
+            onChange={handleFiles}
+          />
         </div>
-      )}
 
-      {/* เมื่อมีข้อมูล — แสดงปุ่มเพิ่มไฟล์ขนาดเล็ก */}
-      {rows.length > 0 && (
-        <div className="shrink-0 flex items-center gap-2">
-          <button onClick={() => fileRef.current?.click()}
-            className="px-3 py-1.5 border border-dashed border-purple-300 text-purple-500 hover:bg-purple-50 rounded-lg text-xs flex items-center gap-1.5 transition">
-            <Upload size={12}/> เพิ่มไฟล์
-          </button>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" multiple className="hidden" onChange={handleFiles}/>
-        </div>
-      )}
+      </div>
 
       {/* Error banner */}
       {error && (
@@ -473,35 +435,24 @@ export default function MyOrderImport() {
         </div>
       )}
 
-      {/* File tags — collapse เป็น pill เดียว กดดูรายชื่อได้ */}
+      {/* File tags */}
       {fileInfos.length > 0 && (
-        <>
-          <div className="shrink-0 flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => setShowFiles(v => !v)}
-              className="px-3 py-1.5 rounded-full text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center gap-1.5 transition"
-            >
-              📁 {fileInfos.length} ไฟล์ · {rows.length} tracking
-              <span className="text-slate-400 text-[10px]">{showFiles ? '▲' : '▼'}</span>
-            </button>
-            <button
-              onClick={() => setShowClearConfirm(true)}
-              className="px-3 py-1.5 rounded-full text-xs bg-slate-100 text-slate-500
-                         hover:bg-red-100 hover:text-red-600 flex items-center gap-1 transition"
-            >
-              <X size={11} /> ล้างทั้งหมด
-            </button>
-          </div>
-          {showFiles && (
-            <div className="shrink-0 flex flex-wrap gap-1.5 px-3 py-2 bg-slate-50 rounded-xl border border-slate-100">
-              {fileInfos.map((f, i) => (
-                <span key={i} className="px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1 bg-white text-purple-600 border border-purple-200">
-                  📋 {f.name} · {f.rows} tracking
-                </span>
-              ))}
-            </div>
-          )}
-        </>
+        <div className="shrink-0 flex flex-wrap gap-2">
+          {fileInfos.map((f, i) => (
+            <span key={i}
+              className="px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5
+                         bg-purple-100 text-purple-700">
+              📋 {f.name} · {f.rows} tracking
+            </span>
+          ))}
+          <button
+            onClick={clearAll}
+            className="px-3 py-1.5 rounded-full text-xs bg-slate-100 text-slate-500
+                       hover:bg-red-100 hover:text-red-600 flex items-center gap-1"
+          >
+            <X size={11} /> ล้างทั้งหมด
+          </button>
+        </div>
       )}
 
       {/* Summary cards */}
@@ -518,9 +469,9 @@ export default function MyOrderImport() {
             <div className="text-xs text-blue-500">{rows.filter(r => r.cod > 0).length} รายการ</div>
           </div>
           <div className="bg-orange-50 border border-orange-200 rounded-xl p-3">
-            <div className="text-xs text-orange-700 font-semibold mb-1">➕ ค่า COD Fee VAT 7%</div>
+            <div className="text-xs text-orange-700 font-semibold mb-1">➕ ค่า COD Fee</div>
             <div className="text-lg font-bold text-orange-800">฿{fmt(totalCodFee)}</div>
-            <div className="text-xs text-orange-500">รวมใน Total Charge</div>
+            <div className="text-xs text-orange-500">รวม VAT 7%</div>
           </div>
           <div className="bg-red-50 border border-red-200 rounded-xl p-3">
             <div className="text-xs text-red-700 font-semibold mb-1">🧾 Total Charge</div>
@@ -583,31 +534,6 @@ export default function MyOrderImport() {
         </div>
       )}
 
-      {/* Tabs */}
-      {rows.length > 0 && (
-        <div className="shrink-0 flex items-center gap-1 bg-slate-100 rounded-xl p-1 w-fit">
-          {([
-            { key: 'all',       label: 'ทั้งหมด',        count: rows.length  },
-            { key: 'matched',   label: '✓ จับคู่แล้ว',  count: cntMatched  },
-            { key: 'unmatched', label: '❌ ไม่มีคู่',    count: cntNotFound },
-          ] as const).map(t => (
-            <button key={t.key} onClick={() => setTabView(t.key)}
-              className={`px-4 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5
-                ${tabView === t.key ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
-              {t.label}
-              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold
-                ${tabView === t.key
-                  ? t.key === 'matched'   ? 'bg-green-100 text-green-700'
-                  : t.key === 'unmatched' ? 'bg-red-100 text-red-600'
-                  : 'bg-slate-200 text-slate-600'
-                  : 'bg-slate-200 text-slate-500'}`}>
-                {t.count}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* Table */}
       {rows.length > 0 && (
         <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
@@ -617,42 +543,39 @@ export default function MyOrderImport() {
                 <th className="p-3 text-left whitespace-nowrap">Tracking No.</th>
                 <th className="p-3 text-left whitespace-nowrap">เพจ</th>
                 <th className="p-3 text-left whitespace-nowrap">ผู้รับ</th>
+                <th className="p-3 text-left whitespace-nowrap">เลขออเดอร์</th>
+                <th className="p-3 text-left whitespace-nowrap">ลูกค้า</th>
+                <th className="p-3 text-left">สินค้า</th>
                 <th className="p-3 text-right whitespace-nowrap">น้ำหนัก</th>
                 <th className="p-3 text-right whitespace-nowrap">COD</th>
-                <th className="p-3 text-right whitespace-nowrap">COD Fee 2%</th>
-                <th className="p-3 text-right whitespace-nowrap">COD VAT 7%</th>
-                <th className="p-3 text-right whitespace-nowrap">พื้นที่พิเศษ</th>
+                <th className="p-3 text-right whitespace-nowrap">COD Fee</th>
                 <th className="p-3 text-right whitespace-nowrap">Freight</th>
                 <th className="p-3 text-right whitespace-nowrap">Total</th>
                 {matched && <th className="p-3 text-center whitespace-nowrap">สถานะ</th>}
-                {tabView === 'unmatched' && <th className="p-3 w-10"/>}
               </tr>
             </thead>
             <tbody>
               {filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="p-8 text-center text-slate-400">
-                    {tabView === 'matched'   ? '✓ ยังไม่มีรายการที่จับคู่แล้ว' :
-                     tabView === 'unmatched' ? '🎉 ไม่มีรายการที่หาออเดอร์ไม่พบ' :
-                     'ไม่พบรายการ'}
-                  </td>
+                  <td colSpan={12} className="p-8 text-center text-slate-400">ไม่พบรายการ</td>
                 </tr>
               )}
               {filteredRows.map(r => (
                 <tr key={r.tracking}
-                  className={`border-b transition ${
-                    matched && !r.matched ? 'bg-red-50 hover:bg-red-100' :
-                    matched &&  r.matched ? 'bg-green-50 hover:bg-green-100' :
+                  className={`border-b ${
+                    matched && !r.matched ? 'bg-red-50' :
+                    matched &&  r.matched ? 'hover:bg-green-50' :
                                             'hover:bg-slate-50'
                   }`}>
                   <td className="p-3 font-mono text-purple-600 whitespace-nowrap">{r.tracking}</td>
                   <td className="p-3 text-slate-600 whitespace-nowrap max-w-[120px] truncate">{r.page}</td>
                   <td className="p-3 text-slate-500 whitespace-nowrap">{r.consignee}</td>
+                  <td className="p-3 font-mono text-slate-600 whitespace-nowrap">{r.order_no ?? (matched ? '-' : '')}</td>
+                  <td className="p-3 font-medium whitespace-nowrap">{r.customer ?? (matched ? '-' : '')}</td>
+                  <td className="p-3 text-slate-500 max-w-[160px] truncate">{r.raw_prod ?? ''}</td>
                   <td className="p-3 text-right text-slate-500">{r.weight} kg</td>
                   <td className="p-3 text-right text-blue-700">{r.cod > 0 ? `฿${fmt(r.cod)}` : '-'}</td>
-                  <td className="p-3 text-right text-orange-500">{r.cod_fee > 0 ? `฿${fmt(r.cod_fee)}` : '-'}</td>
-                  <td className="p-3 text-right text-orange-400">{r.cod_vat7 > 0 ? `฿${r.cod_vat7.toFixed(4)}` : '-'}</td>
-                  <td className="p-3 text-right text-red-500">{r.special_area > 0 ? `฿${fmt(r.special_area)}` : '-'}</td>
+                  <td className="p-3 text-right text-orange-600">{r.cod_fee > 0 ? `฿${fmt(r.cod_fee)}` : '-'}</td>
                   <td className="p-3 text-right text-purple-700 font-medium">฿{fmt(r.freight)}</td>
                   <td className="p-3 text-right font-bold text-red-700">฿{fmt(r.total)}</td>
                   {matched && (
@@ -660,18 +583,8 @@ export default function MyOrderImport() {
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                         r.matched ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
                       }`}>
-                        {r.matched ? '✓ พบออเดอร์' : '❌ ไม่มีคู่'}
+                        {r.matched ? '✓ พบออเดอร์' : '❌ ไม่พบ'}
                       </span>
-                    </td>
-                  )}
-                  {tabView === 'unmatched' && (
-                    <td className="p-3 text-center">
-                      <button
-                        onClick={() => setDeleteTarget(r.tracking)}
-                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                        title="ลบออก">
-                        <Trash2 size={14}/>
-                      </button>
                     </td>
                   )}
                 </tr>
@@ -679,23 +592,17 @@ export default function MyOrderImport() {
             </tbody>
             <tfoot className="bg-slate-50 border-t-2 sticky bottom-0 font-bold text-[11px]">
               <tr>
-                <td className="p-3 text-slate-600" colSpan={3}>
+                <td className="p-3 text-slate-600" colSpan={6}>
                   รวม {filteredRows.length} tracking
                 </td>
                 <td className="p-3 text-right text-slate-500">
-                  {filteredRows.reduce((s, r) => s + r.weight, 0).toFixed(3)} kg
+                  {filteredRows.reduce((s, r) => s + r.weight, 0).toFixed(2)} kg
                 </td>
                 <td className="p-3 text-right text-blue-700">
                   ฿{fmt(filteredRows.reduce((s, r) => s + r.cod, 0))}
                 </td>
-                <td className="p-3 text-right text-orange-500">
+                <td className="p-3 text-right text-orange-600">
                   ฿{fmt(filteredRows.reduce((s, r) => s + r.cod_fee, 0))}
-                </td>
-                <td className="p-3 text-right text-orange-400">
-                  ฿{filteredRows.reduce((s, r) => s + r.cod_vat7, 0).toFixed(4)}
-                </td>
-                <td className="p-3 text-right text-red-500">
-                  ฿{fmt(filteredRows.reduce((s, r) => s + r.special_area, 0))}
                 </td>
                 <td className="p-3 text-right text-purple-700">
                   ฿{fmt(filteredRows.reduce((s, r) => s + r.freight, 0))}
@@ -703,8 +610,7 @@ export default function MyOrderImport() {
                 <td className="p-3 text-right text-red-700">
                   ฿{fmt(filteredRows.reduce((s, r) => s + r.total, 0))}
                 </td>
-                {matched && <td/>}
-                {tabView === 'unmatched' && <td/>}
+                {matched && <td />}
               </tr>
             </tfoot>
           </table>
@@ -737,92 +643,6 @@ export default function MyOrderImport() {
           <span className="text-xs text-slate-400">
             {loadingDB ? '⏳ กำลังโหลดข้อมูล...' : 'ไม่มีข้อมูล — อัพโหลดไฟล์ใหม่ได้เลย'}
           </span>
-        </div>
-      )}
-
-      {/* ── Confirm Delete Single Tracking ── */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
-            style={{ animation: 'popIn .18s cubic-bezier(.34,1.56,.64,1)' }}>
-            <div className="h-1.5 w-full" style={{ background: 'linear-gradient(90deg,#ef4444,#dc2626)' }}/>
-            <div className="px-6 pt-6 pb-5">
-              <div className="flex justify-center mb-4">
-                <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center shadow-inner">
-                  <Trash2 size={26} className="text-red-500"/>
-                </div>
-              </div>
-              <h3 className="text-center text-lg font-bold text-slate-800 mb-1">
-                ยืนยันลบข้อมูล?
-              </h3>
-              <p className="text-center text-xs text-slate-400 mb-1">Tracking No.</p>
-              <p className="text-center font-mono text-sm font-bold text-purple-600 bg-purple-50
-                px-3 py-1.5 rounded-lg mb-4 break-all">
-                {deleteTarget}
-              </p>
-              <p className="text-center text-xs text-red-400 mb-5">
-                ข้อมูลจะถูกลบออกจากระบบถาวร
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setDeleteTarget(null)}
-                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600
-                    text-sm font-medium hover:bg-slate-50 transition">
-                  ไม่
-                </button>
-                <button
-                  onClick={() => deleteTracking(deleteTarget)}
-                  className="flex-1 py-2.5 rounded-xl text-white text-sm font-bold transition
-                    hover:opacity-90 shadow-lg shadow-red-100"
-                  style={{ background: 'linear-gradient(135deg,#ef4444,#dc2626)' }}>
-                  ยืนยัน
-                </button>
-              </div>
-            </div>
-          </div>
-          <style>{`@keyframes popIn{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}`}</style>
-        </div>
-      )}
-
-      {/* ── Confirm Clear Popup ── */}
-      {showClearConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
-            style={{ animation: 'popIn .18s cubic-bezier(.34,1.56,.64,1)' }}>
-            <div className="h-1.5 w-full" style={{ background: 'linear-gradient(90deg,#ef4444,#f97316)' }}/>
-            <div className="px-6 pt-6 pb-5">
-              <div className="flex justify-center mb-4">
-                <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center shadow-inner">
-                  <span className="text-2xl">🗑️</span>
-                </div>
-              </div>
-              <h3 className="text-center text-lg font-bold text-slate-800 mb-1">
-                ล้างข้อมูลทั้งหมด?
-              </h3>
-              <p className="text-center text-sm text-slate-400 mb-5">
-                ข้อมูล MYORDER ทั้งหมดจะถูกลบออก<br/>
-                <span className="text-red-400 font-medium">การกระทำนี้ไม่สามารถย้อนกลับได้</span>
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowClearConfirm(false)}
-                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600
-                    text-sm font-medium hover:bg-slate-50 transition">
-                  ยกเลิก
-                </button>
-                <button
-                  onClick={clearAll}
-                  className="flex-1 py-2.5 rounded-xl text-white text-sm font-bold transition
-                    hover:opacity-90 shadow-lg shadow-red-100"
-                  style={{ background: 'linear-gradient(135deg,#ef4444,#f97316)' }}>
-                  ล้างทั้งหมด
-                </button>
-              </div>
-            </div>
-          </div>
-          <style>{`@keyframes popIn{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}`}</style>
         </div>
       )}
 
