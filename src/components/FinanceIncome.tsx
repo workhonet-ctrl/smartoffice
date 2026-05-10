@@ -357,30 +357,50 @@ export default function FinanceIncome({
   const [filterStatus, setFilterStatus] = useState('');
   const [filterMethod, setFilterMethod] = useState('');
 
-  const loadOrders = async () => {
-    setLoading(true); setSelected(new Set());
-    let q = supabase.from('orders')
-      .select('id, order_no, order_date, total_thb, payment_method, payment_status, order_status, customers(name, tel, facebook_name), raw_prod, tracking_no, slip_image')
-      .order('order_date', { ascending: false })
-      .limit(200);
+  // ── Date filter + Pagination ──────────────────────────────
+  const today = new Date().toISOString().split('T')[0];
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0];
+  });
+  const [dateTo, setDateTo] = useState(today);
+  const PAGE_SIZE = 100;
+  const [pageView, setPageView] = useState<number | 'all'>(0);
 
-    if (tab === 'cod') {
-      q = q.eq('payment_method', 'COD')
-           .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์', 'กำลังแพ็ค', 'แพ็คสินค้า']);
-    } else if (tab === 'transfer') {
-      q = q.neq('payment_method', 'COD')
-           .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์', 'กำลังแพ็ค', 'แพ็คสินค้า']);
-    } else {
-      // ทั้งหมด — เฉพาะที่ส่งแล้ว 200 รายการล่าสุด
-      q = q.in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์']);
+  const loadOrders = async () => {
+    setLoading(true); setSelected(new Set()); setPageView(0);
+
+    // pagination loop — ดึงทั้งหมดไม่จำกัด 200
+    const allOrders: any[] = [];
+    let page = 0;
+    while (true) {
+      let q = supabase.from('orders')
+        .select('id, order_no, order_date, total_thb, payment_method, payment_status, order_status, customers(name, tel, facebook_name), raw_prod, tracking_no, slip_image')
+        .gte('order_date', dateFrom).lte('order_date', dateTo)
+        .order('order_date', { ascending: false })
+        .range(page * 1000, (page + 1) * 1000 - 1);
+
+      if (tab === 'cod') {
+        q = q.eq('payment_method', 'COD')
+             .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์', 'กำลังแพ็ค', 'แพ็คสินค้า']);
+      } else if (tab === 'transfer') {
+        q = q.neq('payment_method', 'COD')
+             .in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์', 'กำลังแพ็ค', 'แพ็คสินค้า']);
+      } else {
+        q = q.in('order_status', ['ส่งสินค้าแล้ว', 'ส่งไปรษณีย์']);
+      }
+
+      const { data, error } = await q;
+      if (error || !data || data.length === 0) break;
+      allOrders.push(...data);
+      if (data.length < 1000) break;
+      page++;
     }
 
-    const { data } = await q;
-    setOrders(data || []);
+    setOrders(allOrders);
     setLoading(false);
   };
 
-  useEffect(() => { if (tab !== 'cod-file') loadOrders(); }, [tab]);
+  useEffect(() => { if (tab !== 'cod-file') loadOrders(); }, [tab, dateFrom, dateTo]);
 
   // ── Slip image ──────────────────────────────────────────────
   const [slipModal, setSlipModal] = useState<{ orderId: string; image: string | null } | null>(null);
@@ -437,6 +457,14 @@ export default function FinanceIncome({
     if (filterMethod && o.payment_method !== filterMethod) return false;
     return true;
   });
+
+  // reset page เมื่อ filter เปลี่ยน
+  useEffect(() => { setPageView(0); }, [search, filterStatus, filterMethod]);
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const pagedOrders = pageView === 'all'
+    ? filtered
+    : filtered.slice((pageView as number) * PAGE_SIZE, ((pageView as number) + 1) * PAGE_SIZE);
 
   const totWaiting = orders.filter(o => o.payment_status !== 'ชำระแล้ว').reduce((s, o) => s + (o.total_thb || 0), 0);
   const totPaid    = orders.filter(o => o.payment_status === 'ชำระแล้ว').reduce((s, o) => s + (o.total_thb || 0), 0);
@@ -506,6 +534,15 @@ export default function FinanceIncome({
 
           {/* Toolbar */}
           <div className="shrink-0 flex items-center gap-2 mb-3 flex-wrap">
+            {/* Date filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-400 whitespace-nowrap">📅 วันที่</span>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 w-[120px]"/>
+              <span className="text-slate-300 text-xs">—</span>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 w-[120px]"/>
+            </div>
             {/* Search */}
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
@@ -547,6 +584,29 @@ export default function FinanceIncome({
             )}
           </div>
 
+          {/* Pagination */}
+          {filtered.length > PAGE_SIZE && (
+            <div className="shrink-0 flex items-center gap-1 mb-2 flex-wrap">
+              {Array.from({ length: totalPages }, (_, i) => (
+                <button key={i} onClick={() => setPageView(i)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    pageView === i ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}>
+                  หน้า {i + 1}
+                </button>
+              ))}
+              <button onClick={() => setPageView('all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                  pageView === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}>
+                แสดงทั้งหมด
+              </button>
+              <span className="text-xs text-slate-400 ml-1">
+                {pageView === 'all' ? `แสดง ${filtered.length}` : `แสดง ${pagedOrders.length} / ${filtered.length}`}
+              </span>
+            </div>
+          )}
+
           {/* Table */}
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
             <table className="text-sm w-full" style={{minWidth:'800px'}}>
@@ -567,7 +627,7 @@ export default function FinanceIncome({
               <tbody>
                 {loading && <tr><td colSpan={10} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
                 {!loading && filtered.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-slate-400">ไม่พบข้อมูล</td></tr>}
-                {filtered.map(o => {
+                {pagedOrders.map(o => {
                   const paid = o.payment_status === 'ชำระแล้ว';
                   const isTransfer = tab === 'transfer';
                   return (
