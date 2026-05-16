@@ -5,3 +5,19 @@
 body {
   font-family: 'IBM Plex Sans Thai', sans-serif;
 }
+
+/* ซ่อน Supabase Auth toolbar ที่ inject อัตโนมัติ */
+[data-supabase-auth-ui],
+supabase-auth-ui,
+#supabase-auth-ui-root,
+.__supabase_auth_ui_widget,
+div[class*="supabase-auth"],
+div[id*="supabase-auth"],
+div[class*="supabase_auth"],
+div[class*="gotrue"],
+iframe[src*="supabase"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
