@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { useState } from 'react';
 import {
   Package, List, Users, ShoppingCart, Truck, FileSpreadsheet,
   DollarSign, UserCog, Archive, Warehouse, ChevronDown, ChevronRight,
@@ -25,6 +24,8 @@ type SidebarProps = {
   setActivePage: (page: PageKey) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  userEmail?: string;
+  onSignOut?: () => void;
 };
 
 type MenuItem = {
@@ -112,18 +113,7 @@ const GROUPS = [
   },
 ];
 
-export default function Sidebar({ activePage, setActivePage, collapsed = false, onToggleCollapse }: SidebarProps) {
-  const [userEmail, setUserEmail] = useState<string>('');
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUserEmail(data?.user?.email || '');
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUserEmail(session?.user?.email || '');
-    });
-    return () => listener?.subscription.unsubscribe();
-  }, []);
+export default function Sidebar({ activePage, setActivePage, collapsed = false, onToggleCollapse, userEmail = '', onSignOut }: SidebarProps) {
   // helper: เช็คว่า menu หรือ children มี key ตรงกับ activePage ไหม
   const isMenuActive = (m: MenuItem): boolean => {
     if (m.key === activePage) return true;
@@ -358,7 +348,7 @@ export default function Sidebar({ activePage, setActivePage, collapsed = false, 
             </div>
             {userEmail && (
               <button
-                onClick={() => supabase.auth.signOut()}
+                onClick={() => onSignOut?.()}
                 className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-400 transition shrink-0"
                 title="ออกจากระบบ">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
