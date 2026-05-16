@@ -24,7 +24,6 @@ import Marketing from './components/Marketing';
 import HR from './components/HR';
 import ComingSoon from './components/ComingSoon';
 import ProductKPI from './components/ProductKPI';
-import { LogOut } from 'lucide-react';
 
 type PageKey =
   | 'sales-admin' | 'sales-customers' | 'sales-customers-problem' | 'sales-crm'
@@ -40,14 +39,13 @@ type PageKey =
 
 export default function App() {
   const { user, loading, signOut } = useAuth();
-  const [activePage, setActivePage]         = useState<PageKey>('orders');
-  const [sidebarOpen, setSidebarOpen]       = useState(false);
+  const [activePage, setActivePage]             = useState<PageKey>('orders');
+  const [sidebarOpen, setSidebarOpen]           = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [packagingOrderIds, setPackagingOrderIds] = useState<string[]>([]);
-  const [packHistoryId, setPackHistoryId]   = useState<string>('');
-  const [codState, setCodState]             = useState<CodFileState>(EMPTY_COD_STATE);
+  const [packHistoryId, setPackHistoryId]       = useState<string>('');
+  const [codState, setCodState]                 = useState<CodFileState>(EMPTY_COD_STATE);
 
-  // ── Auth guard ────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -57,22 +55,11 @@ export default function App() {
   }
 
   if (!user) return <LoginPage />;
-  // ─────────────────────────────────────────────────────────
 
-  const handlePageChange = (page: PageKey) => {
-    setActivePage(page);
-    setSidebarOpen(false);
-  };
-
-  const goToPackaging = (ids: string[]) => {
-    setPackagingOrderIds(ids);
-    setActivePage('pack-products');
-  };
-
-  const goToRequisition = (historyId: string) => {
-    setPackHistoryId(historyId);
-    setActivePage('requisition');
-  };
+  const handlePageChange = (page: PageKey) => { setActivePage(page); setSidebarOpen(false); };
+  const goToPackaging    = (ids: string[])  => { setPackagingOrderIds(ids); setActivePage('pack-products'); };
+  const goToRequisition  = (id: string)     => { setPackHistoryId(id); setActivePage('requisition'); };
+  const handleSignOut    = ()               => { if (confirm('ออกจากระบบ?')) signOut(); };
 
   const renderPage = () => {
     switch (activePage) {
@@ -89,13 +76,12 @@ export default function App() {
       case 'orders':         return <Orders onImportDone={goToPackaging} />;
       case 'flash-export':   return <FlashExport />;
       case 'myorder-export': return <MyOrderExport />;
-      case 'finance-daily':    return <Finance page="daily" />;
-      case 'finance-monthly':  return <Finance page="monthly" />;
-      case 'finance-yearly':   return <Finance page="yearly" />;
-      case 'finance-income':   return <FinanceIncome codState={codState} setCodState={setCodState} />;
-      case 'finance-expenses': return <Finance page="expenses" />;
-      case 'finance-cost':     return <ComingSoon title="ต้นทุนสินค้า" description="วิเคราะห์ต้นทุนและกำไรรายสินค้า" />;
-      // รายจ่าย sub-pages
+      case 'finance-daily':        return <Finance page="daily" />;
+      case 'finance-monthly':      return <Finance page="monthly" />;
+      case 'finance-yearly':       return <Finance page="yearly" />;
+      case 'finance-income':       return <FinanceIncome codState={codState} setCodState={setCodState} />;
+      case 'finance-expenses':     return <Finance page="expenses" />;
+      case 'finance-cost':         return <ComingSoon title="ต้นทุนสินค้า" description="วิเคราะห์ต้นทุนและกำไรรายสินค้า" />;
       case 'finance-exp-record':   return <Finance page="expenses" subTab="records" />;
       case 'finance-exp-po':       return <Finance page="expenses" subTab="po" />;
       case 'finance-exp-ads':      return <Finance page="expenses" subTab="ads" />;
@@ -106,36 +92,40 @@ export default function App() {
       case 'hr-train':   return <ComingSoon title="เทรนพนักงาน" description="ระบบฝึกอบรมพนักงาน" />;
       case 'hr-kpi':     return <ComingSoon title="KPI พนักงาน" description="ประเมินผลงานพนักงาน" />;
       case 'hr-sop':     return <ComingSoon title="คู่มือการทำงาน (SOP)" description="Standard Operating Procedures" />;
-      case 'sales-admin':     return <Marketing page="admin" />;
-      case 'sales-customers': return <Customers onGoToProducts={() => setActivePage('products')} />;
+      case 'sales-admin':             return <Marketing page="admin" />;
+      case 'sales-customers':         return <Customers onGoToProducts={() => setActivePage('products')} />;
       case 'sales-customers-problem': return <ProblemCases />;
-      case 'sales-crm':       return <ComingSoon title="CRM" description="ระบบจัดการความสัมพันธ์ลูกค้า" />;
-      case 'marketing-graphic':    return <Marketing page="graphic" />;
-      case 'marketing-ads-assign': return <AdsAssignment />;
-      case 'marketing-ads':        return <Marketing page="ads" />;
+      case 'sales-crm':               return <ComingSoon title="CRM" description="ระบบจัดการความสัมพันธ์ลูกค้า" />;
+      case 'marketing-graphic':       return <Marketing page="graphic" />;
+      case 'marketing-ads-assign':    return <AdsAssignment />;
+      case 'marketing-ads':           return <Marketing page="ads" />;
       default: return <Products />;
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
-      {/* Overlay backdrop */}
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-40 z-30 lg:hidden" onClick={() => setSidebarOpen(false)}/>
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar — รับ userEmail + onSignOut เพื่อแสดงที่ footer */}
       <div className={`
         fixed inset-y-0 left-0 z-40 transform transition-all duration-300 ease-in-out shrink-0
         lg:relative lg:translate-x-0 lg:z-auto
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         ${sidebarCollapsed ? 'lg:w-[56px]' : 'lg:w-[220px]'}
       `}>
-        <Sidebar activePage={activePage} setActivePage={handlePageChange}
-          collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(c => !c)} />
+        <Sidebar
+          activePage={activePage}
+          setActivePage={handlePageChange}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(c => !c)}
+          userEmail={user.email || ''}
+          onSignOut={handleSignOut}
+        />
       </div>
 
-      {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 min-h-screen">
         {/* Mobile topbar */}
         <div className="lg:hidden shrink-0 flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shadow-sm">
@@ -148,31 +138,19 @@ export default function App() {
           </button>
           <div className="flex items-center gap-2 flex-1">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold"
-              style={{ background: 'linear-gradient(135deg,#0ea5e9,#6366f1)' }}>
-              S
-            </div>
+              style={{ background: 'linear-gradient(135deg,#0ea5e9,#6366f1)' }}>S</div>
             <span className="font-bold text-slate-800 text-sm">SmartOffice</span>
           </div>
-          {/* Sign out — mobile */}
-          <button onClick={() => { if (confirm('ออกจากระบบ?')) signOut(); }}
-            className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-red-500 transition" title="ออกจากระบบ">
-            <LogOut size={17}/>
+          <button onClick={handleSignOut}
+            className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-red-500 transition">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
           </button>
         </div>
 
-        {/* Desktop: user badge + sign out (top-right) */}
-        <div className="hidden lg:flex absolute top-3 right-4 z-20 items-center gap-2">
-          <span className="text-xs text-slate-400 bg-white border border-slate-100 px-2 py-1 rounded-lg shadow-sm">
-            {user.email}
-          </span>
-          <button onClick={() => { if (confirm('ออกจากระบบ?')) signOut(); }}
-            className="p-1.5 rounded-lg bg-white border border-slate-100 shadow-sm text-slate-400 hover:text-red-500 hover:border-red-200 transition"
-            title="ออกจากระบบ">
-            <LogOut size={15}/>
-          </button>
-        </div>
-
-        {/* Page content */}
         <main className="flex-1 overflow-auto">{renderPage()}</main>
       </div>
     </div>
