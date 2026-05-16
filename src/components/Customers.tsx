@@ -470,7 +470,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           quantities:  quantities,
           total_thb:   totalThb,
           payment_method: paymentMethod,
-          payment_status: paymentMethod === 'COD' ? 'รอชำระเงิน' : 'ชำระเงินแล้ว',
+          payment_status: paymentMethod === 'COD' ? 'รอชำระเงิน' : 'ชำระแล้ว',
           order_status: 'รอแพ็ค',
           imported_at: new Date().toISOString().split('T')[0],
         }]);
