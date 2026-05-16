@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 import {
   Package, List, Users, ShoppingCart, Truck, FileSpreadsheet,
   DollarSign, UserCog, Archive, Warehouse, ChevronDown, ChevronRight,
@@ -17,7 +18,6 @@ type PageKey =
   | 'stock' | 'purchase-order' | 'suppliers'
   | 'finance-daily' | 'finance-monthly' | 'finance-yearly'
   | 'finance-expenses' | 'finance-income' | 'finance-cost'
-  | 'finance-exp-record' | 'finance-exp-po' | 'finance-exp-ads' | 'finance-exp-shipping' | 'finance-exp-all'
   | 'hr-recruit' | 'hr' | 'hr-train' | 'hr-kpi' | 'hr-sop';
 
 type SidebarProps = {
@@ -91,19 +91,13 @@ const GROUPS = [
     key: 'finance', label: 'ฝ่ายการเงิน', icon: DollarSign,
     accent: '#10b981', bg: '#f0fdf4', dot: '#10b981',
     menus: [
-      // ── บัญชี ──
-      { key: 'finance-daily',   label: 'รายวัน',   icon: BarChart2,  built: true,  group: 'บัญชี'   },
-      { key: 'finance-monthly', label: 'รายเดือน', icon: BarChart2,  built: true,  group: 'บัญชี'   },
-      { key: 'finance-yearly',  label: 'รายปี',    icon: BarChart2,  built: true,  group: 'บัญชี'   },
-      // ── รายรับ ──
-      { key: 'finance-income',  label: 'รายรับ',   icon: ArrowDownCircle, built: true, group: 'รายรับ' },
-      // ── รายจ่าย ──
-      { key: 'finance-exp-record',   label: 'ใบบันทึกรายจ่าย',  icon: FileText,    built: true,  group: 'รายจ่าย' },
-      { key: 'finance-exp-po',       label: 'ใบสั่งซื้อ (PO)',   icon: ShoppingBag, built: true,  group: 'รายจ่าย' },
-      { key: 'finance-exp-ads',      label: 'ค่าโฆษณา',          icon: Megaphone,   built: true,  group: 'รายจ่าย' },
-      { key: 'finance-exp-shipping', label: 'ค่าขนส่ง',           icon: Truck,       built: true,  group: 'รายจ่าย' },
-      { key: 'finance-exp-all',      label: 'ทั้งหมด',            icon: List,        built: true,  group: 'รายจ่าย' },
-    ] as (MenuItem & { group?: string })[],
+      { key: 'finance-daily',    label: 'บัญชีรายวัน',   icon: BarChart2,       built: true  },
+      { key: 'finance-monthly',  label: 'บัญชีรายเดือน', icon: BarChart2,       built: true  },
+      { key: 'finance-yearly',   label: 'บัญชีรายปี',    icon: BarChart2,       built: true  },
+      { key: 'finance-expenses', label: 'รายจ่าย',        icon: FileText,        built: true  },
+      { key: 'finance-income',   label: 'รายรับ',         icon: ArrowDownCircle, built: true  },
+      { key: 'finance-cost',     label: 'ต้นทุนสินค้า',   icon: DollarSign,      built: false },
+    ] as MenuItem[],
   },
   {
     key: 'hr', label: 'ฝ่าย HR', icon: Building2,
@@ -119,6 +113,17 @@ const GROUPS = [
 ];
 
 export default function Sidebar({ activePage, setActivePage, collapsed = false, onToggleCollapse }: SidebarProps) {
+  const [userEmail, setUserEmail] = useState<string>('');
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUserEmail(data?.user?.email || '');
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserEmail(session?.user?.email || '');
+    });
+    return () => listener?.subscription.unsubscribe();
+  }, []);
   // helper: เช็คว่า menu หรือ children มี key ตรงกับ activePage ไหม
   const isMenuActive = (m: MenuItem): boolean => {
     if (m.key === activePage) return true;
@@ -162,7 +167,7 @@ export default function Sidebar({ activePage, setActivePage, collapsed = false, 
       style={{ boxShadow: '2px 0 12px 0 rgba(0,0,0,0.04)' }}>
 
       {/* Logo + Toggle */}
-      <div className={`${collapsed ? 'px-2 py-4' : 'px-5 py-5'} border-b border-slate-100 flex items-center justify-between`}>
+      <div className={`${collapsed ? 'px-2 py-4' : 'px-4 py-4'} border-b border-slate-100 flex items-center justify-between`}>
         <div className="flex items-center gap-2.5 overflow-hidden">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold shrink-0"
             style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)' }}>
@@ -245,26 +250,13 @@ export default function Sidebar({ activePage, setActivePage, collapsed = false, 
               {isOpen && (
                 <div className="ml-3 mt-0.5 mb-1 pl-3 space-y-0.5"
                   style={{ borderLeft: `1.5px solid ${group.accent}25` }}>
-                  {group.menus.map((menu, idx) => {
+                  {group.menus.map(menu => {
                     const MIcon = menu.icon;
                     const active = activePage === menu.key;
                     const hasChildren = !!(menu.children && menu.children.length > 0);
                     const submenuOpen = openSubmenus.has(menu.key);
-                    const menuWithGroup = menu as MenuItem & { group?: string };
-
-                    // แสดง sub-group label เมื่อเป็นเมนูแรกของ group หรือ group เปลี่ยน
-                    const prevMenu = idx > 0 ? (group.menus[idx - 1] as MenuItem & { group?: string }) : null;
-                    const showGroupLabel = menuWithGroup.group && menuWithGroup.group !== prevMenu?.group;
-
                     return (
                       <div key={menu.key}>
-                        {/* Sub-group label เช่น บัญชี / รายรับ / รายจ่าย */}
-                        {showGroupLabel && (
-                          <div className="px-2 pt-2 pb-1 text-[9.5px] font-semibold uppercase tracking-wider"
-                            style={{ color: group.accent + 'aa' }}>
-                            {menuWithGroup.group}
-                          </div>
-                        )}
                         <div
                           className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[12.5px] transition-all"
                           style={active
@@ -352,11 +344,36 @@ export default function Sidebar({ activePage, setActivePage, collapsed = false, 
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="shrink-0 px-4 py-3 border-t border-slate-100">
-        <div className="text-[10px] text-slate-300 text-center">
-          SmartOffice © 2026
-        </div>
+      {/* Footer: user email + logout */}
+      <div className="shrink-0 border-t border-slate-100">
+        {!collapsed ? (
+          <div className="px-4 py-3 flex items-center gap-2">
+            <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-500 shrink-0">
+              {userEmail ? userEmail[0].toUpperCase() : 'U'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] text-slate-500 truncate font-medium">
+                {userEmail || 'SmartOffice © 2026'}
+              </div>
+            </div>
+            {userEmail && (
+              <button
+                onClick={() => supabase.auth.signOut()}
+                className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-400 transition shrink-0"
+                title="ออกจากระบบ">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="px-2 py-3 flex justify-center">
+            <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-500">
+              {userEmail ? userEmail[0].toUpperCase() : 'S'}
+            </div>
+          </div>
+        )}
       </div>
     </aside>
   );
