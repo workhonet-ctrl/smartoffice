@@ -288,10 +288,10 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
         </>
       )}
 
-      {/* ── Tab: ค่าโฆษณา / ทั้งหมด ── */}
-      {(subTab === 'ads' || subTab === 'all') && (() => {
+      {/* ── Tab: ค่าโฆษณา ── */}
+      {subTab === 'ads' && (() => {
         const tabRows = records.filter(r => {
-          if (subTab === 'ads' && r.category !== 'ค่าโฆษณา') return false;
+          if (r.category !== 'ค่าโฆษณา') return false;
           const q = search.toLowerCase();
           if (q && !(r.description.toLowerCase().includes(q) || (r.doc_no||'').toLowerCase().includes(q))) return false;
           return true;
@@ -350,6 +350,93 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
                     <td colSpan={4} className="p-3 text-right font-semibold text-slate-600">รวม {tabRows.length} รายการ</td>
                     <td className="p-3 text-right font-bold text-red-600 text-base">฿{fmt(tabTotal)}</td>
                     <td colSpan={2}/>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </>
+        );
+      })()}
+
+      {/* ── Tab: ทั้งหมด — รวม records + PO เรียงตามวันที่ ── */}
+      {subTab === 'all' && (() => {
+        const q = search.toLowerCase();
+        const expRows = records.filter(r =>
+          !q || r.description.toLowerCase().includes(q) || (r.doc_no||'').toLowerCase().includes(q)
+        ).map(r => ({
+          id: r.id, doc_no: r.doc_no||'-', date: r.expense_date,
+          description: r.description, category: r.category,
+          amount: Number(r.amount_thb), note: r.note||'', source: 'expense' as const,
+        }));
+        const poRows = pos.filter(p =>
+          !q || (p.supplier_name||'').toLowerCase().includes(q) || p.po_no.toLowerCase().includes(q)
+        ).map(p => ({
+          id: p.id, doc_no: p.po_no, date: p.po_date,
+          description: `PO: ${p.supplier_name||'-'}`, category: 'ใบสั่งซื้อ',
+          amount: Number(p.total_thb), note: p.status, source: 'po' as const,
+        }));
+        const allRows = [...expRows, ...poRows].sort((a, b) => b.date.localeCompare(a.date));
+        const allTotal = allRows.reduce((s, r) => s + r.amount, 0);
+        return (
+          <>
+            <div className="shrink-0 flex gap-3 mb-3 flex-wrap items-center">
+              <div className="rounded-xl px-4 py-3 border bg-slate-50 border-slate-200">
+                <div className="text-xs text-slate-500 font-semibold mb-0.5">ยอดรวมทั้งหมด</div>
+                <div className="text-xl font-bold text-red-600">฿{fmt(allTotal)}</div>
+                <div className="text-xs text-slate-400">{allRows.length} รายการ</div>
+              </div>
+              <div className="flex gap-2 text-xs flex-wrap">
+                <span className="px-2 py-1 bg-red-50 text-red-600 rounded-lg border border-red-100">
+                  ใบบันทึก {expRows.length} รายการ · ฿{fmt(expRows.reduce((s,r)=>s+r.amount,0))}
+                </span>
+                <span className="px-2 py-1 bg-purple-50 text-purple-600 rounded-lg border border-purple-100">
+                  PO {poRows.length} ใบ · ฿{fmt(poRows.reduce((s,r)=>s+r.amount,0))}
+                </span>
+              </div>
+              <div className="relative">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                <input value={search} onChange={e=>setSearch(e.target.value)}
+                  placeholder="ค้นหา..."
+                  className="pl-8 pr-3 py-2 border rounded-lg text-xs w-48 focus:outline-none focus:ring-2 focus:ring-slate-300"/>
+              </div>
+            </div>
+            <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+              <table className="text-sm w-full" style={{minWidth:'650px'}}>
+                <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0">
+                  <tr>
+                    <th className="p-3 text-left">เลขที่</th>
+                    <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                    <th className="p-3 text-left">รายการ</th>
+                    <th className="p-3 text-center whitespace-nowrap">หมวด</th>
+                    <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
+                    <th className="p-3 text-left">หมายเหตุ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allRows.length===0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">ไม่มีรายการในช่วงนี้</td></tr>}
+                  {allRows.map(r => (
+                    <tr key={`${r.source}-${r.id}`} className={`border-b hover:bg-slate-50 ${r.source==='po'?'bg-purple-50/30':''}`}>
+                      <td className="p-3 font-mono text-xs text-slate-500">{r.doc_no}</td>
+                      <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{fmtDate(r.date)}</td>
+                      <td className="p-3 font-medium">{r.description}</td>
+                      <td className="p-3 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                          r.category==='ค่าโฆษณา' ? 'bg-pink-100 text-pink-700' :
+                          r.category==='ใบสั่งซื้อ' ? 'bg-purple-100 text-purple-700' :
+                          r.category==='ค่าจัดส่ง' ? 'bg-blue-100 text-blue-700' :
+                          'bg-red-100 text-red-700'
+                        }`}>{r.category}</span>
+                      </td>
+                      <td className="p-3 text-right font-bold text-red-600">฿{fmt(r.amount)}</td>
+                      <td className="p-3 text-xs text-slate-400">{r.note||'-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-slate-50 border-t-2 sticky bottom-0">
+                  <tr>
+                    <td colSpan={4} className="p-3 text-right font-semibold text-slate-600">รวม {allRows.length} รายการ</td>
+                    <td className="p-3 text-right font-bold text-red-600 text-base">฿{fmt(allTotal)}</td>
+                    <td/>
                   </tr>
                 </tfoot>
               </table>
