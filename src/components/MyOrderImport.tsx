@@ -39,6 +39,7 @@ type TrackingRow = {
 type FileInfo = {
   name: string;
   rows: number;
+  invoice_date?: string;
 };
 
 type ParseResult = {
@@ -107,7 +108,7 @@ function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
 
   return {
     trackingMap,
-    fileInfo: { name: fileName, rows: Object.keys(trackingMap).length },
+    fileInfo: { name: fileName, rows: Object.keys(trackingMap).length, invoice_date: invoiceDate },
   };
 }
 
@@ -350,19 +351,14 @@ export default function MyOrderImport() {
     const trackings = Object.keys(trackingMap);
     setClearing(true);
     try {
-      // ลบออกจาก Supabase ด้วย (ถ้ามี tracking ที่บันทึกไว้)
       if (trackings.length > 0) {
         const CHUNK = 500;
         for (let i = 0; i < trackings.length; i += CHUNK) {
-          await supabase
-            .from('shipping_myorder')
-            .delete()
+          await supabase.from('shipping_myorder').delete()
             .in('tracking', trackings.slice(i, i + CHUNK));
         }
       }
-    } catch (err) {
-      console.error('clearAll DB error:', err);
-    }
+    } catch (err) { console.error('clearAll DB error:', err); }
     sessionStorage.removeItem(STORAGE_KEY);
     setTrackingMap({});
     setFileInfos([]);
@@ -442,13 +438,16 @@ export default function MyOrderImport() {
 
       {/* File tags */}
       {fileInfos.length > 0 && (
-        <div className="shrink-0 flex flex-wrap gap-2">
+        <div className="shrink-0 flex flex-wrap gap-2 items-center">
           {fileInfos.map((f, i) => (
-            <span key={i}
-              className="px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5
-                         bg-purple-100 text-purple-700">
-              📋 {f.name} · {f.rows} tracking
-            </span>
+            <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-purple-100 text-purple-700">
+              <span>📋 {f.name} · {f.rows} tracking</span>
+              {f.invoice_date && (
+                <span className="bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded-lg font-mono text-[10px]">
+                  📅 {f.invoice_date}
+                </span>
+              )}
+            </div>
           ))}
           <button
             onClick={() => setShowClearConfirm(true)}
@@ -458,6 +457,43 @@ export default function MyOrderImport() {
           >
             <X size={11} /> {clearing ? 'กำลังลบ...' : 'ล้างทั้งหมด'}
           </button>
+        </div>
+      )}
+
+      {/* แก้ไขวันที่ invoice ต่อไฟล์ */}
+      {fileInfos.length > 0 && (
+        <div className="shrink-0 flex items-center gap-2 flex-wrap bg-purple-50 border border-purple-100 rounded-xl px-3 py-2">
+          <span className="text-xs text-purple-700 font-semibold whitespace-nowrap">📅 วันที่ invoice:</span>
+          {fileInfos.map((f, i) => (
+            <div key={i} className="flex items-center gap-1.5 bg-white border border-purple-200 rounded-lg px-2 py-1">
+              <span className="text-[11px] text-slate-500 truncate max-w-[100px]" title={f.name}>
+                {f.name.replace(/khamjira.*?_/i, '').split('.')[0] || f.name}
+              </span>
+              <input
+                type="date"
+                value={f.invoice_date || ''}
+                onChange={e => {
+                  const newDate = e.target.value;
+                  const oldDate = f.invoice_date;
+                  // อัพเดต fileInfos
+                  setFileInfos((prev: FileInfo[]) => prev.map((fi: FileInfo, j: number) =>
+                    j === i ? { ...fi, invoice_date: newDate } : fi
+                  ));
+                  // อัพเดต trackingMap rows ที่ invoice_date ตรงกับไฟล์นี้
+                  setTrackingMap(prev => {
+                    const updated = { ...prev };
+                    Object.keys(updated).forEach(k => {
+                      if (updated[k].invoice_date === oldDate) {
+                        updated[k] = { ...updated[k], invoice_date: newDate };
+                      }
+                    });
+                    return updated;
+                  });
+                }}
+                className="border rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-300 w-[130px]"
+              />
+            </div>
+          ))}
         </div>
       )}
 
@@ -667,14 +703,11 @@ export default function MyOrderImport() {
               </div>
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={() => setShowClearConfirm(false)}
+              <button onClick={() => setShowClearConfirm(false)}
                 className="flex-1 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-200">
                 ยกเลิก
               </button>
-              <button
-                onClick={clearAll}
-                disabled={clearing}
+              <button onClick={clearAll} disabled={clearing}
                 className="flex-1 py-2.5 bg-red-500 text-white rounded-xl text-sm font-semibold hover:bg-red-600 disabled:opacity-50">
                 {clearing ? 'กำลังลบ...' : '🗑 ลบทั้งหมด'}
               </button>
