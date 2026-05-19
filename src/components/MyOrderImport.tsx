@@ -72,8 +72,15 @@ function parseNum(val: unknown): number {
  *   col[16] Q = Total Charge
  */
 function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
-  const wb    = XLSX.read(buffer, { type: 'array' });
-  const ws    = wb.Sheets[wb.SheetNames[0]];
+  const wb = XLSX.read(buffer, { type: 'array' });
+
+  // ── หา sheet ที่ถูกต้อง: ลอง "Total Charge Detail" ก่อน ถ้าไม่มีใช้แผ่นแรก ──
+  const targetNames = ['Total Charge Detail', 'total charge detail', 'Sheet1', 'Hoja1'];
+  const sheetName = targetNames.find(n => wb.SheetNames.includes(n)) ?? wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+
+  if (!ws) throw new Error(`ไม่พบ sheet ในไฟล์ (sheets: ${wb.SheetNames.join(', ')})`);
+
   const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
   // skip header row (index 0); กรองแถวที่ไม่มี tracking
@@ -196,8 +203,7 @@ export default function MyOrderImport() {
           results.push(parseSheet(ev.target!.result as ArrayBuffer, file.name));
         } catch (err) {
           console.error('Parse error:', file.name, err);
-          errors.push(`อ่านไฟล์ "${file.name}" ไม่ได้`);
-        } finally {
+          errorush(`อ่านไฟล์ "${file.name}" ไม่ได้: ${err instanceof Error ? err.message : String(err)}`)} finally {
           pending--;
           finalize();
         }
