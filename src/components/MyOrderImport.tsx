@@ -39,7 +39,6 @@ type TrackingRow = {
 type FileInfo = {
   name: string;
   rows: number;
-  invoice_date?: string;
 };
 
 type ParseResult = {
@@ -53,7 +52,10 @@ const fmt = (n: number) =>
   n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function parseNum(val: unknown): number {
-  return Math.abs(parseFloat(String(val ?? '0').replace(/[^0-9.-]/g, '')) || 0);
+  const s = String(val ?? '').trim();
+  if (/\d+\s*[×x×✕]\s*\d+/i.test(s)) return 0;
+  if (/[a-zA-Z\u0E00-\u0E7F]{3,}/.test(s)) return 0;
+  return Math.abs(parseFloat(s.replace(/[^0-9.-]/g, '')) || 0);
 }
 
 /**
@@ -72,16 +74,26 @@ function parseNum(val: unknown): number {
  *   col[16] Q = Total Charge
  */
 function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
-  const wb = XLSX.read(buffer, { type: 'array' });
-
-  // ── หา sheet ที่ถูกต้อง: ลอง "Total Charge Detail" ก่อน ถ้าไม่มีใช้แผ่นแรก ──
-  const targetNames = ['Total Charge Detail', 'total charge detail', 'Sheet1', 'Hoja1'];
-  const sheetName = targetNames.find(n => wb.SheetNames.includes(n)) ?? wb.SheetNames[0];
-  const ws = wb.Sheets[sheetName];
-
-  if (!ws) throw new Error(`ไม่พบ sheet ในไฟล์ (sheets: ${wb.SheetNames.join(', ')})`);
+  const wb    = XLSX.read(buffer, { type: 'array' });
+  const ws    = wb.Sheets[wb.SheetNames[0]];
+  // ดึงวันที่จากชื่อไฟล์ เช่น khamjira_2026-04-03-10-04.xlsx → 2026-04-03
+  const dateMatch = fileName.match(/(\d{4}-\d{2}-\d{2})/);
+  const invoiceDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
 
   const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+  // ── Auto-detect columns จาก header row ──
+  const header = (rows[0] as string[]) || [];
+  const findCol = (keywords: string[]) =>
+    header.findIndex(h => h && keywords.some(k => String(h).toLowerCase().includes(k.toLowerCase())));
+
+  const W  = findCol(['weight'])          >= 0 ? findCol(['weight'])          : 9;
+  const C  = findCol(['cod amount'])      >= 0 ? findCol(['cod amount'])      : 10;
+  const CF = findCol(['total cod fee','cod fee 2']) >= 0 ? findCol(['total cod fee','cod fee 2']) : 11;
+  const V7 = findCol(['cod vat','vat 7']) >= 0 ? findCol(['cod vat','vat 7']) : 12;
+  const SP = findCol(['พื้นที่พิเศษ','special']) >= 0 ? findCol(['พื้นที่พิเศษ','special']) : 13;
+  const FR = findCol(['freight'])         >= 0 ? findCol(['freight'])         : 14;
+  const TC = findCol(['total charge'])    >= 0 ? findCol(['total charge'])    : 15;
 
   // skip header row (index 0); กรองแถวที่ไม่มี tracking
   const dataRows = rows.slice(1).filter(r => (r as unknown[])[5]);
@@ -95,27 +107,27 @@ function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
     if (!trackingMap[tracking]) {
       trackingMap[tracking] = {
         tracking,
-        page:      String(r[4]  ?? '').trim(),
-        consignee: String(r[6]  ?? '').trim(),
-        weight:    parseNum(r[10]),
-        cod:       parseNum(r[12]),
-        cod_fee:   parseNum(r[13]),
-        freight:   parseNum(r[15]),
-        total:     parseNum(r[16]),
-        matched:   false,
+        page:         String(r[4] ?? '').trim(),
+        consignee:    String(r[6] ?? '').trim(),
+        weight:       parseNum(r[W]),
+        cod:          parseNum(r[C]),
+        cod_fee:      parseNum(r[CF]),
+        freight:      parseNum(r[FR]),
+        total:        parseNum(r[TC]),
+        matched:      false,
+        invoice_date: invoiceDate,
       };
     } else {
-      // กรณีมี tracking ซ้ำ (พิเศษ) — บวกรวม
-      trackingMap[tracking].freight += parseNum(r[15]);
-      trackingMap[tracking].total   += parseNum(r[16]);
-      trackingMap[tracking].cod     += parseNum(r[12]);
-      trackingMap[tracking].cod_fee += parseNum(r[13]);
+      trackingMap[tracking].freight  += parseNum(r[FR]);
+      trackingMap[tracking].total    += parseNum(r[TC]);
+      trackingMap[tracking].cod      += parseNum(r[C]);
+      trackingMap[tracking].cod_fee  += parseNum(r[CF]);
     }
   }
 
   return {
     trackingMap,
-    fileInfo: { name: fileName, rows: Object.keys(trackingMap).length, invoice_date: invoiceDate },
+    fileInfo: { name: fileName, rows: Object.keys(trackingMap).length },
   };
 }
 
@@ -126,17 +138,8 @@ function mergeResults(
   const merged = { ...prev };
   for (const result of results) {
     for (const [key, incoming] of Object.entries(result.trackingMap)) {
-      if (!merged[key]) {
-        merged[key] = { ...incoming };
-      } else {
-        merged[key] = {
-          ...merged[key],
-          freight:  merged[key].freight  + incoming.freight,
-          total:    merged[key].total    + incoming.total,
-          cod:      merged[key].cod      + incoming.cod,
-          cod_fee:  merged[key].cod_fee  + incoming.cod_fee,
-        };
-      }
+      // replace ทุกครั้ง — ไฟล์ใหม่ override ค่าเก่าเสมอ ไม่บวกซ้ำ
+      merged[key] = { ...incoming, matched: merged[key]?.matched ?? false };
     }
   }
   return merged;
@@ -203,7 +206,8 @@ export default function MyOrderImport() {
           results.push(parseSheet(ev.target!.result as ArrayBuffer, file.name));
         } catch (err) {
           console.error('Parse error:', file.name, err);
-          errorush(`อ่านไฟล์ "${file.name}" ไม่ได้: ${err instanceof Error ? err.message : String(err)}`)} finally {
+          errors.push(`อ่านไฟล์ "${file.name}" ไม่ได้`);
+        } finally {
           pending--;
           finalize();
         }
@@ -403,11 +407,12 @@ export default function MyOrderImport() {
   return (
     <div className="flex flex-col h-full gap-3">
 
-      {/* Upload zone */}
-      <div className="shrink-0">
-        <label
+      {/* Upload zone + วันที่จัดส่ง */}
+      <div className="shrink-0 flex gap-3 items-stretch">
+        <div
           className="flex-1 border-2 border-dashed border-slate-200 rounded-xl p-4 flex items-center gap-4
-                     hover:border-purple-400 hover:bg-purple-50 transition cursor-pointer w-full"
+                     hover:border-purple-400 hover:bg-purple-50 transition cursor-pointer"
+          onClick={() => fileRef.current?.click()}
         >
           <Upload size={22} className="text-slate-400 shrink-0" />
           <div className="flex-1">
@@ -426,7 +431,8 @@ export default function MyOrderImport() {
             className="hidden"
             onChange={handleFiles}
           />
-        </label>
+        </div>
+
       </div>
 
       {/* Error banner */}
@@ -442,16 +448,13 @@ export default function MyOrderImport() {
 
       {/* File tags */}
       {fileInfos.length > 0 && (
-        <div className="shrink-0 flex flex-wrap gap-2 items-center">
+        <div className="shrink-0 flex flex-wrap gap-2">
           {fileInfos.map((f, i) => (
-            <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-purple-100 text-purple-700">
-              <span>📋 {f.name} · {f.rows} tracking</span>
-              {f.invoice_date && (
-                <span className="bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded-lg font-mono text-[10px]">
-                  📅 {f.invoice_date}
-                </span>
-              )}
-            </div>
+            <span key={i}
+              className="px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5
+                         bg-purple-100 text-purple-700">
+              📋 {f.name} · {f.rows} tracking
+            </span>
           ))}
           <button
             onClick={() => setShowClearConfirm(true)}
@@ -461,43 +464,6 @@ export default function MyOrderImport() {
           >
             <X size={11} /> {clearing ? 'กำลังลบ...' : 'ล้างทั้งหมด'}
           </button>
-        </div>
-      )}
-
-      {/* แก้ไขวันที่ invoice ต่อไฟล์ */}
-      {fileInfos.length > 0 && (
-        <div className="shrink-0 flex items-center gap-2 flex-wrap bg-purple-50 border border-purple-100 rounded-xl px-3 py-2">
-          <span className="text-xs text-purple-700 font-semibold whitespace-nowrap">📅 วันที่ invoice:</span>
-          {fileInfos.map((f, i) => (
-            <div key={i} className="flex items-center gap-1.5 bg-white border border-purple-200 rounded-lg px-2 py-1">
-              <span className="text-[11px] text-slate-500 truncate max-w-[100px]" title={f.name}>
-                {f.name.replace(/khamjira.*?_/i, '').split('.')[0] || f.name}
-              </span>
-              <input
-                type="date"
-                value={f.invoice_date || ''}
-                onChange={e => {
-                  const newDate = e.target.value;
-                  const oldDate = f.invoice_date;
-                  // อัพเดต fileInfos
-                  setFileInfos((prev: FileInfo[]) => prev.map((fi: FileInfo, j: number) =>
-                    j === i ? { ...fi, invoice_date: newDate } : fi
-                  ));
-                  // อัพเดต trackingMap rows ที่ invoice_date ตรงกับไฟล์นี้
-                  setTrackingMap(prev => {
-                    const updated = { ...prev };
-                    Object.keys(updated).forEach(k => {
-                      if (updated[k].invoice_date === oldDate) {
-                        updated[k] = { ...updated[k], invoice_date: newDate };
-                      }
-                    });
-                    return updated;
-                  });
-                }}
-                className="border rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-300 w-[130px]"
-              />
-            </div>
-          ))}
         </div>
       )}
 
