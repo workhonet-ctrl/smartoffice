@@ -21,19 +21,19 @@ function readStorage(key: string) {
 // ── Types ─────────────────────────────────────────────────────
 
 type TrackingRow = {
-  tracking:  string;
-  page:      string;   // ชื่อเพจ/สินค้า (col E)
-  consignee: string;   // ชื่อผู้รับ (col G)
-  weight:    number;   // น้ำหนัก kg (col K)
-  cod:       number;   // COD amount (col M)
-  cod_fee:   number;   // Total COD Fee (col N)
-  freight:   number;   // ค่าขนส่ง (col P)
-  total:     number;   // Total Charge (col Q)
-  // จากการจับคู่กับ orders
-  order_no?: string;
-  customer?: string;
-  raw_prod?: string;
-  matched:   boolean;
+  tracking:     string;
+  page:         string;
+  consignee:    string;
+  weight:       number;
+  cod:          number;
+  cod_fee:      number;
+  freight:      number;
+  total:        number;
+  invoice_date?: string;
+  order_no?:    string;
+  customer?:    string;
+  raw_prod?:    string;
+  matched:      boolean;
 };
 
 type FileInfo = {
@@ -237,18 +237,19 @@ export default function MyOrderImport() {
       const loaded: Record<string, TrackingRow> = {};
       for (const r of data ?? []) {
         loaded[r.tracking] = {
-          tracking:  r.tracking,
-          page:      r.page       ?? '',
-          consignee: r.consignee  ?? '',
-          weight:    Number(r.weight_kg),
-          cod:       Number(r.cod_thb),
-          cod_fee:   Number(r.cod_fee_thb),
-          freight:   Number(r.freight_thb),
-          total:     Number(r.total_thb),
-          order_no:  r.order_no   ?? undefined,
-          customer:  r.customer   ?? undefined,
-          raw_prod:  r.raw_prod   ?? undefined,
-          matched:   r.matched    ?? false,
+          tracking:     r.tracking,
+          page:         r.page       ?? '',
+          consignee:    r.consignee  ?? '',
+          weight:       Number(r.weight_kg),
+          cod:          Number(r.cod_thb),
+          cod_fee:      Number(r.cod_fee_thb),
+          freight:      Number(r.freight_thb),
+          total:        Number(r.total_thb),
+          invoice_date: r.invoice_date ?? undefined,
+          order_no:     r.order_no   ?? undefined,
+          customer:     r.customer   ?? undefined,
+          raw_prod:     r.raw_prod   ?? undefined,
+          matched:      r.matched    ?? false,
         };
       }
 
@@ -268,18 +269,19 @@ export default function MyOrderImport() {
     setSaving(true);
     try {
       const rows = Object.values(map).map(r => ({
-        tracking:    r.tracking,
-        page:        r.page      || null,
-        consignee:   r.consignee || null,
-        weight_kg:   r.weight,
-        cod_thb:     r.cod,
-        cod_fee_thb: r.cod_fee,
-        freight_thb: r.freight,
-        total_thb:   r.total,
-        order_no:    r.order_no ?? null,
-        customer:    r.customer ?? null,
-        raw_prod:    r.raw_prod ?? null,
-        matched:     r.matched,
+        tracking:     r.tracking,
+        page:         r.page      || null,
+        consignee:    r.consignee || null,
+        weight_kg:    r.weight,
+        cod_thb:      r.cod,
+        cod_fee_thb:  r.cod_fee,
+        freight_thb:  r.freight,
+        total_thb:    r.total,
+        invoice_date: (r as any).invoice_date || null,
+        order_no:     r.order_no ?? null,
+        customer:     r.customer ?? null,
+        raw_prod:     r.raw_prod ?? null,
+        matched:      r.matched,
       }));
       await supabase.from('shipping_myorder').upsert(rows, { onConflict: 'tracking' });
 
