@@ -41,6 +41,7 @@ type TrackingRow = {
 type FileInfo = {
   name: string;
   rows: number;
+  invoice_date?: string;
 };
 
 type ParseResult = {
@@ -144,7 +145,7 @@ function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
 
   return {
     trackingMap,
-    fileInfo: { name: fileName, rows: Object.keys(trackingMap).length },
+    fileInfo: { name: fileName, rows: Object.keys(trackingMap).length, invoice_date: invoiceDate },
   };
 }
 
@@ -455,13 +456,16 @@ export default function MyOrderImport() {
 
       {/* File tags */}
       {fileInfos.length > 0 && (
-        <div className="shrink-0 flex flex-wrap gap-2">
+        <div className="shrink-0 flex flex-wrap gap-2 items-center">
           {fileInfos.map((f, i) => (
-            <span key={i}
-              className="px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5
-                         bg-purple-100 text-purple-700">
-              📋 {f.name} · {f.rows} tracking
-            </span>
+            <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-purple-100 text-purple-700">
+              <span>📋 {f.name} · {f.rows} tracking</span>
+              {f.invoice_date && (
+                <span className="bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded-lg font-mono">
+                  📅 {f.invoice_date}
+                </span>
+              )}
+            </div>
           ))}
           <button
             onClick={clearAll}
@@ -470,6 +474,37 @@ export default function MyOrderImport() {
           >
             <X size={11} /> ล้างทั้งหมด
           </button>
+        </div>
+      )}
+
+      {/* แก้ invoice_date ทั้งหมด (ถ้ามีหลายไฟล์ที่วันที่ต่างกัน) */}
+      {fileInfos.length > 0 && (
+        <div className="shrink-0 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 font-medium">📅 วันที่ invoice:</span>
+          {fileInfos.map((f, i) => (
+            <div key={i} className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+              <span className="text-xs text-slate-500 truncate max-w-[120px]">{f.name.split('_').slice(0,2).join('_') || f.name}</span>
+              <input
+                type="date"
+                value={f.invoice_date || ''}
+                onChange={e => {
+                  const newDate = e.target.value;
+                  setFileInfos(prev => prev.map((fi, j) => j === i ? { ...fi, invoice_date: newDate } : fi));
+                  // อัพเดต invoice_date ใน trackingMap ด้วย
+                  setTrackingMap(prev => {
+                    const updated = { ...prev };
+                    Object.keys(updated).forEach(k => {
+                      if (updated[k].invoice_date === f.invoice_date) {
+                        updated[k] = { ...updated[k], invoice_date: newDate };
+                      }
+                    });
+                    return updated;
+                  });
+                }}
+                className="border rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-300 w-[130px]"
+              />
+            </div>
+          ))}
         </div>
       )}
 
