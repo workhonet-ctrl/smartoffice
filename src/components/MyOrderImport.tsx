@@ -21,27 +21,24 @@ function readStorage(key: string) {
 // ── Types ─────────────────────────────────────────────────────
 
 type TrackingRow = {
-  tracking:     string;
-  page:         string;
-  consignee:    string;
-  weight:       number;
-  cod:          number;
-  cod_fee:      number;
-  cod_vat7:     number;
-  special_area: number;
-  freight:      number;
-  total:        number;
-  invoice_date?: string;
-  order_no?:    string;
-  customer?:    string;
-  raw_prod?:    string;
-  matched:      boolean;
+  tracking:  string;
+  page:      string;   // ชื่อเพจ/สินค้า (col E)
+  consignee: string;   // ชื่อผู้รับ (col G)
+  weight:    number;   // น้ำหนัก kg (col K)
+  cod:       number;   // COD amount (col M)
+  cod_fee:   number;   // Total COD Fee (col N)
+  freight:   number;   // ค่าขนส่ง (col P)
+  total:     number;   // Total Charge (col Q)
+  // จากการจับคู่กับ orders
+  order_no?: string;
+  customer?: string;
+  raw_prod?: string;
+  matched:   boolean;
 };
 
 type FileInfo = {
   name: string;
   rows: number;
-  invoice_date?: string;
 };
 
 type ParseResult = {
@@ -55,12 +52,7 @@ const fmt = (n: number) =>
   n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function parseNum(val: unknown): number {
-  const s = String(val ?? '').trim();
-  // ถ้าเป็น dimension string เช่น "24×17×16" หรือ "20x14x12" → 0
-  if (/\d+\s*[×x×✕]\s*\d+/i.test(s)) return 0;
-  // ถ้าเป็น text ที่ไม่ใช่ตัวเลข เช่น "Dry food", "Thailand" → 0
-  if (/[a-zA-Z\u0E00-\u0E7F]{3,}/.test(s)) return 0;
-  return Math.abs(parseFloat(s.replace(/[^0-9.-]/g, '')) || 0);
+  return Math.abs(parseFloat(String(val ?? '0').replace(/[^0-9.-]/g, '')) || 0);
 }
 
 /**
@@ -83,32 +75,6 @@ function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
   const ws    = wb.Sheets[wb.SheetNames[0]];
   const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
-  // ดึงวันที่จากชื่อไฟล์ เช่น khamjira_2026-04-03-10-04.xlsx → 2026-04-03
-  const dateMatch = fileName.match(/(\d{4}-\d{2}-\d{2})/);
-  const invoiceDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
-
-  // ── Auto-detect column positions จาก header row ──────────────
-  const header = (rows[0] as string[]) || [];
-  const findCol = (keywords: string[]) =>
-    header.findIndex(h => h && keywords.some(k => String(h).toLowerCase().includes(k.toLowerCase())));
-
-  const colWeight  = findCol(['weight']);                           // น้ำหนัก
-  const colCod     = findCol(['cod amount', 'cod_amount']);         // COD Amount
-  const colCodFee  = findCol(['total cod fee', 'cod fee 2']);       // COD Fee 2%
-  const colVat7    = findCol(['cod vat', 'vat 7']);                 // COD VAT 7%
-  const colSpecial = findCol(['พื้นที่พิเศษ', 'special']);          // พื้นที่พิเศษ
-  const colFreight = findCol(['freight']);                          // Freight
-  const colTotal   = findCol(['total charge', 'total_charge']);     // Total Charge
-
-  // fallback ถ้า header ไม่ตรง (16-col format เดิม)
-  const W  = colWeight  >= 0 ? colWeight  : 9;
-  const C  = colCod     >= 0 ? colCod     : 10;
-  const CF = colCodFee  >= 0 ? colCodFee  : 11;
-  const V7 = colVat7    >= 0 ? colVat7    : 12;
-  const SP = colSpecial >= 0 ? colSpecial : 13;
-  const FR = colFreight >= 0 ? colFreight : 14;
-  const TC = colTotal   >= 0 ? colTotal   : 15;
-
   // skip header row (index 0); กรองแถวที่ไม่มี tracking
   const dataRows = rows.slice(1).filter(r => (r as unknown[])[5]);
 
@@ -121,31 +87,27 @@ function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
     if (!trackingMap[tracking]) {
       trackingMap[tracking] = {
         tracking,
-        page:         String(r[4]  ?? '').trim(),
-        consignee:    String(r[6]  ?? '').trim(),
-        weight:       parseNum(r[W]),
-        cod:          parseNum(r[C]),
-        cod_fee:      parseNum(r[CF]),
-        cod_vat7:     parseNum(r[V7]),
-        special_area: parseNum(r[SP]),
-        freight:      parseNum(r[FR]),
-        total:        parseNum(r[TC]),
-        invoice_date: invoiceDate,
-        matched:      false,
+        page:      String(r[4]  ?? '').trim(),
+        consignee: String(r[6]  ?? '').trim(),
+        weight:    parseNum(r[10]),
+        cod:       parseNum(r[12]),
+        cod_fee:   parseNum(r[13]),
+        freight:   parseNum(r[15]),
+        total:     parseNum(r[16]),
+        matched:   false,
       };
     } else {
-      trackingMap[tracking].freight      += parseNum(r[FR]);
-      trackingMap[tracking].total        += parseNum(r[TC]);
-      trackingMap[tracking].cod          += parseNum(r[C]);
-      trackingMap[tracking].cod_fee      += parseNum(r[CF]);
-      trackingMap[tracking].cod_vat7     += parseNum(r[V7]);
-      trackingMap[tracking].special_area += parseNum(r[SP]);
+      // กรณีมี tracking ซ้ำ (พิเศษ) — บวกรวม
+      trackingMap[tracking].freight += parseNum(r[15]);
+      trackingMap[tracking].total   += parseNum(r[16]);
+      trackingMap[tracking].cod     += parseNum(r[12]);
+      trackingMap[tracking].cod_fee += parseNum(r[13]);
     }
   }
 
   return {
     trackingMap,
-    fileInfo: { name: fileName, rows: Object.keys(trackingMap).length, invoice_date: invoiceDate },
+    fileInfo: { name: fileName, rows: Object.keys(trackingMap).length },
   };
 }
 
@@ -156,8 +118,17 @@ function mergeResults(
   const merged = { ...prev };
   for (const result of results) {
     for (const [key, incoming] of Object.entries(result.trackingMap)) {
-      // replace ทุกครั้ง — ไฟล์ใหม่ override ค่าเก่าเสมอ ไม่บวกซ้ำ
-      merged[key] = { ...incoming, matched: merged[key]?.matched ?? false };
+      if (!merged[key]) {
+        merged[key] = { ...incoming };
+      } else {
+        merged[key] = {
+          ...merged[key],
+          freight:  merged[key].freight  + incoming.freight,
+          total:    merged[key].total    + incoming.total,
+          cod:      merged[key].cod      + incoming.cod,
+          cod_fee:  merged[key].cod_fee  + incoming.cod_fee,
+        };
+      }
     }
   }
   return merged;
@@ -255,21 +226,18 @@ export default function MyOrderImport() {
       const loaded: Record<string, TrackingRow> = {};
       for (const r of data ?? []) {
         loaded[r.tracking] = {
-          tracking:     r.tracking,
-          page:         r.page       ?? '',
-          consignee:    r.consignee  ?? '',
-          weight:       Number(r.weight_kg),
-          cod:          Number(r.cod_thb),
-          cod_fee:      Number(r.cod_fee_thb),
-          cod_vat7:     Number(r.cod_vat7_thb   ?? 0),
-          special_area: Number(r.special_area_thb ?? 0),
-          freight:      Number(r.freight_thb),
-          total:        Number(r.total_thb),
-          invoice_date: r.invoice_date ?? undefined,
-          order_no:     r.order_no  ?? undefined,
-          customer:     r.customer  ?? undefined,
-          raw_prod:     r.raw_prod  ?? undefined,
-          matched:      r.matched   ?? false,
+          tracking:  r.tracking,
+          page:      r.page       ?? '',
+          consignee: r.consignee  ?? '',
+          weight:    Number(r.weight_kg),
+          cod:       Number(r.cod_thb),
+          cod_fee:   Number(r.cod_fee_thb),
+          freight:   Number(r.freight_thb),
+          total:     Number(r.total_thb),
+          order_no:  r.order_no   ?? undefined,
+          customer:  r.customer   ?? undefined,
+          raw_prod:  r.raw_prod   ?? undefined,
+          matched:   r.matched    ?? false,
         };
       }
 
@@ -289,21 +257,18 @@ export default function MyOrderImport() {
     setSaving(true);
     try {
       const rows = Object.values(map).map(r => ({
-        tracking:         r.tracking,
-        page:             r.page      || null,
-        consignee:        r.consignee || null,
-        weight_kg:        r.weight,
-        cod_thb:          r.cod,
-        cod_fee_thb:      r.cod_fee,
-        cod_vat7_thb:     r.cod_vat7,
-        special_area_thb: r.special_area,
-        freight_thb:      r.freight,
-        total_thb:        r.total,
-        invoice_date:     r.invoice_date || null,
-        order_no:         r.order_no ?? null,
-        customer:         r.customer ?? null,
-        raw_prod:         r.raw_prod ?? null,
-        matched:          r.matched,
+        tracking:    r.tracking,
+        page:        r.page      || null,
+        consignee:   r.consignee || null,
+        weight_kg:   r.weight,
+        cod_thb:     r.cod,
+        cod_fee_thb: r.cod_fee,
+        freight_thb: r.freight,
+        total_thb:   r.total,
+        order_no:    r.order_no ?? null,
+        customer:    r.customer ?? null,
+        raw_prod:    r.raw_prod ?? null,
+        matched:     r.matched,
       }));
       await supabase.from('shipping_myorder').upsert(rows, { onConflict: 'tracking' });
 
@@ -378,13 +343,34 @@ export default function MyOrderImport() {
     });
   };
 
-  const clearAll = () => {
+  const [clearing, setClearing] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  const clearAll = async () => {
+    const trackings = Object.keys(trackingMap);
+    setClearing(true);
+    try {
+      // ลบออกจาก Supabase ด้วย (ถ้ามี tracking ที่บันทึกไว้)
+      if (trackings.length > 0) {
+        const CHUNK = 500;
+        for (let i = 0; i < trackings.length; i += CHUNK) {
+          await supabase
+            .from('shipping_myorder')
+            .delete()
+            .in('tracking', trackings.slice(i, i + CHUNK));
+        }
+      }
+    } catch (err) {
+      console.error('clearAll DB error:', err);
+    }
     sessionStorage.removeItem(STORAGE_KEY);
     setTrackingMap({});
     setFileInfos([]);
     setMatched(false);
     setSearch('');
     setError(null);
+    setClearing(false);
+    setShowClearConfirm(false);
   };
 
   // ── Derived values ──────────────────────────────────────────
@@ -456,55 +442,22 @@ export default function MyOrderImport() {
 
       {/* File tags */}
       {fileInfos.length > 0 && (
-        <div className="shrink-0 flex flex-wrap gap-2 items-center">
+        <div className="shrink-0 flex flex-wrap gap-2">
           {fileInfos.map((f, i) => (
-            <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-purple-100 text-purple-700">
-              <span>📋 {f.name} · {f.rows} tracking</span>
-              {f.invoice_date && (
-                <span className="bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded-lg font-mono">
-                  📅 {f.invoice_date}
-                </span>
-              )}
-            </div>
+            <span key={i}
+              className="px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5
+                         bg-purple-100 text-purple-700">
+              📋 {f.name} · {f.rows} tracking
+            </span>
           ))}
           <button
-            onClick={clearAll}
+            onClick={() => setShowClearConfirm(true)}
+            disabled={clearing}
             className="px-3 py-1.5 rounded-full text-xs bg-slate-100 text-slate-500
-                       hover:bg-red-100 hover:text-red-600 flex items-center gap-1"
+                       hover:bg-red-100 hover:text-red-600 flex items-center gap-1 disabled:opacity-50"
           >
-            <X size={11} /> ล้างทั้งหมด
+            <X size={11} /> {clearing ? 'กำลังลบ...' : 'ล้างทั้งหมด'}
           </button>
-        </div>
-      )}
-
-      {/* แก้ invoice_date ทั้งหมด (ถ้ามีหลายไฟล์ที่วันที่ต่างกัน) */}
-      {fileInfos.length > 0 && (
-        <div className="shrink-0 flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-slate-500 font-medium">📅 วันที่ invoice:</span>
-          {fileInfos.map((f, i) => (
-            <div key={i} className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
-              <span className="text-xs text-slate-500 truncate max-w-[120px]">{f.name.split('_').slice(0,2).join('_') || f.name}</span>
-              <input
-                type="date"
-                value={f.invoice_date || ''}
-                onChange={e => {
-                  const newDate = e.target.value;
-                  setFileInfos(prev => prev.map((fi, j) => j === i ? { ...fi, invoice_date: newDate } : fi));
-                  // อัพเดต invoice_date ใน trackingMap ด้วย
-                  setTrackingMap(prev => {
-                    const updated = { ...prev };
-                    Object.keys(updated).forEach(k => {
-                      if (updated[k].invoice_date === f.invoice_date) {
-                        updated[k] = { ...updated[k], invoice_date: newDate };
-                      }
-                    });
-                    return updated;
-                  });
-                }}
-                className="border rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-300 w-[130px]"
-              />
-            </div>
-          ))}
         </div>
       )}
 
@@ -696,6 +649,37 @@ export default function MyOrderImport() {
           <span className="text-xs text-slate-400">
             {loadingDB ? '⏳ กำลังโหลดข้อมูล...' : 'ไม่มีข้อมูล — อัพโหลดไฟล์ใหม่ได้เลย'}
           </span>
+        </div>
+      )}
+
+      {/* Confirm clear popup */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0 text-xl">🗑</div>
+              <div>
+                <h3 className="font-bold text-slate-800">ล้างข้อมูลทั้งหมด?</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  จะลบ <strong>{Object.keys(trackingMap).length} tracking</strong> ออกจากหน้าจอ
+                  <br/>และ<strong className="text-red-600">ลบออกจาก Supabase</strong> ด้วย
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="flex-1 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-200">
+                ยกเลิก
+              </button>
+              <button
+                onClick={clearAll}
+                disabled={clearing}
+                className="flex-1 py-2.5 bg-red-500 text-white rounded-xl text-sm font-semibold hover:bg-red-600 disabled:opacity-50">
+                {clearing ? 'กำลังลบ...' : '🗑 ลบทั้งหมด'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
