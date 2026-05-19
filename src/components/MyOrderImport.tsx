@@ -614,6 +614,7 @@ export default function MyOrderImport() {
           <table className="text-xs w-full" style={{ minWidth: '1000px' }}>
             <thead className="bg-slate-800 text-slate-200 sticky top-0 z-10">
               <tr>
+                <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                 <th className="p-3 text-left whitespace-nowrap">Tracking No.</th>
                 <th className="p-3 text-left whitespace-nowrap">เพจ</th>
                 <th className="p-3 text-left whitespace-nowrap">ผู้รับ</th>
@@ -631,7 +632,7 @@ export default function MyOrderImport() {
             <tbody>
               {filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="p-8 text-center text-slate-400">ไม่พบรายการ</td>
+                  <td colSpan={13} className="p-8 text-center text-slate-400">ไม่พบรายการ</td>
                 </tr>
               )}
               {filteredRows.map(r => (
@@ -641,6 +642,11 @@ export default function MyOrderImport() {
                     matched &&  r.matched ? 'hover:bg-green-50' :
                                             'hover:bg-slate-50'
                   }`}>
+                  <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                    {r.invoice_date
+                      ? r.invoice_date.split('-').reverse().join('/')
+                      : <span className="text-slate-300">-</span>}
+                  </td>
                   <td className="p-3 font-mono text-purple-600 whitespace-nowrap">{r.tracking}</td>
                   <td className="p-3 text-slate-600 whitespace-nowrap max-w-[120px] truncate">{r.page}</td>
                   <td className="p-3 text-slate-500 whitespace-nowrap">{r.consignee}</td>
@@ -666,7 +672,7 @@ export default function MyOrderImport() {
             </tbody>
             <tfoot className="bg-slate-50 border-t-2 sticky bottom-0 font-bold text-[11px]">
               <tr>
-                <td className="p-3 text-slate-600" colSpan={6}>
+                <td className="p-3 text-slate-600" colSpan={7}>
                   รวม {filteredRows.length} tracking
                 </td>
                 <td className="p-3 text-right text-slate-500">
