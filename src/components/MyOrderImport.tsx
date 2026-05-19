@@ -76,9 +76,18 @@ function parseNum(val: unknown): number {
 function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
   const wb    = XLSX.read(buffer, { type: 'array' });
   const ws    = wb.Sheets[wb.SheetNames[0]];
-  // ดึงวันที่จากชื่อไฟล์ เช่น khamjira_2026-04-03-10-04.xlsx → 2026-04-03
-  const dateMatch = fileName.match(/(\d{4}-\d{2}-\d{2})/);
-  const invoiceDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
+  // ดึงวันที่จากชื่อไฟล์
+  // รองรับ: 2026-04-30, 30042569 (ddmmBE), 30-04-2026, 30042026
+  let invoiceDate = new Date().toISOString().split('T')[0];
+  const isoMatch  = fileName.match(/(\d{4}-\d{2}-\d{2})/);
+  const thaiMatch = fileName.match(/(\d{2})(\d{2})(\d{4})/); // ddmmyyyy
+  if (isoMatch) {
+    invoiceDate = isoMatch[1];
+  } else if (thaiMatch) {
+    const [, dd, mm, yyyy] = thaiMatch;
+    const year = Number(yyyy) > 2500 ? Number(yyyy) - 543 : Number(yyyy);
+    invoiceDate = `${year}-${mm}-${dd}`;
+  }
 
   const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
@@ -450,13 +459,16 @@ export default function MyOrderImport() {
 
       {/* File tags */}
       {fileInfos.length > 0 && (
-        <div className="shrink-0 flex flex-wrap gap-2">
+        <div className="shrink-0 flex flex-wrap gap-2 items-center">
           {fileInfos.map((f, i) => (
-            <span key={i}
-              className="px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5
-                         bg-purple-100 text-purple-700">
-              📋 {f.name} · {f.rows} tracking
-            </span>
+            <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-purple-100 text-purple-700">
+              <span>📋 {f.name} · {f.rows} tracking</span>
+              {f.invoice_date && (
+                <span className="bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded font-mono text-[10px]">
+                  📅 {f.invoice_date}
+                </span>
+              )}
+            </div>
           ))}
           <button
             onClick={() => setShowClearConfirm(true)}
@@ -466,6 +478,44 @@ export default function MyOrderImport() {
           >
             <X size={11} /> {clearing ? 'กำลังลบ...' : 'ล้างทั้งหมด'}
           </button>
+        </div>
+      )}
+
+      {/* วันที่ invoice — ใส่เองได้ก่อนจับคู่ */}
+      {fileInfos.length > 0 && (
+        <div className="shrink-0 flex items-center gap-2 flex-wrap bg-purple-50 border border-purple-100 rounded-xl px-4 py-2.5">
+          <span className="text-xs text-purple-700 font-semibold whitespace-nowrap">📅 วันที่ invoice:</span>
+          {fileInfos.map((f, i) => (
+            <div key={i} className="flex items-center gap-1.5 bg-white border border-purple-200 rounded-lg px-2 py-1">
+              {fileInfos.length > 1 && (
+                <span className="text-[10px] text-slate-400 truncate max-w-[80px]" title={f.name}>
+                  {f.name.split('.')[0]}
+                </span>
+              )}
+              <input
+                type="date"
+                value={f.invoice_date || ''}
+                onChange={e => {
+                  const newDate = e.target.value;
+                  const oldDate = f.invoice_date;
+                  setFileInfos((prev: FileInfo[]) => prev.map((fi: FileInfo, j: number) =>
+                    j === i ? { ...fi, invoice_date: newDate } : fi
+                  ));
+                  setTrackingMap(prev => {
+                    const updated = { ...prev };
+                    Object.keys(updated).forEach(k => {
+                      if ((updated[k] as any).invoice_date === oldDate || !oldDate) {
+                        (updated[k] as any) = { ...updated[k], invoice_date: newDate };
+                      }
+                    });
+                    return updated;
+                  });
+                }}
+                className="border-0 text-xs focus:outline-none focus:ring-2 focus:ring-purple-300 rounded px-1 w-[130px] text-slate-700"
+              />
+            </div>
+          ))}
+          <span className="text-[10px] text-purple-400">กรอกวันที่ก่อนกดจับคู่</span>
         </div>
       )}
 
