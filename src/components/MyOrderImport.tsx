@@ -327,6 +327,17 @@ export default function MyOrderImport() {
       }
 
       const updatedMap = { ...trackingMap };
+
+      // ── ใส่ invoice_date จาก fileInfos ลงทุก row (ถ้า user กรอกมา) ──
+      const latestInvoiceDate = fileInfos.find(f => f.invoice_date)?.invoice_date;
+      if (latestInvoiceDate) {
+        for (const k of Object.keys(updatedMap)) {
+          if (!updatedMap[k].invoice_date) {
+            updatedMap[k] = { ...updatedMap[k], invoice_date: latestInvoiceDate };
+          }
+        }
+      }
+
       for (const o of allData) {
         if (updatedMap[o.tracking_no]) {
           updatedMap[o.tracking_no] = {
@@ -497,17 +508,16 @@ export default function MyOrderImport() {
                 value={f.invoice_date || ''}
                 onChange={e => {
                   const newDate = e.target.value;
-                  const oldDate = f.invoice_date;
+                  // อัพเดต fileInfos
                   setFileInfos((prev: FileInfo[]) => prev.map((fi: FileInfo, j: number) =>
                     j === i ? { ...fi, invoice_date: newDate } : fi
                   ));
+                  // อัพเดต invoice_date ใน trackingMap ทุก row (ไฟล์เดียว = ทุก row ใช้วันเดียวกัน)
                   setTrackingMap(prev => {
-                    const updated = { ...prev };
-                    Object.keys(updated).forEach(k => {
-                      if ((updated[k] as any).invoice_date === oldDate || !oldDate) {
-                        (updated[k] as any) = { ...updated[k], invoice_date: newDate };
-                      }
-                    });
+                    const updated: Record<string, TrackingRow> = {};
+                    for (const [k, v] of Object.entries(prev)) {
+                      updated[k] = { ...v, invoice_date: newDate };
+                    }
                     return updated;
                   });
                 }}
