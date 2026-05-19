@@ -403,12 +403,11 @@ export default function MyOrderImport() {
   return (
     <div className="flex flex-col h-full gap-3">
 
-      {/* Upload zone + วันที่จัดส่ง */}
-      <div className="shrink-0 flex gap-3 items-stretch">
-        <div
+      {/* Upload zone */}
+      <div className="shrink-0">
+        <label
           className="flex-1 border-2 border-dashed border-slate-200 rounded-xl p-4 flex items-center gap-4
-                     hover:border-purple-400 hover:bg-purple-50 transition cursor-pointer"
-          onClick={() => fileRef.current?.click()}
+                     hover:border-purple-400 hover:bg-purple-50 transition cursor-pointer w-full"
         >
           <Upload size={22} className="text-slate-400 shrink-0" />
           <div className="flex-1">
@@ -427,8 +426,7 @@ export default function MyOrderImport() {
             className="hidden"
             onChange={handleFiles}
           />
-        </div>
-
+        </label>
       </div>
 
       {/* Error banner */}
