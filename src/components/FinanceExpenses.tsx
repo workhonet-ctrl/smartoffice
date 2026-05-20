@@ -409,17 +409,27 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
           description: `PO: ${p.supplier_name||'-'}`, category: 'ใบสั่งซื้อ',
           amount: Number(p.total_thb), source: 'po' as const,
         }));
-        // ── เพิ่ม shipping rows จาก Flash + MyOrder ──
-        const shipRows = shippingRows.filter(r =>
-          !q || r.tracking.toLowerCase().includes(q)
-        ).map(r => ({
-          id: `${r.source}-${r.id}`,
-          doc_no: r.tracking,
-          date: r.date,
-          description: r.source === 'flash' ? '⚡ Flash Express' : '📋 MYORDER',
+        // ── Shipping: group by date + source (รวมยอดต่อวันต่อ courier) ──
+        const shipGroupMap: Record<string, { date: string; source: 'flash' | 'myorder'; amount: number; count: number }> = {};
+        for (const r of shippingRows) {
+          if (!r.date) continue;
+          if (q && !r.tracking.toLowerCase().includes(q)) continue;
+          const key = `${r.date}__${r.source}`;
+          if (!shipGroupMap[key]) {
+            shipGroupMap[key] = { date: r.date, source: r.source, amount: 0, count: 0 };
+          }
+          shipGroupMap[key].amount += r.amount;
+          shipGroupMap[key].count  += 1;
+        }
+        const shipRows = Object.values(shipGroupMap).map(g => ({
+          id: `${g.source}-${g.date}`,
+          doc_no: g.source === 'flash' ? '⚡ Flash Express' : '📋 MYORDER',
+          date: g.date,
+          description: g.source === 'flash' ? 'Flash Express' : 'MYORDER',
           category: 'ค่าส่ง',
-          amount: r.amount,
-          source: r.source,
+          amount: g.amount,
+          source: g.source,
+          count: g.count,
         }));
         const allRows = [...expRows, ...poRows, ...shipRows].sort((a, b) => (b.date||'').localeCompare(a.date||''));
         const allTotal = allRows.reduce((s, r) => s + r.amount, 0);
@@ -470,7 +480,12 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
                     }`}>
                       <td className="p-3 font-mono text-xs text-slate-500">{r.doc_no}</td>
                       <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{fmtDate(r.date)}</td>
-                      <td className="p-3 font-medium">{r.description}</td>
+                      <td className="p-3 font-medium">
+                        {r.description}
+                        {(r.source === 'flash' || r.source === 'myorder') && (r as any).count && (
+                          <span className="ml-2 text-[11px] text-slate-400">({(r as any).count} tracking)</span>
+                        )}
+                      </td>
                       <td className="p-3 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                           r.category==='ค่าโฆษณา'  ? 'bg-pink-100 text-pink-700' :
