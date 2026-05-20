@@ -383,6 +383,9 @@ export default function MyOrderImport() {
 
   const [clearing, setClearing] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [expandFiles, setExpandFiles] = useState(false);
+  const [showDateModal, setShowDateModal] = useState(false);
+  const [bulkDate, setBulkDate] = useState('');
 
   const clearAll = async () => {
     const trackings = Object.keys(trackingMap);
@@ -473,73 +476,82 @@ export default function MyOrderImport() {
         </div>
       )}
 
-      {/* File tags */}
-      {fileInfos.length > 0 && (
-        <div className="shrink-0 flex flex-wrap gap-2 items-center">
-          {fileInfos.map((f, i) => (
-            <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-purple-100 text-purple-700">
-              <span>📋 {f.name} · {f.rows} tracking</span>
-              {f.invoice_date && (
-                <span className="bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded font-mono text-[10px]">
-                  📅 {f.invoice_date}
-                </span>
-              )}
-            </div>
-          ))}
-          <button
-            onClick={() => setShowClearConfirm(true)}
-            disabled={clearing}
-            className="px-3 py-1.5 rounded-full text-xs bg-slate-100 text-slate-500
-                       hover:bg-red-100 hover:text-red-600 flex items-center gap-1 disabled:opacity-50"
-          >
-            <X size={11} /> {clearing ? 'กำลังลบ...' : 'ล้างทั้งหมด'}
-          </button>
-        </div>
-      )}
+      {/* File summary - แบบย่อ */}
+      {fileInfos.length > 0 && (() => {
+        const uploadedFiles = fileInfos.filter(f => f.name !== '📂 โหลดจาก Supabase');
+        const supabaseFile  = fileInfos.find(f => f.name === '📂 โหลดจาก Supabase');
+        const totalRows     = fileInfos.reduce((s, f) => s + f.rows, 0);
+        const filesWithDate = uploadedFiles.filter(f => f.invoice_date).length;
 
-      {/* วันที่ invoice — ใส่เองได้ก่อนจับคู่ (เฉพาะไฟล์ที่ upload เท่านั้น ไม่รวม Supabase) */}
-      {fileInfos.some(f => f.name !== '📂 โหลดจาก Supabase') && (
-        <div className="shrink-0 flex items-center gap-2 flex-wrap bg-purple-50 border border-purple-100 rounded-xl px-4 py-2.5">
-          <span className="text-xs text-purple-700 font-semibold whitespace-nowrap">📅 วันที่ invoice:</span>
-          {fileInfos.map((f, i) => {
-            // ข้ามไฟล์ที่ load จาก Supabase
-            if (f.name === '📂 โหลดจาก Supabase') return null;
-            return (
-              <div key={i} className="flex items-center gap-1.5 bg-white border border-purple-200 rounded-lg px-2 py-1">
-                <span className="text-[10px] text-slate-500 truncate max-w-[140px] font-medium" title={f.name}>
-                  📄 {f.name.split('.')[0]}
+        return (
+          <div className="shrink-0 flex items-center gap-2 flex-wrap">
+            {/* Summary badge */}
+            <button
+              onClick={() => setExpandFiles(e => !e)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium bg-purple-100 text-purple-700 hover:bg-purple-200 transition"
+            >
+              📂 {fileInfos.length} ไฟล์ · {totalRows} tracking
+              <span className="text-[10px]">{expandFiles ? '▲' : '▼'}</span>
+            </button>
+
+            {/* Date status */}
+            {uploadedFiles.length > 0 && (
+              <button
+                onClick={() => setShowDateModal(true)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition ${
+                  filesWithDate === uploadedFiles.length
+                    ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                    : 'bg-amber-100 text-amber-700 hover:bg-amber-200 animate-pulse'
+                }`}
+                title="ตั้งวันที่ invoice"
+              >
+                📅 วันที่ invoice
+                <span className="bg-white/60 px-1.5 rounded-full text-[10px] font-mono">
+                  {filesWithDate}/{uploadedFiles.length}
                 </span>
-                <input
-                  type="date"
-                  value={f.invoice_date || ''}
-                  onChange={e => {
-                    const newDate = e.target.value;
-                    const fileName = f.name;
-                    // อัพเดต fileInfos เฉพาะไฟล์ที่กรอก
-                    setFileInfos((prev: FileInfo[]) => prev.map((fi: FileInfo, j: number) =>
-                      j === i ? { ...fi, invoice_date: newDate } : fi
-                    ));
-                    // อัพเดต trackingMap เฉพาะ row ที่มาจากไฟล์นี้ (source_file === fileName)
-                    setTrackingMap(prev => {
-                      const updated: Record<string, TrackingRow> = {};
-                      for (const [k, v] of Object.entries(prev)) {
-                        if (v.source_file === fileName) {
-                          updated[k] = { ...v, invoice_date: newDate };
-                        } else {
-                          updated[k] = v;
-                        }
-                      }
-                      return updated;
-                    });
-                  }}
-                  className="border-0 text-xs focus:outline-none focus:ring-2 focus:ring-purple-300 rounded px-1 w-[130px] text-slate-700"
-                />
+              </button>
+            )}
+
+            <button
+              onClick={() => setShowClearConfirm(true)}
+              disabled={clearing}
+              className="px-3 py-1.5 rounded-full text-xs bg-slate-100 text-slate-500
+                         hover:bg-red-100 hover:text-red-600 flex items-center gap-1 disabled:opacity-50"
+            >
+              <X size={11} /> {clearing ? 'กำลังลบ...' : 'ล้างทั้งหมด'}
+            </button>
+
+            {/* Expand รายละเอียดไฟล์ */}
+            {expandFiles && (
+              <div className="w-full mt-1 bg-slate-50 border border-slate-200 rounded-xl p-3 max-h-40 overflow-y-auto">
+                <div className="flex flex-col gap-1.5">
+                  {supabaseFile && (
+                    <div className="flex items-center gap-2 text-xs px-2 py-1 bg-white rounded-lg">
+                      <span className="text-purple-600">📂</span>
+                      <span className="flex-1 text-slate-600">โหลดจาก Supabase</span>
+                      <span className="text-slate-400 font-mono">{supabaseFile.rows} tracking</span>
+                    </div>
+                  )}
+                  {uploadedFiles.map((f, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs px-2 py-1 bg-white rounded-lg">
+                      <span className="text-purple-600">📋</span>
+                      <span className="flex-1 truncate text-slate-700" title={f.name}>{f.name}</span>
+                      {f.invoice_date && (
+                        <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-mono text-[10px]">
+                          📅 {f.invoice_date}
+                        </span>
+                      )}
+                      <span className="text-slate-400 font-mono">{f.rows}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            );
-          })}
-          <span className="text-[10px] text-purple-400">กรอกวันที่ก่อนกดจับคู่</span>
-        </div>
-      )}
+            )}
+          </div>
+        );
+      })()}
+
+      {/* date picker → moved to modal */}
 
       {/* Summary cards */}
       {rows.length > 0 && (
@@ -739,6 +751,117 @@ export default function MyOrderImport() {
       )}
 
       {/* Confirm clear popup */}
+      {/* ── Date Modal ── */}
+      {showDateModal && (() => {
+        const uploadedFiles = fileInfos.filter(f => f.name !== '📂 โหลดจาก Supabase');
+        const applyBulk = () => {
+          if (!bulkDate) return;
+          setFileInfos(prev => prev.map(f =>
+            f.name === '📂 โหลดจาก Supabase' ? f : { ...f, invoice_date: bulkDate }
+          ));
+          setTrackingMap(prev => {
+            const updated: Record<string, TrackingRow> = {};
+            for (const [k, v] of Object.entries(prev)) {
+              if (v.source_file && v.source_file !== '__supabase__') {
+                updated[k] = { ...v, invoice_date: bulkDate };
+              } else {
+                updated[k] = v;
+              }
+            }
+            return updated;
+          });
+        };
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowDateModal(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="flex items-center justify-between p-5 border-b">
+                <div>
+                  <h3 className="font-bold text-slate-800 flex items-center gap-2">📅 ตั้งวันที่ invoice</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">{uploadedFiles.length} ไฟล์ที่อัพโหลดใหม่</p>
+                </div>
+                <button onClick={() => setShowDateModal(false)} className="text-slate-400 hover:text-slate-700">
+                  <X size={18}/>
+                </button>
+              </div>
+
+              {/* Bulk apply */}
+              <div className="p-5 border-b bg-amber-50">
+                <p className="text-xs font-semibold text-amber-700 mb-2">⚡ ใช้วันเดียวกันทั้งหมด</p>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="date"
+                    value={bulkDate}
+                    onChange={e => setBulkDate(e.target.value)}
+                    className="flex-1 border border-amber-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"
+                  />
+                  <button
+                    onClick={applyBulk}
+                    disabled={!bulkDate}
+                    className="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 disabled:opacity-40 whitespace-nowrap"
+                  >
+                    ✓ ใช้กับทุกไฟล์
+                  </button>
+                </div>
+                <p className="text-[10px] text-amber-600 mt-1.5">เหมาะถ้า upload หลายไฟล์ที่มีวันเดียวกัน</p>
+              </div>
+
+              {/* Per-file list */}
+              <div className="flex-1 overflow-y-auto p-5">
+                <p className="text-xs font-semibold text-slate-600 mb-3">หรือตั้งแยกแต่ละไฟล์</p>
+                <div className="flex flex-col gap-2">
+                  {uploadedFiles.map((f, i) => {
+                    const realIdx = fileInfos.indexOf(f);
+                    return (
+                      <div key={realIdx} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                        <span className="text-purple-600 text-lg">📋</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-medium text-slate-700 truncate" title={f.name}>{f.name}</div>
+                          <div className="text-[10px] text-slate-400">{f.rows} tracking</div>
+                        </div>
+                        <input
+                          type="date"
+                          value={f.invoice_date || ''}
+                          onChange={e => {
+                            const newDate = e.target.value;
+                            const fileName = f.name;
+                            setFileInfos(prev => prev.map((fi, j) =>
+                              j === realIdx ? { ...fi, invoice_date: newDate } : fi
+                            ));
+                            setTrackingMap(prev => {
+                              const updated: Record<string, TrackingRow> = {};
+                              for (const [k, v] of Object.entries(prev)) {
+                                if (v.source_file === fileName) {
+                                  updated[k] = { ...v, invoice_date: newDate };
+                                } else {
+                                  updated[k] = v;
+                                }
+                              }
+                              return updated;
+                            });
+                          }}
+                          className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-300 w-[135px]"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t bg-slate-50 flex justify-end">
+                <button
+                  onClick={() => setShowDateModal(false)}
+                  className="px-6 py-2 bg-purple-500 text-white rounded-lg text-sm font-semibold hover:bg-purple-600"
+                >
+                  เสร็จสิ้น
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {showClearConfirm && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
