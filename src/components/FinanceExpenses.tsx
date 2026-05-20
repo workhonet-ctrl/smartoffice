@@ -29,6 +29,9 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
   }, [initialSubTab]);
   const [records, setRecords] = useState<ExpRecord[]>([]);
   const [pos, setPOs]         = useState<PO[]>([]);
+  const [shippingRows, setShippingRows] = useState<Array<{
+    id: string; tracking: string; date: string; source: 'flash' | 'myorder'; amount: number;
+  }>>([]);
   const [search, setSearch]   = useState('');
   const [catFilter, setCatFilter] = useState('ทั้งหมด');
   const [dateFrom, setDateFrom] = useState(() => { const d=new Date(); d.setDate(1); return d.toISOString().split('T')[0]; });
@@ -42,7 +45,7 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
   const [toast, setToast]     = useState<string|null>(null);
   const showToast = (msg:string) => { setToast(msg); setTimeout(()=>setToast(null),4000); };
 
-  useEffect(() => { loadRecords(); loadPOs(); }, [dateFrom, dateTo]);
+  useEffect(() => { loadRecords(); loadPOs(); loadShipping(); }, [dateFrom, dateTo]);
 
   const loadRecords = async () => {
     setLoading(true);
@@ -58,6 +61,37 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
       .gte('po_date', dateFrom).lte('po_date', dateTo)
       .order('po_date', { ascending:false });
     if (data) setPOs(data);
+  };
+
+  const loadShipping = async () => {
+    // ดึงจาก shipping_flash + shipping_myorder
+    const allRows: Array<{ id: string; tracking: string; date: string; source: 'flash' | 'myorder'; amount: number }> = [];
+
+    const { data: flashData } = await supabase.from('shipping_flash')
+      .select('id, tracking, invoice_date, total_thb')
+      .gte('invoice_date', dateFrom).lte('invoice_date', dateTo);
+    if (flashData) {
+      for (const r of flashData) {
+        allRows.push({
+          id: r.id, tracking: r.tracking, date: r.invoice_date,
+          source: 'flash', amount: Number(r.total_thb || 0),
+        });
+      }
+    }
+
+    const { data: myData } = await supabase.from('shipping_myorder')
+      .select('id, tracking, invoice_date, total_thb')
+      .gte('invoice_date', dateFrom).lte('invoice_date', dateTo);
+    if (myData) {
+      for (const r of myData) {
+        allRows.push({
+          id: r.id, tracking: r.tracking, date: r.invoice_date,
+          source: 'myorder', amount: Number(r.total_thb || 0),
+        });
+      }
+    }
+
+    setShippingRows(allRows);
   };
 
   const handleAdd = async () => {
@@ -358,7 +392,7 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
         );
       })()}
 
-      {/* ── Tab: ทั้งหมด — รวม records + PO เรียงตามวันที่ ── */}
+      {/* ── Tab: ทั้งหมด — รวม records + PO + shipping เรียงตามวันที่ ── */}
       {subTab === 'all' && (() => {
         const q = search.toLowerCase();
         const expRows = records.filter(r =>
@@ -366,17 +400,30 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
         ).map(r => ({
           id: r.id, doc_no: r.doc_no||'-', date: r.expense_date,
           description: r.description, category: r.category,
-          amount: Number(r.amount_thb), note: r.note||'', source: 'expense' as const,
+          amount: Number(r.amount_thb), source: 'expense' as const,
         }));
         const poRows = pos.filter(p =>
           !q || (p.supplier_name||'').toLowerCase().includes(q) || p.po_no.toLowerCase().includes(q)
         ).map(p => ({
           id: p.id, doc_no: p.po_no, date: p.po_date,
           description: `PO: ${p.supplier_name||'-'}`, category: 'ใบสั่งซื้อ',
-          amount: Number(p.total_thb), note: p.status, source: 'po' as const,
+          amount: Number(p.total_thb), source: 'po' as const,
         }));
-        const allRows = [...expRows, ...poRows].sort((a, b) => b.date.localeCompare(a.date));
+        // ── เพิ่ม shipping rows จาก Flash + MyOrder ──
+        const shipRows = shippingRows.filter(r =>
+          !q || r.tracking.toLowerCase().includes(q)
+        ).map(r => ({
+          id: `${r.source}-${r.id}`,
+          doc_no: r.tracking,
+          date: r.date,
+          description: r.source === 'flash' ? '⚡ Flash Express' : '📋 MYORDER',
+          category: 'ค่าส่ง',
+          amount: r.amount,
+          source: r.source,
+        }));
+        const allRows = [...expRows, ...poRows, ...shipRows].sort((a, b) => (b.date||'').localeCompare(a.date||''));
         const allTotal = allRows.reduce((s, r) => s + r.amount, 0);
+        const shipTotal = shipRows.reduce((s, r) => s + r.amount, 0);
         return (
           <>
             <div className="shrink-0 flex gap-3 mb-3 flex-wrap items-center">
@@ -391,6 +438,9 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
                 </span>
                 <span className="px-2 py-1 bg-purple-50 text-purple-600 rounded-lg border border-purple-100">
                   PO {poRows.length} ใบ · ฿{fmt(poRows.reduce((s,r)=>s+r.amount,0))}
+                </span>
+                <span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-lg border border-blue-100">
+                  ค่าส่ง {shipRows.length} รายการ · ฿{fmt(shipTotal)}
                 </span>
               </div>
               <div className="relative">
@@ -409,26 +459,28 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
                     <th className="p-3 text-left">รายการ</th>
                     <th className="p-3 text-center whitespace-nowrap">หมวด</th>
                     <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
-                    <th className="p-3 text-left">หมายเหตุ</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {allRows.length===0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">ไม่มีรายการในช่วงนี้</td></tr>}
+                  {allRows.length===0 && <tr><td colSpan={5} className="p-8 text-center text-slate-400">ไม่มีรายการในช่วงนี้</td></tr>}
                   {allRows.map(r => (
-                    <tr key={`${r.source}-${r.id}`} className={`border-b hover:bg-slate-50 ${r.source==='po'?'bg-purple-50/30':''}`}>
+                    <tr key={`${r.source}-${r.id}`} className={`border-b hover:bg-slate-50 ${
+                      r.source==='po' ? 'bg-purple-50/30' :
+                      r.source==='flash' || r.source==='myorder' ? 'bg-blue-50/30' : ''
+                    }`}>
                       <td className="p-3 font-mono text-xs text-slate-500">{r.doc_no}</td>
                       <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{fmtDate(r.date)}</td>
                       <td className="p-3 font-medium">{r.description}</td>
                       <td className="p-3 text-center">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                          r.category==='ค่าโฆษณา' ? 'bg-pink-100 text-pink-700' :
+                          r.category==='ค่าโฆษณา'  ? 'bg-pink-100 text-pink-700' :
                           r.category==='ใบสั่งซื้อ' ? 'bg-purple-100 text-purple-700' :
+                          r.category==='ค่าส่ง'    ? 'bg-blue-100 text-blue-700' :
                           r.category==='ค่าจัดส่ง' ? 'bg-blue-100 text-blue-700' :
                           'bg-red-100 text-red-700'
                         }`}>{r.category}</span>
                       </td>
                       <td className="p-3 text-right font-bold text-red-600">฿{fmt(r.amount)}</td>
-                      <td className="p-3 text-xs text-slate-400">{r.note||'-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -436,7 +488,6 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
                   <tr>
                     <td colSpan={4} className="p-3 text-right font-semibold text-slate-600">รวม {allRows.length} รายการ</td>
                     <td className="p-3 text-right font-bold text-red-600 text-base">฿{fmt(allTotal)}</td>
-                    <td/>
                   </tr>
                 </tfoot>
               </table>
