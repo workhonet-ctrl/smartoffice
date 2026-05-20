@@ -30,6 +30,7 @@ type TrackingRow = {
   freight:      number;
   total:        number;
   invoice_date?: string;
+  source_file?: string;  // ผูก row กับไฟล์ที่มา
   order_no?:    string;
   customer?:    string;
   raw_prod?:    string;
@@ -125,6 +126,7 @@ function parseSheet(buffer: ArrayBuffer, fileName: string): ParseResult {
         total:        parseNum(r[TC]),
         matched:      false,
         invoice_date: invoiceDate,
+        source_file:  fileName,
       };
     } else {
       trackingMap[tracking].freight  += parseNum(r[FR]);
@@ -255,6 +257,7 @@ export default function MyOrderImport() {
           freight:      Number(r.freight_thb),
           total:        Number(r.total_thb),
           invoice_date: r.invoice_date ?? undefined,
+          source_file:  '__supabase__',
           order_no:     r.order_no   ?? undefined,
           customer:     r.customer   ?? undefined,
           raw_prod:     r.raw_prod   ?? undefined,
@@ -328,13 +331,15 @@ export default function MyOrderImport() {
 
       const updatedMap = { ...trackingMap };
 
-      // ── ใส่ invoice_date จาก fileInfos ลงทุก row (ถ้า user กรอกมา) ──
-      const latestInvoiceDate = fileInfos.find(f => f.invoice_date)?.invoice_date;
-      if (latestInvoiceDate) {
-        for (const k of Object.keys(updatedMap)) {
-          if (!updatedMap[k].invoice_date) {
-            updatedMap[k] = { ...updatedMap[k], invoice_date: latestInvoiceDate };
-          }
+      // ── ใส่ invoice_date ตามไฟล์ต้นทาง (source_file) ──
+      const fileDateMap: Record<string, string> = {};
+      for (const f of fileInfos) {
+        if (f.invoice_date) fileDateMap[f.name] = f.invoice_date;
+      }
+      for (const k of Object.keys(updatedMap)) {
+        const src = updatedMap[k].source_file;
+        if (src && fileDateMap[src] && !updatedMap[k].invoice_date) {
+          updatedMap[k] = { ...updatedMap[k], invoice_date: fileDateMap[src] };
         }
       }
 
@@ -492,39 +497,46 @@ export default function MyOrderImport() {
         </div>
       )}
 
-      {/* วันที่ invoice — ใส่เองได้ก่อนจับคู่ */}
-      {fileInfos.length > 0 && (
+      {/* วันที่ invoice — ใส่เองได้ก่อนจับคู่ (เฉพาะไฟล์ที่ upload เท่านั้น ไม่รวม Supabase) */}
+      {fileInfos.some(f => f.name !== '📂 โหลดจาก Supabase') && (
         <div className="shrink-0 flex items-center gap-2 flex-wrap bg-purple-50 border border-purple-100 rounded-xl px-4 py-2.5">
           <span className="text-xs text-purple-700 font-semibold whitespace-nowrap">📅 วันที่ invoice:</span>
-          {fileInfos.map((f, i) => (
-            <div key={i} className="flex items-center gap-1.5 bg-white border border-purple-200 rounded-lg px-2 py-1">
-              {fileInfos.length > 1 && (
-                <span className="text-[10px] text-slate-400 truncate max-w-[80px]" title={f.name}>
-                  {f.name.split('.')[0]}
+          {fileInfos.map((f, i) => {
+            // ข้ามไฟล์ที่ load จาก Supabase
+            if (f.name === '📂 โหลดจาก Supabase') return null;
+            return (
+              <div key={i} className="flex items-center gap-1.5 bg-white border border-purple-200 rounded-lg px-2 py-1">
+                <span className="text-[10px] text-slate-500 truncate max-w-[140px] font-medium" title={f.name}>
+                  📄 {f.name.split('.')[0]}
                 </span>
-              )}
-              <input
-                type="date"
-                value={f.invoice_date || ''}
-                onChange={e => {
-                  const newDate = e.target.value;
-                  // อัพเดต fileInfos
-                  setFileInfos((prev: FileInfo[]) => prev.map((fi: FileInfo, j: number) =>
-                    j === i ? { ...fi, invoice_date: newDate } : fi
-                  ));
-                  // อัพเดต invoice_date ใน trackingMap ทุก row (ไฟล์เดียว = ทุก row ใช้วันเดียวกัน)
-                  setTrackingMap(prev => {
-                    const updated: Record<string, TrackingRow> = {};
-                    for (const [k, v] of Object.entries(prev)) {
-                      updated[k] = { ...v, invoice_date: newDate };
-                    }
-                    return updated;
-                  });
-                }}
-                className="border-0 text-xs focus:outline-none focus:ring-2 focus:ring-purple-300 rounded px-1 w-[130px] text-slate-700"
-              />
-            </div>
-          ))}
+                <input
+                  type="date"
+                  value={f.invoice_date || ''}
+                  onChange={e => {
+                    const newDate = e.target.value;
+                    const fileName = f.name;
+                    // อัพเดต fileInfos เฉพาะไฟล์ที่กรอก
+                    setFileInfos((prev: FileInfo[]) => prev.map((fi: FileInfo, j: number) =>
+                      j === i ? { ...fi, invoice_date: newDate } : fi
+                    ));
+                    // อัพเดต trackingMap เฉพาะ row ที่มาจากไฟล์นี้ (source_file === fileName)
+                    setTrackingMap(prev => {
+                      const updated: Record<string, TrackingRow> = {};
+                      for (const [k, v] of Object.entries(prev)) {
+                        if (v.source_file === fileName) {
+                          updated[k] = { ...v, invoice_date: newDate };
+                        } else {
+                          updated[k] = v;
+                        }
+                      }
+                      return updated;
+                    });
+                  }}
+                  className="border-0 text-xs focus:outline-none focus:ring-2 focus:ring-purple-300 rounded px-1 w-[130px] text-slate-700"
+                />
+              </div>
+            );
+          })}
           <span className="text-[10px] text-purple-400">กรอกวันที่ก่อนกดจับคู่</span>
         </div>
       )}
