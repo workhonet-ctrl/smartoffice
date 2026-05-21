@@ -287,8 +287,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     });
     setPreviewOrderRows(flashPreviewRows);
     setPreviewImportFn(() => async () => {
-      setShowOrderPreview(false);
-      setShowFlashImport(true);
+      // import ตรง ไม่ต้องเปิด modal เดิม — ใช้ค่าจาก preview ได้เลย
+      await handleFlashImport();
     });
     setShowOrderPreview(true);
 
@@ -536,7 +536,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const amtSystem = mappedPromos.reduce((s, mp) => {
           return s + (mp.promo ? Number(mp.promo.price_thb||0) * mp.qty : 0);
         }, 0);
-        return { date, custName, facebook, tel, payment, mappedPromos, qty: rawProds.length, amtFile, amtSystem, match: amtFile > 0 && Math.abs(amtFile - amtSystem) < 1 };
+        return { date, custName, facebook, tel, payment, mappedPromos, qty: rawProds.length, amtFile, amtSystem, match: payment === 'BANK' ? mappedPromos.length > 0 : (amtFile > 0 && Math.abs(amtFile - amtSystem) < 1) };
       });
       setPreviewOrderRows(previewRows);
       // เก็บ pendingImportData ไว้ให้ handleConfirmImport เดิมใช้ได้
@@ -1662,8 +1662,20 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                 }
               </span>
               <span className="text-green-600">✓ ยอดตรง <strong>{previewOrderRows.filter(r=>r.match).length}</strong></span>
-              <span className="text-red-500">✗ ยอดไม่ตรง <strong>{previewOrderRows.filter(r=>!r.match).length}</strong></span>
-              <span className="text-amber-600">⚠ ยังไม่จับคู่ <strong>{previewOrderRows.filter(r=>r.mappedPromos.some((mp:any)=>!mp.promoId)).length}</strong> ออเดอร์</span>
+              <button
+                onClick={() => setBulkFilter('__mismatch__')}
+                className="text-red-500 hover:text-red-700 hover:underline cursor-pointer">
+                ✗ ยอดไม่ตรง <strong>{previewOrderRows.filter(r=>r.payment !== 'BANK' && !r.match && r.amtFile > 0 && r.amtSystem > 0).length}</strong>
+              </button>
+              <button
+                onClick={() => setBulkFilter('__unmatched__')}
+                className="text-amber-600 hover:text-amber-800 hover:underline cursor-pointer">
+                ⚠ ยังไม่จับคู่ <strong>{previewOrderRows.filter(r=>r.mappedPromos.length === 0 || r.mappedPromos.some((mp:any)=>!mp.promoId)).length}</strong> ออเดอร์
+              </button>
+              {bulkFilter.startsWith('__') && (
+                <button onClick={() => setBulkFilter('')}
+                  className="text-xs text-slate-400 hover:text-slate-600">✕ ล้างตัวกรอง</button>
+              )}
               {/* Filter rows */}
               <div className="ml-auto flex items-center gap-2">
                 <input
@@ -1734,7 +1746,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                     }
                     const newAmt = newPromos.reduce((s:number, m:any) => s + (m.promo ? Number(m.promo.price_thb||0)*m.qty : 0), 0);
                     flashSelUpdates[ri] = newPromos.map(np => ({ promoId: np.promoId, qty: np.qty }));
-                    return { ...r, mappedPromos: newPromos, qty: newPromos.length, amtSystem: newAmt, match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
+                    return { ...r, mappedPromos: newPromos, qty: newPromos.length, amtSystem: newAmt, match: r.payment === 'BANK' ? newPromos.length > 0 : (r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1) };
                   }));
                   setPreviewMappingSelects(prev => ({ ...prev, ...newMappings }));
                   setFlashPromoSel(prev => ({ ...prev, ...flashSelUpdates }));
@@ -1760,7 +1772,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                     ];
                     const newAmt = newPromos.reduce((s:number, m:any) => s + (m.promo ? Number(m.promo.price_thb||0)*m.qty : 0), 0);
                     flashSelUpdates[ri] = newPromos.map(np => ({ promoId: np.promoId, qty: np.qty }));
-                    return { ...r, mappedPromos: newPromos, qty: newPromos.length, amtSystem: newAmt, match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
+                    return { ...r, mappedPromos: newPromos, qty: newPromos.length, amtSystem: newAmt, match: r.payment === 'BANK' ? newPromos.length > 0 : (r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1) };
                   }));
                   setFlashPromoSel(prev => ({ ...prev, ...flashSelUpdates }));
                 }}
@@ -1823,6 +1835,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                   {(() => {
                     const filtered = bulkFilter.trim()
                       ? previewOrderRows.filter(r => {
+                          // Special filters: mismatch / unmatched
+                          if (bulkFilter === '__mismatch__') {
+                            return r.payment !== 'BANK' && !r.match && r.amtFile > 0 && r.amtSystem > 0;
+                          }
+                          if (bulkFilter === '__unmatched__') {
+                            return r.mappedPromos.length === 0 || r.mappedPromos.some((mp:any) => !mp.promoId);
+                          }
                           const f = bulkFilter.trim().toLowerCase();
                           // กรองจาก ต้นฉบับ
                           const hasRaw = r.mappedPromos.some((mp:any) =>
@@ -1830,7 +1849,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                           );
                           // กรองจาก ยอดไฟล์
                           const hasAmt = String(r.amtFile).includes(f);
-                          return hasRaw || hasAmt;
+                          // กรองจาก ชื่อลูกค้า / เบอร์
+                          const hasCust = (r.custName||'').toLowerCase().includes(f)
+                                       || (r.tel||'').includes(f);
+                          return hasRaw || hasAmt || hasCust;
                         })
                       : previewOrderRows;
                     return filtered.map((row, idx) => {
@@ -1839,7 +1861,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                     <tr key={origIdx}
                       className={`border-b align-top transition ${
                         previewSelectedRows.has(origIdx) ? 'bg-amber-50 hover:bg-amber-100' :
-                        !row.match ? 'bg-red-50 hover:bg-red-100' :
+                        // แดงเฉพาะ: COD ที่ยอดไม่ตรง (มียอดทั้ง 2 ฝั่ง)
+                        (row.payment !== 'BANK' && !row.match && row.amtFile > 0 && row.amtSystem > 0) ? 'bg-red-50 hover:bg-red-100' :
                         idx % 2 === 0 ? 'bg-white hover:bg-green-50' : 'bg-slate-50/50 hover:bg-green-50'
                       }`}>
                       {/* checkbox */}
@@ -1934,7 +1957,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                                 const newAmt = newPromos.reduce((s:number, m:any) =>
                                                   s + (m.promo ? Number(m.promo.price_thb||0)*m.qty : 0), 0);
                                                 return { ...r, mappedPromos: newPromos, amtSystem: newAmt,
-                                                  match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
+                                                  match: r.payment === 'BANK' ? newPromos.length > 0 : (r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1) };
                                               }));
                                               setPreviewMappingSelects(prev => ({ ...prev, [mp.rawName]: p.id }));
                                               setOpenPromoIdx(null);
@@ -1965,7 +1988,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                     if (ri !== origIdx) return r;
                                     const newPromos = r.mappedPromos.filter((_:any, mj:number) => mj !== mi);
                                     const newAmt = newPromos.reduce((s:number, m:any) => s + (m.promo ? Number(m.promo.price_thb||0)*m.qty : 0), 0);
-                                    return { ...r, mappedPromos: newPromos, qty: newPromos.length, amtSystem: newAmt, match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
+                                    return { ...r, mappedPromos: newPromos, qty: newPromos.length, amtSystem: newAmt, match: r.payment === 'BANK' ? newPromos.length > 0 : (r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1) };
                                   }));
                                   setFlashPromoSel(prev => {
                                     const cur = prev[origIdx] || [];
@@ -2004,7 +2027,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                         {row.amtSystem > 0 ? `฿${row.amtSystem.toLocaleString()}` : '-'}
                       </td>
                       <td className="p-2.5 text-center text-base">
-                        {!row.match && row.amtFile > 0 && row.amtSystem > 0
+                        {row.payment === 'BANK'
+                          ? <span title="BANK" className="text-blue-400 text-xs">🏦</span>
+                          : !row.match && row.amtFile > 0 && row.amtSystem > 0
                           ? <span title="ยอดไม่ตรง">🔴</span>
                           : row.amtFile > 0 && row.amtSystem > 0
                           ? <span title="ยอดตรง">✅</span>
@@ -2022,9 +2047,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
             {/* Footer */}
             <div className="px-6 py-4 border-t flex items-center justify-between shrink-0 bg-slate-50 rounded-b-2xl">
               <div className="text-xs text-slate-500 space-y-0.5">
-                {previewOrderRows.filter(r=>!r.match && r.amtFile>0 && r.amtSystem>0).length > 0 && (
+                {previewOrderRows.filter(r=>r.payment !== 'BANK' && !r.match && r.amtFile>0 && r.amtSystem>0).length > 0 && (
                   <div className="text-red-600 font-medium">
-                    ⚠ มี {previewOrderRows.filter(r=>!r.match && r.amtFile>0 && r.amtSystem>0).length} ออเดอร์ที่ยอดไม่ตรง — ยังสามารถ import ได้
+                    ⚠ มี {previewOrderRows.filter(r=>r.payment !== 'BANK' && !r.match && r.amtFile>0 && r.amtSystem>0).length} ออเดอร์ที่ยอดไม่ตรง — ยังสามารถ import ได้
                   </div>
                 )}
               </div>
