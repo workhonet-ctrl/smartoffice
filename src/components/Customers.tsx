@@ -52,43 +52,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const [editTag, setEditTag]       = useState<{id: string; tag: string} | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  // ── กรองตามวันที่สั่งซื้อ ──────────────────────────────────
-  const [orderDateFrom, setOrderDateFrom] = useState('');
-  const [orderDateTo,   setOrderDateTo]   = useState('');
-  const [dateFilteredIds, setDateFilteredIds] = useState<Set<string> | null>(null);
-  const [loadingDateFilter, setLoadingDateFilter] = useState(false);
-
-  const applyDateFilter = async () => {
-    if (!orderDateFrom && !orderDateTo) { setDateFilteredIds(null); return; }
-    setLoadingDateFilter(true);
-    let q = supabase.from('orders').select('customer_id').not('customer_id', 'is', null);
-    if (orderDateFrom) q = q.gte('order_date', orderDateFrom);
-    if (orderDateTo)   q = q.lte('order_date', orderDateTo);
-    const { data } = await q;
-    const ids = new Set((data || []).map((o: any) => o.customer_id as string));
-    setDateFilteredIds(ids);
-    setLoadingDateFilter(false);
-    setPageView(0);
-  };
-
-  const clearDateFilter = () => {
-    setOrderDateFrom(''); setOrderDateTo('');
-    setDateFilteredIds(null);
-  };
-
-  // ── ออเดอร์ซ้ำ (Order No. เดิม ข้อมูลต่าง) — รอ user เลือก ──
-  type DupOrderItem = {
-    orderNo: string;
-    oldProd: string; newProd: string;
-    oldTrack: string; newTrack: string;
-    oldAmt: number; newAmt: number;
-    action: 'remove' | 'add';
-    row: any;
-  };
-  const [dupOrderItems, setDupOrderItems]         = useState<DupOrderItem[]>([]);
-  const [showDupOrderModal, setShowDupOrderModal] = useState(false);
-  const [pendingAfterDup, setPendingAfterDup]     = useState<(() => Promise<void>) | null>(null);
-
   const [importing, setImporting]   = useState(false);
   // Flash Import
   const [showFlashImport, setShowFlashImport] = useState(false);
@@ -231,13 +194,33 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   }, [flashOpenPromo]);
 
   // ── Flash Import ──────────────────────────────────────────
+  // ── ไฟล์ Flash columns (store_parcels.xlsx) ──
+  //   [0]  A  เวลารับพัสดุ          → order_date
+  //   [1]  B  เลขพัสดุ              → tracking_no
+  //   [2]  C  สถานะพัสดุ
+  //   [10] K  ชื่อผู้รับ              → customer name
+  //   [11] L  เบอร์ผู้รับ            → tel
+  //   [12] M  รายละเอียดที่อยู่ผู้รับ → address
+  //   [13] N  ชื่ออำเภอ จังหวัดผู้รับ → district + province
+  //   [14] O  รหัสไปรษณีย์ผู้รับ     → postal_code
+  //   [15] P  น้ำหนัก
+  //   [17] R  ค่าสินค้าที่เรียกเก็บ COD → total_thb
+  //   [23] X  ค่าบริการขนส่งที่เก็บจริง → freight (เก็บไว้ใน shipping table)
+  // หมายเหตุ: ไฟล์ Flash ใหม่ไม่มี column สินค้า → user เลือกเองทุกแถว
   const handleFlashFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     const buf = await file.arrayBuffer();
     const wb  = XLSX.read(buf);
     const ws  = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
-    const dataRows = rows.slice(1).filter(r => r[1] && r[11]); // มี tracking + tel
+    // กรองเฉพาะ row ที่มี tracking [1] และเบอร์โทรผู้รับ [11]
+    const dataRows = rows.slice(1).filter(r => r[1] && r[11]);
+
+    if (dataRows.length === 0) {
+      showToast('ไม่พบข้อมูลในไฟล์ — ตรวจสอบว่ามี Tracking + เบอร์ผู้รับ', 'error');
+      e.target.value = '';
+      return;
+    }
 
     // batch โหลด promos ถ้ายังไม่มี
     if (promoOptions.length === 0) {
@@ -263,76 +246,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       if (existMap[t]) dups.push({ row: r, existing: existMap[t] });
     });
 
-    // ── Auto-match สินค้าจาก column AB (รายการสินค้า) ──
-    // 1. รวบรวม raw product names (split ด้วย | ถ้ามีหลายชิ้น)
-    const rawProdSet = new Set<string>();
-    dataRows.forEach(r => {
-      const raw = String(r[27] || '').trim();
-      if (!raw) return;
-      raw.split('|').forEach(p => {
-        const t = p.trim();
-        if (t) rawProdSet.add(t);
-      });
-    });
-
-    const autoMap: Record<string, string> = {}; // raw_name → promo_id
-
-    if (rawProdSet.size > 0) {
-      // 2. โหลด mapping จาก product_mappings table
-      const { data: mappings } = await supabase
-        .from('product_mappings')
-        .select('raw_name, promo_id')
-        .in('raw_name', [...rawProdSet]);
-      (mappings || []).forEach((m: any) => { autoMap[m.raw_name] = m.promo_id; });
-
-      // 3. สำหรับ raw ที่ยังไม่มี mapping → fuzzy match กับ promo names
-      // โหลด promos ทั้งหมดถ้ายังไม่ได้
-      let promosForMatch = promoOptions;
-      if (promosForMatch.length === 0) {
-        const { data: promos } = await supabase
-          .from('products_promo').select('id, name, short_name')
-          .eq('active', true);
-        promosForMatch = (promos || []) as any;
-      }
-
-      const norm = (s: string) => s.toLowerCase().replace(/[\s()\u0e00-\u0e7f]+/g, m => m.replace(/\s/g, '')).trim();
-      [...rawProdSet].forEach(raw => {
-        if (autoMap[raw]) return;
-        const rawNorm = norm(raw);
-        // exact match (ignore spaces)
-        const exact = promosForMatch.find((p: any) =>
-          norm(p.name) === rawNorm || norm(p.short_name || '') === rawNorm
-        );
-        if (exact) { autoMap[raw] = exact.id; return; }
-        // contains match (raw contains promo name หรือ promo name contains raw)
-        const contains = promosForMatch.find((p: any) => {
-          const pn = norm(p.name);
-          const sn = norm(p.short_name || '');
-          return (pn && (rawNorm.includes(pn) || pn.includes(rawNorm)))
-              || (sn && (rawNorm.includes(sn) || sn.includes(rawNorm)));
-        });
-        if (contains) autoMap[raw] = contains.id;
-      });
-    }
-
-    // 4. แปลง autoMap → flashPromoSel เริ่มต้น (auto fill ออเดอร์ที่ match ได้)
-    const initialSel: Record<number, {promoId: string; qty: number}[]> = {};
-    dataRows.forEach((r, idx) => {
-      const raw = String(r[27] || '').trim();
-      if (!raw) return;
-      const items: {promoId: string; qty: number}[] = [];
-      raw.split('|').forEach(p => {
-        const t = p.trim();
-        if (t && autoMap[t]) {
-          items.push({ promoId: autoMap[t], qty: 1 });
-        }
-      });
-      if (items.length > 0) initialSel[idx] = items;
-    });
-
+    // ไฟล์ Flash ไม่มี column สินค้า → user เลือกเอง
     setFlashRows(dataRows);
     setFlashDups(dups);
-    setFlashPromoSel(initialSel);  // ✅ pre-fill จาก auto-match
+    setFlashPromoSel({});      // ไม่ pre-fill
     setFlashTotalSel({});
     setFlashPromoSearch({});
     setFlashAddQty({});
@@ -343,25 +260,30 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     setFlashSelectedRows(new Set());
 
     // ── สร้าง previewOrderRows สำหรับ popup ตรวจสอบ ──────────────────────
-    const currentPromos = promoOptions.length > 0 ? promoOptions : [];
-    const flashPreviewRows = dataRows.map((r: any, idx: number) => {
-      const date     = String(r[3]||'');   // col D วันที่จัดส่ง
-      const custName = String(r[9]||'');   // col J ชื่อผู้รับ
-      const facebook = String(r[7]||'');   // col H ชื่อผู้สั่ง
-      const tel      = String(r[11]||'');  // col L เบอร์โทร
-      const amtFile  = Number(r[17]||0);   // col R ยอด
+    const flashPreviewRows = dataRows.map((r: any) => {
+      // [0] เวลารับพัสดุ → date (รูปแบบ "2026-05-16 15:12:04" หรือ Date object)
+      let date = '';
+      const t0 = r[0];
+      if (t0 instanceof Date) {
+        date = t0.toISOString().split('T')[0];
+      } else if (typeof t0 === 'string') {
+        date = t0.split(' ')[0];
+      }
+
+      const custName = String(r[10]||'').trim();   // [10] ชื่อผู้รับ
+      const facebook = '';                          // ไม่มีใน Flash
+      const tel      = String(r[11]||'').trim();    // [11] เบอร์ผู้รับ
+      const amtFile  = Number(r[17]||0);            // [17] ค่าสินค้า COD
       const payment  = amtFile > 0 ? 'COD' : 'BANK';
-      const rawProd  = String(r[27]||'').trim(); // col AB สินค้า
-      const rawProds = rawProd ? rawProd.split('|').map((s:string)=>s.trim()).filter(Boolean) : [];
-      const selItems = initialSel[idx] || [];
-      const mappedPromos = rawProds.map((rp, i) => {
-        const pid   = autoMap[rp] || '';
-        const promo = currentPromos.find((p:any) => p.id === pid);
-        const qty   = selItems[i]?.qty || 1;
-        return { rawName: rp, promoId: pid, promo, qty };
-      });
-      const amtSystem = mappedPromos.reduce((s, mp) => s + (mp.promo ? Number(mp.promo.price_thb||0) * mp.qty : 0), 0);
-      return { date, custName, facebook, tel, payment, mappedPromos, qty: rawProds.length, amtFile, amtSystem, match: Math.abs(amtFile - amtSystem) < 1 };
+
+      return {
+        date, custName, facebook, tel, payment,
+        mappedPromos: [],     // empty — user เลือกเอง
+        qty: 0,
+        amtFile,
+        amtSystem: 0,
+        match: false,
+      };
     });
     setPreviewOrderRows(flashPreviewRows);
     setPreviewImportFn(() => async () => {
@@ -370,14 +292,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     });
     setShowOrderPreview(true);
 
-    // แสดงสรุปการ match
-    const matchedCount = Object.keys(initialSel).length;
-    if (rawProdSet.size > 0) {
-      const matchedRaw = [...rawProdSet].filter(r => autoMap[r]).length;
-      setTimeout(() => showToast(
-        `🎯 จับคู่อัตโนมัติ ${matchedRaw}/${rawProdSet.size} สินค้า · ${matchedCount}/${dataRows.length} ออเดอร์`
-      ), 100);
-    }
+    showToast(
+      `📦 พบ ${dataRows.length} ออเดอร์ · ${dups.length} ซ้ำ · เลือกสินค้าในขั้นถัดไป`,
+      dups.length > 0 ? 'error' : 'success'
+    );
     e.target.value = '';
   };
 
@@ -396,23 +314,25 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       const toInsert: any[] = [];
       const seenTels = new Set<string>();
       flashRows.forEach(r => {
-        const tel = String(r[11]).trim();
-        if (!custMap[tel] && !seenTels.has(tel)) {
-          seenTels.add(tel);
-          const dp = String(r[13]||'').split(' ');
-          const province = dp[dp.length-1] || '';
-          const district = dp[dp.length-2] || '';
-          toInsert.push({
-            name: String(r[10]||'').trim(),
-            tel,
-            address: String(r[12]||'').trim()||null,
-            district, province,
-            postal_code: String(r[14]||'').trim()||null,
-            channel: 'FLASH',
-            payment_method: Number(r[17] || 0) > 0 ? 'COD' : 'BANK',
-            tag: 'ใหม่',
-          });
-        }
+        const tel = String(r[11]||'').trim();
+        if (!tel || (custMap[tel] || seenTels.has(tel))) return;
+        seenTels.add(tel);
+
+        // [13] ชื่ออำเภอ จังหวัดผู้รับ → "บางพึ่ง พระประแดง สมุทรปราการ"
+        const dp = String(r[13]||'').trim().split(/\s+/);
+        const province = dp[dp.length-1] || '';
+        const district = dp.length >= 2 ? dp[dp.length-2] : '';
+
+        toInsert.push({
+          name: String(r[10]||'').trim(),
+          tel,
+          address: String(r[12]||'').trim() || null,
+          district, province,
+          postal_code: String(r[14]||'').trim() || null,
+          channel: 'FLASH',
+          payment_method: Number(r[17] || 0) > 0 ? 'COD' : 'BANK',
+          tag: 'ใหม่',
+        });
       });
       for (let i = 0; i < toInsert.length; i += 500) {
         const { data } = await supabase.from('customers').insert(toInsert.slice(i, i+500)).select('id, tel');
@@ -456,11 +376,21 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const codAmount  = Number(r[17] || 0);
         const paymentMethod = codAmount > 0 ? 'COD' : 'BANK';
 
+        // วันที่: ดึงจาก [0] เวลารับพัสดุ (รูปแบบ "2026-05-16 15:12:04" หรือ Date)
+        let orderDate = new Date().toISOString().split('T')[0];
+        const t0 = r[0];
+        if (t0 instanceof Date) {
+          orderDate = t0.toISOString().split('T')[0];
+        } else if (typeof t0 === 'string' && t0.trim()) {
+          const m = t0.match(/(\d{4}-\d{2}-\d{2})/);
+          if (m) orderDate = m[1];
+        }
+
         const { error } = await supabase.from('orders').insert([{
           order_no:    `FL-${tracking}`,
           customer_id: customerId,
           channel:     'FLASH',
-          order_date:  new Date().toISOString().split('T')[0],
+          order_date:  orderDate,
           tracking_no: tracking,
           courier:     'FLASH',
           route:       'B',
@@ -638,19 +568,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // ── Step 3: โหลด orders ที่มีอยู่แล้วทั้งหมดครั้งเดียว (by order_no) ─
       const allOrderNos = [...new Set(dataRows.map(r => String(r[1]||'').trim()).filter(Boolean))];
       const existingOrderSet = new Set<string>();
-      const existingOrderMap: Record<string, { raw_prod: string; tracking_no: string; total_thb: number }> = {};
       for (let i=0; i<allOrderNos.length; i+=500) {
-        const { data } = await supabase.from('orders')
-          .select('order_no, raw_prod, tracking_no, total_thb')
-          .in('order_no', allOrderNos.slice(i,i+500));
-        (data||[]).forEach((o:any) => {
-          existingOrderSet.add(o.order_no);
-          existingOrderMap[o.order_no] = {
-            raw_prod:    o.raw_prod    || '',
-            tracking_no: o.tracking_no || '',
-            total_thb:   Number(o.total_thb || 0),
-          };
-        });
+        const { data } = await supabase.from('orders').select('order_no').in('order_no', allOrderNos.slice(i,i+500));
+        (data||[]).forEach((o:any) => existingOrderSet.add(o.order_no));
       }
 
       // ── Step 4: แยก insert vs update — deduplicate by tel ────────────
@@ -710,33 +630,11 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // ── Step 5: batch insert orders ────────────────────────────────────
       const ordersToInsert: any[] = [];
       let orderSkipped = 0;
-      const dupFound: DupOrderItem[] = [];
 
       for (const row of dataRows) {
         const orderNo = String(row[1]||'').trim();
         if (!orderNo) continue;
-        // ── Order No. ซ้ำ → ตรวจว่าข้อมูลต่างไหม ──
-        if (existingOrderSet.has(orderNo)) {
-          const existing = existingOrderMap[orderNo];
-          const newProd2  = String(row[14]||'').trim();
-          const rawT2     = String(row[17]||'');
-          const tm2i      = rawT2.match(/^([^\s(]+)/);
-          const newTrack2 = tm2i && tm2i[1].length > 3 ? tm2i[1] : '';
-          const newAmt2   = Number(row[21])||0;
-          if (existing && (existing.raw_prod !== newProd2 || existing.tracking_no !== newTrack2 || existing.total_thb !== newAmt2)) {
-            dupFound.push({
-              orderNo,
-              oldProd: existing.raw_prod, newProd: newProd2,
-              oldTrack: existing.tracking_no, newTrack: newTrack2,
-              oldAmt: existing.total_thb, newAmt: newAmt2,
-              action: 'add',
-              row,
-            });
-          } else {
-            orderSkipped++;
-          }
-          continue;
-        }
+        if (existingOrderSet.has(orderNo)) { orderSkipped++; continue; }
 
         const tel = String(row[6]||'').trim();
         const customerId = telToId[tel];
@@ -789,69 +687,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           route,
           imported_at: new Date().toISOString().split('T')[0],
         });
-      }
-
-      // ── ถ้ามีออเดอร์ซ้ำ → หยุดรอ user ──────────────────────
-      if (dupFound.length > 0) {
-        setDupOrderItems(dupFound);
-        setShowDupOrderModal(true);
-        setPendingAfterDup(() => async () => {
-          const extraOrders: any[] = [];
-          for (const d of dupFound) {
-            if (d.action !== 'add') continue;
-            let suffix = 1;
-            let newOrderNo = `${d.orderNo}-${suffix}`;
-            while (existingOrderSet.has(newOrderNo)) { suffix++; newOrderNo = `${d.orderNo}-${suffix}`; }
-            const row = d.row;
-            const rawDate2 = String(row[3]||'');
-            const orderDate2 = rawDate2 ? new Date(rawDate2).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-            const tmR2 = rawDate2.match(/(\d{1,2}):(\d{2})/);
-            const rawT2 = String(row[17]||'');
-            const tm2 = rawT2.match(/^([^\s(]+)/);
-            const trackingNo2 = tm2 ? tm2[1] : '';
-            const cm2 = rawT2.match(/\(([^)]+)\)/);
-            let courier2 = '';
-            if (cm2) { const cv = cm2[1].toUpperCase(); if (cv.includes('THAI_POST')||cv.includes('EMS')) courier2='ไปรษณีย์'; else if (cv.includes('FLASH')) courier2='FLASH'; else courier2=cm2[1]; }
-            const rawProds2 = String(row[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
-            const promoIds2 = rawProds2.map((rp:string)=>finalPromoMap[rp]||'').filter(Boolean);
-            const quantities2 = String(row[15]||'1');
-            const hasTrack2 = trackingNo2.length>3;
-            const postal2 = String(row[11]||'').trim();
-            const isTourist2 = TOURIST_ZIPS.has(postal2);
-            const route2 = hasTrack2 ? (courier2==='ไปรษณีย์'?(isTourist2?'C':'A'):'B') : (isTourist2?'C':'B');
-            const tel2 = String(row[6]||'').trim();
-            const customerId2 = telToId[tel2];
-            if (!customerId2) continue;
-            extraOrders.push({
-              order_no: newOrderNo, customer_id: customerId2,
-              channel: String(row[2]||'').trim()||null,
-              order_date: orderDate2, order_time: tmR2?`${tmR2[1].padStart(2,'0')}:${tmR2[2]}`:null,
-              raw_prod: String(row[14]||'').trim()||null, promo_ids: promoIds2,
-              quantity: quantities2.split('|').reduce((s:number,n:string)=>s+(Number(n.trim())||1),0),
-              quantities: quantities2, weight_kg: (Number(row[16])||0)/1000,
-              tracking_no: hasTrack2?trackingNo2:null, courier: courier2||null,
-              total_thb: Number(row[21])||0,
-              payment_method: String(row[22]||'COD').trim(),
-              payment_status: String(row[24]||'รอชำระเงิน').trim(),
-              order_status: hasTrack2?'รอแพ็ค':'รอคีย์ออเดอร์',
-              route: route2, imported_at: new Date().toISOString().split('T')[0],
-              note: '🔁 สั่งเพิ่ม',
-            });
-          }
-          const allToInsert = [...ordersToInsert, ...extraOrders];
-          let orderAdded2 = 0;
-          for (let i=0; i<allToInsert.length; i+=500) {
-            const { error } = await supabase.from('orders').insert(allToInsert.slice(i,i+500));
-            if (!error) orderAdded2 += Math.min(500, allToInsert.length-i);
-          }
-          const addedDup = dupFound.filter(d=>d.action==='add').length;
-          const removedDup = dupFound.filter(d=>d.action==='remove').length;
-          showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded2}${addedDup>0?` (🔁 สั่งเพิ่ม ${addedDup})`:''}${removedDup>0?` · ข้าม ${orderSkipped+removedDup}`:orderSkipped>0?` · ข้าม ${orderSkipped}`:''}`);
-          loadCustomers(); setShowDupOrderModal(false); setImporting(false);
-          if (e?.target) e.target.value = '';
-        });
-        setImporting(false);
-        return;
       }
 
       // batch insert orders (500 ต่อครั้ง)
@@ -1139,7 +974,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     setEditOrder(data);
     setEditOrderItems(items);
     setEditOrderForm({
-      order_date:     data.order_date || '',
       total_thb:      String(data.total_thb || 0),
       tracking_no:    data.tracking_no || '',
       courier:        data.courier || '',
@@ -1174,7 +1008,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         quantities,
         quantity:       qtySum,
         raw_prod:       rawProd,
-        order_date:     editOrderForm.order_date || null,
         total_thb:      Number(editOrderForm.total_thb) || 0,
         tracking_no:    editOrderForm.tracking_no?.trim() || null,
         courier:        editOrderForm.courier?.trim() || null,
@@ -1241,8 +1074,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       || (c.facebook_name || '').toLowerCase().includes(search.toLowerCase())
       || c.tel.includes(search)
       || (c.province || '').includes(search);
-    const matchDate    = !dateFilteredIds || dateFilteredIds.has(c.id);
-    return matchTag && matchOrders && matchChannel && matchProduct && matchSearch && matchDate;
+    return matchTag && matchOrders && matchChannel && matchProduct && matchSearch;
   });
 
   // unique channels สำหรับ dropdown
@@ -1426,34 +1258,11 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           <option value="updated_at">เรียงตามล่าสุด</option>
         </select>
         {/* ล้าง filter */}
-        {(filterMinOrders > 0 || filterChannel || searchProduct || dateFilteredIds) && (
-          <button onClick={() => { setFilterMinOrders(0); setFilterChannel(''); setSearchProduct(''); clearDateFilter(); }}
+        {(filterMinOrders > 0 || filterChannel || searchProduct) && (
+          <button onClick={() => { setFilterMinOrders(0); setFilterChannel(''); setSearchProduct(''); }}
             className="text-xs text-slate-400 hover:text-red-500 px-2 py-1 rounded border hover:border-red-300 transition">
             ✕ ล้างตัวกรอง
           </button>
-        )}
-        {/* กรองตามวันที่สั่งซื้อ */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-slate-400 whitespace-nowrap">📅 สั่งซื้อ</span>
-          <input type="date" value={orderDateFrom} onChange={e => setOrderDateFrom(e.target.value)}
-            className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 w-[120px]"/>
-          <span className="text-slate-300 text-xs">—</span>
-          <input type="date" value={orderDateTo} onChange={e => setOrderDateTo(e.target.value)}
-            className="border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 w-[120px]"/>
-          <button onClick={applyDateFilter} disabled={loadingDateFilter || (!orderDateFrom && !orderDateTo)}
-            className="px-3 py-1.5 bg-cyan-500 text-white rounded-lg text-xs hover:bg-cyan-600 disabled:opacity-40 whitespace-nowrap">
-            {loadingDateFilter ? '...' : 'กรอง'}
-          </button>
-          {dateFilteredIds && (
-            <button onClick={clearDateFilter} className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50">
-              <X size={13}/>
-            </button>
-          )}
-        </div>
-        {dateFilteredIds && (
-          <span className="text-xs bg-cyan-50 text-cyan-600 border border-cyan-200 px-2 py-0.5 rounded-lg">
-            📅 {orderDateFrom||'...'} — {orderDateTo||'...'} · {filtered.length} คน
-          </span>
         )}
         <span className="text-xs text-slate-400">{filtered.length} คน</span>
         {/* Pagination buttons */}
@@ -2971,12 +2780,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
               {/* ข้อมูลอื่นๆ */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t">
                 <div>
-                  <label className="text-xs font-semibold text-slate-500 block mb-1">📅 วันที่สั่งซื้อ</label>
-                  <input type="date" value={editOrderForm.order_date || ''}
-                    onChange={e => setEditOrderForm((p: any) => ({...p, order_date: e.target.value}))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-                </div>
-                <div>
                   <label className="text-xs font-semibold text-slate-500 block mb-1">ยอดรวม (฿) *</label>
                   <input type="number" value={editOrderForm.total_thb || '0'}
                     onChange={e => setEditOrderForm((p: any) => ({...p, total_thb: e.target.value}))}
@@ -3149,74 +2952,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           </div>
         </>,
         document.body
-      )}
-
-      {/* ── Modal: ออเดอร์ซ้ำ Order No. เดิม ข้อมูลต่าง ── */}
-      {showDupOrderModal && dupOrderItems.length > 0 && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-[90] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
-            <div className="shrink-0 px-6 py-4 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center text-xl">⚠️</div>
-                <div>
-                  <h3 className="font-bold text-slate-800">พบออเดอร์ซ้ำ {dupOrderItems.length} รายการ</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Order No. เดิม แต่ข้อมูลเปลี่ยนแปลง — เลือกว่าจะทำอะไร</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex-1 overflow-auto px-6 py-4 space-y-3">
-              {dupOrderItems.map((d, i) => (
-                <div key={i} className={`rounded-xl border p-4 transition ${d.action === 'remove' ? 'border-slate-200 bg-slate-50 opacity-60' : 'border-blue-200 bg-blue-50'}`}>
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div>
-                      <span className="font-mono text-sm font-bold text-slate-700">{d.orderNo}</span>
-                      {d.action === 'add' && <span className="ml-2 text-xs text-blue-600 font-medium">→ จะบันทึกเป็น {d.orderNo}-1</span>}
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      <button onClick={() => setDupOrderItems(prev => prev.map((x,j) => j===i ? {...x, action:'remove'} : x))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${d.action==='remove' ? 'bg-slate-500 text-white' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-100'}`}>
-                        ลบออก
-                      </button>
-                      <button onClick={() => setDupOrderItems(prev => prev.map((x,j) => j===i ? {...x, action:'add'} : x))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${d.action==='add' ? 'bg-blue-500 text-white' : 'bg-white border border-blue-300 text-blue-600 hover:bg-blue-50'}`}>
-                        🔁 สั่งเพิ่ม
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="bg-white rounded-lg p-3 border border-slate-200">
-                      <div className="text-slate-400 font-medium mb-1.5">ข้อมูลเดิมในระบบ</div>
-                      <div className="text-slate-600 mb-1 line-clamp-2">{d.oldProd || '-'}</div>
-                      {d.oldTrack && <div className="font-mono text-slate-500">{d.oldTrack}</div>}
-                      <div className="text-slate-500 mt-1">฿{d.oldAmt.toLocaleString()}</div>
-                    </div>
-                    <div className="bg-white rounded-lg p-3 border border-blue-200">
-                      <div className="text-blue-500 font-medium mb-1.5">ข้อมูลใหม่จาก Excel</div>
-                      <div className={`mb-1 line-clamp-2 ${d.newProd !== d.oldProd ? 'text-blue-700 font-bold' : 'text-slate-600'}`}>{d.newProd || '-'}</div>
-                      {d.newTrack && <div className={`font-mono ${d.newTrack !== d.oldTrack ? 'text-blue-700 font-bold' : 'text-slate-500'}`}>{d.newTrack}</div>}
-                      <div className={`mt-1 ${d.newAmt !== d.oldAmt ? 'text-blue-700 font-bold' : 'text-slate-500'}`}>฿{d.newAmt.toLocaleString()}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="shrink-0 px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
-              <div className="text-xs text-slate-400">
-                สั่งเพิ่ม {dupOrderItems.filter(d=>d.action==='add').length} · ลบออก {dupOrderItems.filter(d=>d.action==='remove').length}
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => { setShowDupOrderModal(false); setImporting(false); }}
-                  className="px-4 py-2 bg-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-300">
-                  ยกเลิกทั้งหมด
-                </button>
-                <button onClick={() => { if (pendingAfterDup) pendingAfterDup(); }}
-                  className="px-6 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600">
-                  ✓ ยืนยัน
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
 
       {toast && (
