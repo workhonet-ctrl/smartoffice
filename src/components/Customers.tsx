@@ -630,6 +630,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         return { date, custName, facebook, tel, payment, mappedPromos, qty: rawProds.length, amtFile, amtSystem, match: payment === 'BANK' ? mappedPromos.length > 0 : (amtFile > 0 && Math.abs(amtFile - amtSystem) < 1) };
       });
       setPreviewOrderRows(previewRows);
+      setPreviewImportFn(null);  // ← MyOrder ใช้ handleConfirmImport (default) ไม่ใช่ Flash flow
       // เก็บ pendingImportData ไว้ให้ handleConfirmImport เดิมใช้ได้
       setShowPreviewModal(false);
       setShowOrderPreview(true);
