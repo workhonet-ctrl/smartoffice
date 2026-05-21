@@ -1718,16 +1718,30 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                   if (!bulkPromoId) return;
                   const promo = promoOptions.find((p:any) => p.id === bulkPromoId);
                   const newMappings: Record<string,string> = {};
+                  const flashSelUpdates: Record<number, {promoId: string; qty: number}[]> = {};
+
                   setPreviewOrderRows(prev => prev.map((r, ri) => {
                     if (!previewSelectedRows.has(ri)) return r;
-                    const newPromos = r.mappedPromos.map((m:any) => {
-                      newMappings[m.rawName] = bulkPromoId;
-                      return { ...m, promoId: bulkPromoId, promo };
-                    });
+                    let newPromos;
+                    if (r.mappedPromos.length === 0) {
+                      // Flash row ที่ยังไม่มีสินค้าเลย → เพิ่มใหม่
+                      const rawName = (promo as any)?.short_name || (promo as any)?.name || '';
+                      newPromos = [{ rawName, promoId: bulkPromoId, promo, qty: bulkQty || 1 }];
+                    } else {
+                      // มี mapping อยู่แล้ว → override
+                      newPromos = r.mappedPromos.map((m:any) => {
+                        newMappings[m.rawName] = bulkPromoId;
+                        return { ...m, promoId: bulkPromoId, promo, qty: bulkQty || m.qty };
+                      });
+                    }
                     const newAmt = newPromos.reduce((s:number, m:any) => s + (m.promo ? Number(m.promo.price_thb||0)*m.qty : 0), 0);
-                    return { ...r, mappedPromos: newPromos, amtSystem: newAmt, match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
+                    // sync ลง flashPromoSel เพื่อให้ handleFlashImport เห็น
+                    flashSelUpdates[ri] = newPromos.map(np => ({ promoId: np.promoId, qty: np.qty }));
+                    return { ...r, mappedPromos: newPromos, qty: newPromos.length, amtSystem: newAmt, match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
                   }));
                   setPreviewMappingSelects(prev => ({ ...prev, ...newMappings }));
+                  // sync ลง flashPromoSel (Flash) — handleFlashImport อ่านจาก state นี้
+                  setFlashPromoSel(prev => ({ ...prev, ...flashSelUpdates }));
                 }}
                 className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 disabled:opacity-40 whitespace-nowrap">
                 ✓ ใส่ให้ที่เลือก
