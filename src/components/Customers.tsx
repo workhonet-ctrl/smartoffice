@@ -386,6 +386,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       let skippedExist = 0;
       let skippedNoCust = 0;
       let insertErrors = 0;
+      let firstError: string = '';
 
       for (let idx = 0; idx < flashRows.length; idx++) {
         const r = flashRows[idx];
@@ -460,6 +461,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         }]);
         if (error) {
           console.error('[Flash insert error]', orderNo, error);
+          if (!firstError) firstError = `${orderNo}: ${error.message}`;
           insertErrors++;
           continue;
         }
@@ -474,7 +476,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       if (skippedNoCust > 0) skipParts.push(`${skippedNoCust} ไม่มีลูกค้า`);
       if (insertErrors > 0)  skipParts.push(`${insertErrors} error`);
       const skipMsg = skipParts.length > 0 ? ` · ข้าม ${skipParts.join(', ')}` : '';
-      showToast(`✓ นำเข้าสำเร็จ · ออเดอร์ใหม่ ${added} รายการ${skipMsg}`, added > 0 ? 'success' : 'error');
+      const errDetail = firstError ? `\nError แรก: ${firstError}` : '';
+      showToast(`✓ นำเข้าสำเร็จ · ออเดอร์ใหม่ ${added} รายการ${skipMsg}${errDetail}`, added > 0 ? 'success' : 'error');
 
       setShowFlashImport(false);
       setShowOrderPreview(false);
