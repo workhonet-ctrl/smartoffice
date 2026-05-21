@@ -286,9 +286,12 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       };
     });
     setPreviewOrderRows(flashPreviewRows);
+    // capture ค่า dataRows + previewRows ใน closure — กัน state race
+    const capturedFlashRows = dataRows;
+    const capturedPreviewRows = flashPreviewRows;
     setPreviewImportFn(() => async () => {
-      // import ตรง ไม่ต้องเปิด modal เดิม — ใช้ค่าจาก preview ได้เลย
-      await handleFlashImport();
+      // import ตรง โดยใช้ค่าจาก closure (ไม่พึ่ง React state)
+      await handleFlashImportDirect(capturedFlashRows, capturedPreviewRows);
     });
     setShowOrderPreview(true);
 
@@ -299,11 +302,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     e.target.value = '';
   };
 
-  const handleFlashImport = async () => {
+  const handleFlashImport = () => handleFlashImportDirect(flashRows, previewOrderRows);
+
+  const handleFlashImportDirect = async (rowsArg: any[], previewArg: any[]) => {
     if (flashSaving) return; // ป้องกัน double-click
 
     // ── ตรวจสอบก่อน: ออเดอร์ที่ยังไม่เลือกสินค้า ──
-    const noProductRows = previewOrderRows.filter(r =>
+    const noProductRows = previewArg.filter(r =>
       r.mappedPromos.length === 0 || r.mappedPromos.every((mp: any) => !mp.promoId)
     );
     if (noProductRows.length > 0) {
@@ -316,16 +321,16 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
     setFlashSaving(true);
     setShowOrderPreview(false); // ปิด popup ทันทีกันกดซ้ำ
     try {
-      // 📌 อ่านจาก previewOrderRows (single source of truth) — ไม่ใช่ flashRows + flashPromoSel แยก
-      if (previewOrderRows.length === 0 || flashRows.length === 0) {
-        showToast('ไม่มีข้อมูลที่จะนำเข้า', 'error');
+      // 📌 ใช้ args ที่ส่งมาตรงๆ (closure) — ไม่พึ่ง React state
+      if (previewArg.length === 0 || rowsArg.length === 0) {
+        showToast(`ไม่มีข้อมูลที่จะนำเข้า (rows=${rowsArg.length}, preview=${previewArg.length})`, 'error');
         return;
       }
 
-      console.log('[Flash Import] start', { rows: flashRows.length, preview: previewOrderRows.length });
+      console.log('[Flash Import] start', { rows: rowsArg.length, preview: previewArg.length });
 
       // โหลด existing customers by tel
-      const allTels = [...new Set(flashRows.map(r => String(r[11]||'').trim()).filter(Boolean))];
+      const allTels = [...new Set(rowsArg.map(r => String(r[11]||'').trim()).filter(Boolean))];
       const custMap: Record<string, string> = {};
       for (let i = 0; i < allTels.length; i += 500) {
         const { data } = await supabase.from('customers').select('id, tel').in('tel', allTels.slice(i, i+500));
@@ -336,7 +341,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // สร้างลูกค้าใหม่
       const toInsert: any[] = [];
       const seenTels = new Set<string>();
-      flashRows.forEach(r => {
+      rowsArg.forEach(r => {
         const tel = String(r[11]||'').trim();
         if (!tel || custMap[tel] || seenTels.has(tel)) return;
         seenTels.add(tel);
@@ -371,7 +376,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       console.log('[Flash Import] custMap after insert:', Object.keys(custMap).length);
 
       // ── ตรวจ order_no ที่มีอยู่แล้วใน DB เพื่อข้าม duplicate ──
-      const allOrderNos = flashRows.map(r => `FL-${String(r[1]||'').trim()}`).filter(o => o !== 'FL-');
+      const allOrderNos = rowsArg.map(r => `FL-${String(r[1]||'').trim()}`).filter(o => o !== 'FL-');
       const existingOrderNos = new Set<string>();
       for (let i = 0; i < allOrderNos.length; i += 500) {
         const chunk = allOrderNos.slice(i, i + 500);
@@ -388,8 +393,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       let insertErrors = 0;
       let firstError: string = '';
 
-      for (let idx = 0; idx < flashRows.length; idx++) {
-        const r = flashRows[idx];
+      for (let idx = 0; idx < rowsArg.length; idx++) {
+        const r = rowsArg[idx];
         const tracking = String(r[1]||'').trim();
         const tel = String(r[11]||'').trim();
         if (!tracking || !tel) continue;
@@ -401,8 +406,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const customerId = custMap[tel];
         if (!customerId) { skippedNoCust++; continue; }
 
-        // 📌 อ่านสินค้าจาก previewOrderRows[idx].mappedPromos
-        const preview = previewOrderRows[idx];
+        // 📌 อ่านสินค้าจาก previewArg[idx].mappedPromos
+        const preview = previewArg[idx];
         const items = (preview?.mappedPromos || [])
           .filter((mp: any) => mp.promoId)
           .map((mp: any) => ({ promoId: mp.promoId, qty: mp.qty || 1 }));
