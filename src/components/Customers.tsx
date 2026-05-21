@@ -307,10 +307,11 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const handleFlashImportDirect = async (rowsArg: any[], previewArg: any[]) => {
     if (flashSaving) return; // ป้องกัน double-click
 
-    // ── ตรวจสอบก่อน: ออเดอร์ที่ยังไม่เลือกสินค้า ──
-    const noProductRows = previewArg.filter(r =>
-      r.mappedPromos.length === 0 || r.mappedPromos.every((mp: any) => !mp.promoId)
-    );
+    // ── ตรวจสอบก่อน: ออเดอร์ที่ยังไม่มี promo เลย (ไม่นับ slot ว่างถ้ามี promo อื่นแล้ว) ──
+    const noProductRows = previewArg.filter(r => {
+      const validPromos = r.mappedPromos.filter((mp: any) => mp.promoId);
+      return validPromos.length === 0;
+    });
     if (noProductRows.length > 0) {
       // ดึงรายชื่อ + เบอร์ของ row ที่ขาด เพื่อแสดงให้ user เห็น
       const missingList = noProductRows.slice(0, 5).map((r: any, i: number) =>
@@ -1752,7 +1753,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
               <button
                 onClick={() => setBulkFilter('__unmatched__')}
                 className="text-amber-600 hover:text-amber-800 hover:underline cursor-pointer">
-                ⚠ ยังไม่จับคู่ <strong>{previewOrderRows.filter(r=>r.mappedPromos.length === 0 || r.mappedPromos.some((mp:any)=>!mp.promoId)).length}</strong> ออเดอร์
+                ⚠ ยังไม่จับคู่ <strong>{previewOrderRows.filter(r=>r.mappedPromos.filter((mp:any)=>mp.promoId).length === 0).length}</strong> ออเดอร์
               </button>
               {bulkFilter.startsWith('__') && (
                 <button onClick={() => setBulkFilter('')}
@@ -1922,7 +1923,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                             return r.payment !== 'BANK' && !r.match && r.amtFile > 0 && r.amtSystem > 0;
                           }
                           if (bulkFilter === '__unmatched__') {
-                            return r.mappedPromos.length === 0 || r.mappedPromos.some((mp:any) => !mp.promoId);
+                            return r.mappedPromos.filter((mp:any) => mp.promoId).length === 0;
                           }
                           const f = bulkFilter.trim().toLowerCase();
                           // กรองจาก ต้นฉบับ
