@@ -629,11 +629,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         if (data.length < PAGE) break;
         page++;
       }
-      // deduplicate by order_no — กัน row ทับกันจาก pagination boundary
-      const unique = Array.from(
-        new Map(all.map(o => [o.order_no, o])).values()
-      );
-      setOrders(unique);
+      setOrders(all);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
   };
@@ -1476,11 +1472,13 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                               const promoId = o.promo_ids?.[idx];
                               const promo   = promoId ? promoMap[promoId] : null;
                               const name    = promo ? (promo.short_name || promo.name) : rp;
-                              // ถ้ามีโปรในระบบ ใช้ extractQty จากชื่อโปร (เช่น "1 แถม 1" = 2)
-                              // ถ้าไม่มี ใช้จำนวนจากไฟล์ต้นฉบับ
-                              const qty = promo
+                              // ── size ต่อชุด (จากโปร เช่น "1 แถม 1" = 2) ──
+                              const sizePerSet = promo
                                 ? extractQty(promo.name)
-                                : (Number(qtys[idx]?.trim()) || 1);
+                                : 1;
+                              // ── จำนวนชุดที่สั่ง (จาก quantities หรือ quantity) ──
+                              const setQty = Number(qtys[idx]?.trim()) || 1;
+                              const totalQty = sizePerSet * setQty;
                               return (
                                 <div key={idx} className="flex items-start gap-1.5">
                                   {/* ลำดับ */}
@@ -1489,7 +1487,11 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                                   </span>
                                   <div className="flex-1 min-w-0">
                                     <span className="text-slate-800 font-medium block truncate">{name}</span>
-                                    <span className="text-slate-400 text-[10px]">จำนวน {qty} {qty > 1 ? 'ชิ้น' : 'ชิ้น'}</span>
+                                    <span className="text-slate-400 text-[10px]">
+                                      {setQty > 1
+                                        ? `${sizePerSet} ชิ้น × ${setQty} ชุด = ${totalQty} ชิ้น`
+                                        : `${sizePerSet} ชิ้น`}
+                                    </span>
                                   </div>
                                 </div>
                               );
@@ -1498,16 +1500,17 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                         );
                       })()}
                     </td>
-                    {/* จำนวน — รวมทุก item */}
+                    {/* จำนวน — รวมทุก item (sizePerSet × setQty) */}
                     <td className="p-3 text-center">
                       {(() => {
                         const prods = (o.raw_prod || '').split('|').map((s: string) => s.trim()).filter(Boolean);
                         const qtys  = String((o as any).quantities || o.quantity || '1').split('|');
                         const total = prods.reduce((s: number, _: string, idx: number) => {
-                          const promoId = o.promo_ids?.[idx];
-                          const promo   = promoId ? promoMap[promoId] : null;
-                          const qty     = promo ? extractQty(promo.name) : (Number(qtys[idx]?.trim()) || 1);
-                          return s + qty;
+                          const promoId    = o.promo_ids?.[idx];
+                          const promo      = promoId ? promoMap[promoId] : null;
+                          const sizePerSet = promo ? extractQty(promo.name) : 1;
+                          const setQty     = Number(qtys[idx]?.trim()) || 1;
+                          return s + (sizePerSet * setQty);
                         }, 0);
                         const items = prods.length;
                         return (
