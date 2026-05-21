@@ -302,29 +302,37 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const handleFlashImport = async () => {
     setFlashSaving(true);
     try {
+      // 📌 อ่านจาก previewOrderRows (single source of truth) — ไม่ใช่ flashRows + flashPromoSel แยก
+      if (previewOrderRows.length === 0 || flashRows.length === 0) {
+        showToast('ไม่มีข้อมูลที่จะนำเข้า', 'error');
+        return;
+      }
+
+      console.log('[Flash Import] start', { rows: flashRows.length, preview: previewOrderRows.length });
+
       // โหลด existing customers by tel
-      const allTels = [...new Set(flashRows.map(r => String(r[11]).trim()))];
+      const allTels = [...new Set(flashRows.map(r => String(r[11]||'').trim()).filter(Boolean))];
       const custMap: Record<string, string> = {};
       for (let i = 0; i < allTels.length; i += 500) {
         const { data } = await supabase.from('customers').select('id, tel').in('tel', allTels.slice(i, i+500));
         (data||[]).forEach((c: any) => { custMap[c.tel] = c.id; });
       }
+      console.log('[Flash Import] existing customers:', Object.keys(custMap).length);
 
       // สร้างลูกค้าใหม่
       const toInsert: any[] = [];
       const seenTels = new Set<string>();
       flashRows.forEach(r => {
         const tel = String(r[11]||'').trim();
-        if (!tel || (custMap[tel] || seenTels.has(tel))) return;
+        if (!tel || custMap[tel] || seenTels.has(tel)) return;
         seenTels.add(tel);
 
-        // [13] ชื่ออำเภอ จังหวัดผู้รับ → "บางพึ่ง พระประแดง สมุทรปราการ"
         const dp = String(r[13]||'').trim().split(/\s+/);
         const province = dp[dp.length-1] || '';
         const district = dp.length >= 2 ? dp[dp.length-2] : '';
 
         toInsert.push({
-          name: String(r[10]||'').trim(),
+          name: String(r[10]||'').trim() || 'ลูกค้า',
           tel,
           address: String(r[12]||'').trim() || null,
           district, province,
@@ -334,49 +342,66 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           tag: 'ใหม่',
         });
       });
+      console.log('[Flash Import] new customers to insert:', toInsert.length);
+
       for (let i = 0; i < toInsert.length; i += 500) {
-        const { data } = await supabase.from('customers').insert(toInsert.slice(i, i+500)).select('id, tel');
+        const chunk = toInsert.slice(i, i+500);
+        const { data, error } = await supabase.from('customers').insert(chunk).select('id, tel');
+        if (error) {
+          console.error('[Flash Import] customer insert error:', error);
+          showToast(`สร้างลูกค้าล้มเหลว: ${error.message}`, 'error');
+          return;
+        }
         (data||[]).forEach((c: any) => { custMap[c.tel] = c.id; });
       }
+      console.log('[Flash Import] custMap after insert:', Object.keys(custMap).length);
 
-      // สร้างออเดอร์
+      // สร้างออเดอร์ — อ่านสินค้าจาก previewOrderRows
       let added = 0;
+      let skippedDup = 0;
+      let skippedNoCust = 0;
+      let insertErrors = 0;
+
       for (let idx = 0; idx < flashRows.length; idx++) {
         const r = flashRows[idx];
-        const tracking = String(r[1]).trim();
-        const tel = String(r[11]).trim();
+        const tracking = String(r[1]||'').trim();
+        const tel = String(r[11]||'').trim();
+        if (!tracking || !tel) continue;
+
         const customerId = custMap[tel];
-        if (!customerId) continue;
+        if (!customerId) { skippedNoCust++; continue; }
 
-        // รายการสินค้าที่ user เลือก (หลายรายการได้)
-        const items = (flashPromoSel[idx] || []).filter(it => it.promoId);
-        const totalThb = flashTotalSel[idx] ? Number(flashTotalSel[idx]) : (Number(r[17])||0);
+        // 📌 อ่านสินค้าจาก previewOrderRows[idx].mappedPromos
+        const preview = previewOrderRows[idx];
+        const items = (preview?.mappedPromos || [])
+          .filter((mp: any) => mp.promoId)
+          .map((mp: any) => ({ promoId: mp.promoId, qty: mp.qty || 1 }));
 
-        // ลบ dup ที่เลือกลบ (ไม่ทำอะไร = ข้าม)
+        const totalThb = preview?.amtFile > 0 ? preview.amtFile : (Number(r[17])||0);
+
+        // ข้าม duplicate tracking
         const isDup = flashDups.find(d => String(d.row[1]).trim() === tracking);
-        if (isDup) continue; // ข้าม duplicate (ให้ user จัดการเอง)
+        if (isDup) { skippedDup++; continue; }
 
-        // สร้าง promo_ids, quantities, raw_prod จาก items
-        const promoIds   = items.map(it => it.promoId);
-        const quantities = items.length > 0 ? items.map(it => String(it.qty || 1)).join('|') : '1';
-        const qtySum     = items.length > 0 ? items.reduce((s, it) => s + (Number(it.qty) || 1), 0) : 1;
-        // raw_prod = ชื่อสินค้า + โปรโมชั่น (เช่น "ซุปใสรากบัว 2 กระป๋อง")
+        // สร้าง promo_ids, quantities, raw_prod
+        const promoIds   = items.map((it: any) => it.promoId);
+        const quantities = items.length > 0 ? items.map((it: any) => String(it.qty || 1)).join('|') : '1';
+        const qtySum     = items.length > 0 ? items.reduce((s: number, it: any) => s + (Number(it.qty) || 1), 0) : 1;
         const rawProd    = items.length > 0
-          ? items.map(it => {
-              const p = promoOptions.find(p => p.id === it.promoId);
+          ? items.map((it: any) => {
+              const p = promoOptions.find((p: any) => p.id === it.promoId);
               if (!p) return '';
-              const productName = (p.short_name || '').trim();
+              const productName = ((p as any).short_name || '').trim();
               const promoName   = (p.name || '').trim();
               if (productName && promoName) return `${productName} ${promoName}`;
               return productName || promoName;
             }).filter(Boolean).join('|')
           : '';
 
-        // วิธีชำระ: ดูจาก column R (ค่า COD) — > 0 = COD, = 0 = BANK
-        const codAmount  = Number(r[17] || 0);
+        const codAmount = Number(r[17] || 0);
         const paymentMethod = codAmount > 0 ? 'COD' : 'BANK';
 
-        // วันที่: ดึงจาก [0] เวลารับพัสดุ (รูปแบบ "2026-05-16 15:12:04" หรือ Date)
+        // วันที่จาก [0] เวลารับพัสดุ
         let orderDate = new Date().toISOString().split('T')[0];
         const t0 = r[0];
         if (t0 instanceof Date) {
@@ -405,15 +430,22 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           imported_at: new Date().toISOString().split('T')[0],
         }]);
         if (error) {
-          console.error('[Flash insert error] order:', `FL-${tracking}`, error);
-          throw error;
+          console.error('[Flash insert error]', `FL-${tracking}`, error);
+          insertErrors++;
+          continue;
         }
         added++;
       }
 
-      showToast(`✓ นำเข้าสำเร็จ · ออเดอร์ใหม่ ${added} รายการ`);
+      console.log('[Flash Import] result:', { added, skippedDup, skippedNoCust, insertErrors });
+
+      const skipMsg = skippedDup > 0 || skippedNoCust > 0 || insertErrors > 0
+        ? ` · ข้าม ${skippedDup} ซ้ำ · ${skippedNoCust} ไม่มีลูกค้า · ${insertErrors} error`
+        : '';
+      showToast(`✓ นำเข้าสำเร็จ · ออเดอร์ใหม่ ${added} รายการ${skipMsg}`, added > 0 ? 'success' : 'error');
+
       setShowFlashImport(false);
-      // รอ trigger DB อัพเดต order_count/total_spent ก่อน reload
+      setShowOrderPreview(false);
       setTimeout(() => loadCustomers(), 600);
     } catch (err: any) {
       console.error('[Flash Import Error]', err);
