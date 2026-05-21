@@ -58,12 +58,24 @@ export default function Packaging({
   const loadData = async () => {
     setLoading(true);
     try {
-      // ── 1. โหลด orders ──────────────────────────────────────────
-      const query = orderIds.length > 0
-        ? supabase.from('orders').select('*, customers(name, tel)').in('id', orderIds)
-        : supabase.from('orders').select('*, customers(name, tel)').eq('order_status', 'รอแพ็ค');
-      const { data: ordersData } = await query.order('created_at', { ascending: true });
-      if (!ordersData) return;
+      // ── 1. โหลด orders ทั้งหมด (loop pagination — ปลดล้อก 1000) ──
+      const PAGE = 1000;
+      const ordersData: any[] = [];
+      let page = 0;
+      while (true) {
+        const baseQuery = orderIds.length > 0
+          ? supabase.from('orders').select('*, customers(name, tel)').in('id', orderIds)
+          : supabase.from('orders').select('*, customers(name, tel)').eq('order_status', 'รอแพ็ค');
+        const { data, error } = await baseQuery
+          .order('created_at', { ascending: true })
+          .range(page * PAGE, (page + 1) * PAGE - 1);
+        if (error) { console.error('[Packaging load orders]', error); break; }
+        if (!data || data.length === 0) break;
+        ordersData.push(...data);
+        if (data.length < PAGE) break;
+        page++;
+      }
+      if (!ordersData.length) return;
 
       // ── 2. รวม raw_names ทั้งหมด + promo_ids ──────────────────
       const allRawNames = new Set<string>();
@@ -205,7 +217,7 @@ export default function Packaging({
     setLoadingHistory(true);
     const { data } = await supabase
       .from('pack_history')
-      .select('id, pack_date, responsible_person, order_count, status, created_at, summary_snapshot, orders_snapshot')
+      .select('id, pack_date, responsible_person, order_count, status, created_at, summary_snapshot')
       .in('status', ['printed', 'approved'])
       .order('created_at', { ascending: false })
       .limit(50);
@@ -213,145 +225,18 @@ export default function Packaging({
     setLoadingHistory(false);
   };
 
-  // ── Shared: สร้าง HTML ใบเตรียมสินค้าแบบ summary (เหมือนปริ้นปกติ) ──
-  const buildSummaryPrintHtml = (
-    flashOrdSnap: any[], myordOrdSnap: any[],
-    today: string, resp: string, totalOrders: number
-  ) => {
-    const makeGrouped2 = (subset: any[]) => {
-      const grouped: Record<string, { short_name: string; promo_name: string; box: string; bubble: string; count: number }> = {};
-      for (const o of subset.filter(o2 => (o2.promos||[]).length === 1)) {
-        const p = o.promos[0]; if (!p) continue;
-        const bub = p.bubble_name && !p.bubble_name.includes('0 cm') ? p.bubble_name : '-';
-        const key = p.short_name ? `${p.short_name}-${p.name}` : p.name;
-        if (grouped[key]) grouped[key].count++;
-        else grouped[key] = { short_name: p.short_name||'', promo_name: p.name, box: p.box_name||'-', bubble: bub, count: 1 };
-      }
-      return Object.values(grouped);
-    };
-    const fSingle2 = makeGrouped2(flashOrdSnap);
-    const mSingle2 = makeGrouped2(myordOrdSnap);
-    const fMultis2 = flashOrdSnap.filter(o => (o.promos||[]).length > 1);
-    const mMultis2 = myordOrdSnap.filter(o => (o.promos||[]).length > 1);
-
-    const buildRows2 = (grouped: typeof fSingle2, multis: typeof fMultis2, startIdx: number) => {
-      let html2 = ''; let idx = startIdx;
-      for (const g of grouped) {
-        const displayName = g.short_name ? `${g.short_name} ${g.promo_name}` : g.promo_name;
-        html2 += `<tr>
-          <td class="num">${idx++}</td>
-          <td><div style="font-weight:700">${displayName}</div></td>
-          <td style="text-align:center"><span class="badge">${g.count} ออเดอร์</span></td>
-          <td style="text-align:center">${g.box}</td>
-          <td style="text-align:center;color:#0369a1">${g.bubble !== '-' ? g.bubble : '-'}</td>
-          <td><div class="note-box"></div></td>
-        </tr>`;
-      }
-      for (const o of multis) {
-        const bxName = o.box || '-';
-        const buName = o.bubble && !String(o.bubble).includes('0 cm') ? o.bubble : '-';
-        const ph = (o.promos||[]).map((p2: any, pi: number) => {
-          const pname = p2.short_name ? `${p2.short_name} ${p2.name}` : p2.name;
-          return `<div><span style="background:#fef3c7;color:#92400e;border-radius:3px;padding:0 3px;font-size:10px">${pi+1}</span> <strong>${pname}</strong></div>`;
-        }).join('');
-        html2 += `<tr style="background:#fffbeb">
-          <td class="num">${idx++}</td>
-          <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
-          <td style="text-align:center"><span class="badge">1 ออเดอร์</span></td>
-          <td style="text-align:center">${bxName}</td>
-          <td style="text-align:center;color:#0369a1">${buName}</td>
-          <td><div class="note-box"></div></td>
-        </tr>`;
-      }
-      return { html: html2, nextIdx: idx };
-    };
-
-    const { html: fRows2, nextIdx: ni2 } = buildRows2(fSingle2, fMultis2, 1);
-    const { html: mRows2 }               = buildRows2(mSingle2, mMultis2, ni2);
-
-    const fSection2 = (fSingle2.length + fMultis2.length) > 0 ? `
-      <tr><td colspan="6" style="background:#fefce8;border-top:2px solid #ca8a04;padding:6px 10px">
-        <span style="font-weight:700;color:#854d0e">🟡 FLASH — ${flashOrdSnap.length} ออเดอร์</span>
-      </td></tr>${fRows2}` : '';
-    const mSection2 = (mSingle2.length + mMultis2.length) > 0 ? `
-      <tr><td colspan="6" style="background:#eff6ff;border-top:2px solid #2563eb;padding:6px 10px">
-        <span style="font-weight:700;color:#1d4ed8">🔵 MyOrder — ${myordOrdSnap.length} ออเดอร์</span>
-      </td></tr>${mRows2}` : '';
-
-    return `<!DOCTYPE html><html><head>
-  <meta charset="utf-8"/>
-  <title>ใบเตรียมสินค้า</title>
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Sarabun',sans-serif;font-size:13px;color:#1e293b;padding:20px}
-    h1{font-size:20px;font-weight:700;margin-bottom:3px}
-    .meta{font-size:11px;color:#64748b;margin-bottom:14px}
-    table{width:100%;border-collapse:collapse;margin-bottom:20px}
-    th{background:#1e293b;color:white;padding:8px 10px;text-align:left;font-size:11px}
-    td{padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;vertical-align:top}
-    .num{text-align:center;color:#64748b;font-weight:700;width:28px}
-    .badge{display:inline-block;background:#cffafe;color:#164e63;border-radius:99px;padding:1px 8px;font-weight:700;font-size:12px}
-    .note-box{border:1px solid #cbd5e1;border-radius:4px;min-height:28px}
-    .footer{margin-top:24px;display:flex;gap:60px}
-    .sig{border-top:1px solid #94a3b8;width:180px;text-align:center;padding-top:5px;font-size:10px;color:#64748b;margin-top:36px}
-    @media print{body{padding:10px}}
-  </style>
-</head><body>
-  <h1>📋 ใบเตรียมสินค้า</h1>
-  <div class="meta">วันที่: ${today} &nbsp;|&nbsp; จำนวนออเดอร์: ${totalOrders} รายการ &nbsp;|&nbsp; ผู้รับผิดชอบ: ${resp}</div>
-  <table>
-    <thead><tr>
-      <th style="width:28px">#</th>
-      <th>รายการสินค้า / โปรโมชั่น</th>
-      <th style="text-align:center;width:100px">จำนวน (ออเดอร์)</th>
-      <th style="text-align:center;width:120px">กล่อง</th>
-      <th style="text-align:center;width:90px">บับเบิ้ล</th>
-      <th style="width:120px">หมายเหตุ</th>
-    </tr></thead>
-    <tbody>${fSection2}${mSection2}</tbody>
-  </table>
-  <div class="footer">
-    <div class="sig">ผู้เตรียม: ${resp}</div>
-    <div class="sig">ผู้ตรวจสอบ: ___________________</div>
-  </div>
-  <script>window.onload=()=>{window.print()}</script>
-</body></html>`;
-  };
-
   const handleReprintFromHistory = (item: any) => {
-    const ordersSnap = (item.orders_snapshot || []) as any[];
-    const today = new Date().toLocaleDateString('th-TH', {
-      year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
-    });
-
-    if (ordersSnap.length > 0 && Array.isArray(ordersSnap[0]?.promos)) {
-      // snapshot ใหม่ — แยก flash/myorder แล้ว build summary เหมือนปริ้นปกติ
-      const flashSnap = ordersSnap.filter((o: any) => o.isFlash);
-      const myordSnap = ordersSnap.filter((o: any) => !o.isFlash);
-      const html = buildSummaryPrintHtml(
-        flashSnap, myordSnap, today,
-        item.responsible_person || '-',
-        item.order_count || ordersSnap.length
-      );
-      const w = window.open('', '_blank', 'width=1000,height=700');
-      if (w) { w.document.write(html); w.document.close(); }
-      return;
-    }
-
-    // fallback: snapshot เก่า — ใช้ summary_snapshot
     const snap = (item.summary_snapshot || []) as any[];
-    const allSnap = snap.map((s: any) => ({
-      isFlash: false,
-      promos: [{ short_name: s.short_name || null, name: s.name || s.promo_name || '-', qty: s.count || 1, box_name: s.box || '-', bubble_name: s.bubble || '-' }],
-      box: s.box || '-', bubble: s.bubble || '-',
+    const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+    const rows = snap.map((s: any) => ({
+      product: s.short_name || s.name || '-',
+      promo:   s.name || '',
+      count:   s.count || 1,
+      box:     s.box || '-',
+      bubble:  s.bubble || '-',
+      note:    s.type === 'multi' ? 'แพ็คพิเศษ' : '',
     }));
-    const html = buildSummaryPrintHtml(
-      [], allSnap, today,
-      item.responsible_person || '-',
-      item.order_count || snap.length
-    );
-    const w = window.open('', '_blank', 'width=1000,height=700');
-    if (w) { w.document.write(html); w.document.close(); }
+    openPrintWindow(rows, today, item.responsible_person || '-', item.order_count || 0);
   };
 
   const openPrintWindow = (rows: any[], today: string, resp: string, orderCount: number) => {
@@ -457,20 +342,8 @@ export default function Packaging({
       })),
     ];
     const ordersSnapshot = orders.map(o => ({
-      order_no: o.order_no,
-      customerName: (o.customers as any)?.name || '-',
-      tel: (o.customers as any)?.tel || '',
-      isFlash: isFlash(o),
-      isMulti: isMulti(o),
-      box: o.promos[0]?.box_name || '-',
-      bubble: o.promos[0]?.bubble_name || '-',
-      promos: o.promos.map(p => ({
-        short_name: p.short_name || null,
-        name: p.name,
-        qty: p.qty,
-        box_name: p.box_name,
-        bubble_name: p.bubble_name,
-      })),
+      order_no: o.order_no, customer: o.customers?.name,
+      promos: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
     }));
 
     const { error: phError } = await supabase.from('pack_history').insert([{
