@@ -301,6 +301,18 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
   const handleFlashImport = async () => {
     if (flashSaving) return; // ป้องกัน double-click
+
+    // ── ตรวจสอบก่อน: ออเดอร์ที่ยังไม่เลือกสินค้า ──
+    const noProductRows = previewOrderRows.filter(r =>
+      r.mappedPromos.length === 0 || r.mappedPromos.every((mp: any) => !mp.promoId)
+    );
+    if (noProductRows.length > 0) {
+      const confirmMsg = `มี ${noProductRows.length} ออเดอร์ที่ยังไม่ได้เลือกสินค้า\nจะ import โดยไม่มีสินค้าหรือไม่?\n\n(แนะนำ: กดยกเลิก แล้วใส่สินค้าก่อน)`;
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+    }
+
     setFlashSaving(true);
     setShowOrderPreview(false); // ปิด popup ทันทีกันกดซ้ำ
     try {
