@@ -1724,27 +1724,48 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                     if (!previewSelectedRows.has(ri)) return r;
                     let newPromos;
                     if (r.mappedPromos.length === 0) {
-                      // Flash row ที่ยังไม่มีสินค้าเลย → เพิ่มใหม่
                       const rawName = (promo as any)?.short_name || (promo as any)?.name || '';
                       newPromos = [{ rawName, promoId: bulkPromoId, promo, qty: bulkQty || 1 }];
                     } else {
-                      // มี mapping อยู่แล้ว → override
                       newPromos = r.mappedPromos.map((m:any) => {
                         newMappings[m.rawName] = bulkPromoId;
                         return { ...m, promoId: bulkPromoId, promo, qty: bulkQty || m.qty };
                       });
                     }
                     const newAmt = newPromos.reduce((s:number, m:any) => s + (m.promo ? Number(m.promo.price_thb||0)*m.qty : 0), 0);
-                    // sync ลง flashPromoSel เพื่อให้ handleFlashImport เห็น
                     flashSelUpdates[ri] = newPromos.map(np => ({ promoId: np.promoId, qty: np.qty }));
                     return { ...r, mappedPromos: newPromos, qty: newPromos.length, amtSystem: newAmt, match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
                   }));
                   setPreviewMappingSelects(prev => ({ ...prev, ...newMappings }));
-                  // sync ลง flashPromoSel (Flash) — handleFlashImport อ่านจาก state นี้
                   setFlashPromoSel(prev => ({ ...prev, ...flashSelUpdates }));
                 }}
                 className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600 disabled:opacity-40 whitespace-nowrap">
-                ✓ ใส่ให้ที่เลือก
+                ✓ ใส่ทับ
+              </button>
+
+              <button
+                disabled={!bulkPromoId || previewSelectedRows.size === 0}
+                onClick={() => {
+                  if (!bulkPromoId) return;
+                  const promo = promoOptions.find((p:any) => p.id === bulkPromoId);
+                  const flashSelUpdates: Record<number, {promoId: string; qty: number}[]> = {};
+
+                  setPreviewOrderRows(prev => prev.map((r, ri) => {
+                    if (!previewSelectedRows.has(ri)) return r;
+                    const rawName = (promo as any)?.short_name || (promo as any)?.name || '';
+                    // ── เพิ่มต่อท้าย (รายการที่ 2, 3, …) ──
+                    const newPromos = [
+                      ...r.mappedPromos,
+                      { rawName, promoId: bulkPromoId, promo, qty: bulkQty || 1 },
+                    ];
+                    const newAmt = newPromos.reduce((s:number, m:any) => s + (m.promo ? Number(m.promo.price_thb||0)*m.qty : 0), 0);
+                    flashSelUpdates[ri] = newPromos.map(np => ({ promoId: np.promoId, qty: np.qty }));
+                    return { ...r, mappedPromos: newPromos, qty: newPromos.length, amtSystem: newAmt, match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
+                  }));
+                  setFlashPromoSel(prev => ({ ...prev, ...flashSelUpdates }));
+                }}
+                className="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-bold hover:bg-emerald-600 disabled:opacity-40 whitespace-nowrap">
+                + เพิ่มรายการ
               </button>
               {previewSelectedRows.size > 0 && (
                 <button onClick={() => setPreviewSelectedRows(new Set())}
@@ -1936,8 +1957,42 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                 </div>
                               )}
                             </div>
+                            {/* ปุ่มลบรายการ (เฉพาะรายการที่ 2+ หรือถ้ามีหลายรายการ) */}
+                            {row.mappedPromos.length > 1 && (
+                              <button
+                                onClick={() => {
+                                  setPreviewOrderRows(prev => prev.map((r, ri) => {
+                                    if (ri !== origIdx) return r;
+                                    const newPromos = r.mappedPromos.filter((_:any, mj:number) => mj !== mi);
+                                    const newAmt = newPromos.reduce((s:number, m:any) => s + (m.promo ? Number(m.promo.price_thb||0)*m.qty : 0), 0);
+                                    return { ...r, mappedPromos: newPromos, qty: newPromos.length, amtSystem: newAmt, match: r.amtFile>0 && Math.abs(r.amtFile-newAmt)<1 };
+                                  }));
+                                  setFlashPromoSel(prev => {
+                                    const cur = prev[origIdx] || [];
+                                    return { ...prev, [origIdx]: cur.filter((_:any, mj:number) => mj !== mi) };
+                                  });
+                                }}
+                                className="text-red-400 hover:text-red-600 text-xs shrink-0"
+                                title="ลบรายการนี้">✕</button>
+                            )}
                           </div>
                         ))}
+                        {/* ปุ่มเพิ่มรายการในแถวนี้ */}
+                        <button
+                          onClick={() => {
+                            setPreviewOrderRows(prev => prev.map((r, ri) => {
+                              if (ri !== origIdx) return r;
+                              const newPromos = [...r.mappedPromos, { rawName: '', promoId: '', promo: null, qty: 1 }];
+                              return { ...r, mappedPromos: newPromos, qty: newPromos.length };
+                            }));
+                            setFlashPromoSel(prev => {
+                              const cur = prev[origIdx] || [];
+                              return { ...prev, [origIdx]: [...cur, { promoId: '', qty: 1 }] };
+                            });
+                          }}
+                          className="mt-1.5 text-[10px] text-cyan-600 hover:text-cyan-800 hover:bg-cyan-50 border border-dashed border-cyan-300 rounded px-2 py-1 w-full transition">
+                          + เพิ่มรายการในแถวนี้
+                        </button>
                       </td>
                       <td className="p-2.5 text-center font-bold text-slate-700">{row.qty}</td>
                       <td className="p-2.5 text-right text-slate-700">
