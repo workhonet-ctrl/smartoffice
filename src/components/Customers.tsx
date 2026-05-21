@@ -376,6 +376,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       }
       console.log('[Flash Import] custMap after insert:', Object.keys(custMap).length);
 
+      // ── โหลด promos สดจาก DB (ไม่พึ่ง state promoOptions ที่อาจ stale) ──
+      const { data: freshPromos } = await supabase
+        .from('products_promo').select('id, name, short_name, price_thb').eq('active', true);
+      const promoMapDB: Record<string, any> = {};
+      (freshPromos || []).forEach((p: any) => { promoMapDB[p.id] = p; });
+      console.log('[Flash Import] loaded promos from DB:', Object.keys(promoMapDB).length);
+
       // ── ตรวจ order_no ที่มีอยู่แล้วใน DB เพื่อข้าม duplicate ──
       const allOrderNos = rowsArg.map(r => `FL-${String(r[1]||'').trim()}`).filter(o => o !== 'FL-');
       const existingOrderNos = new Set<string>();
@@ -435,9 +442,12 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const qtySum     = items.length > 0 ? items.reduce((s: number, it: any) => s + (Number(it.qty) || 1), 0) : 1;
         const rawProd    = items.length > 0
           ? items.map((it: any) => {
-              const p = promoOptions.find((p: any) => p.id === it.promoId);
-              if (!p) return '';
-              const productName = ((p as any).short_name || '').trim();
+              const p = promoMapDB[it.promoId];   // ใช้ promoMapDB ที่ load สด
+              if (!p) {
+                console.warn('[Flash Import] promo not found in DB:', it.promoId);
+                return '';
+              }
+              const productName = (p.short_name || '').trim();
               const promoName   = (p.name || '').trim();
               if (productName && promoName) return `${productName} ${promoName}`;
               return productName || promoName;
