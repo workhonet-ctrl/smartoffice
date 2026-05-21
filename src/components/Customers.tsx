@@ -300,7 +300,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   };
 
   const handleFlashImport = async () => {
+    if (flashSaving) return; // ป้องกัน double-click
     setFlashSaving(true);
+    setShowOrderPreview(false); // ปิด popup ทันทีกันกดซ้ำ
     try {
       // 📌 อ่านจาก previewOrderRows (single source of truth) — ไม่ใช่ flashRows + flashPromoSel แยก
       if (previewOrderRows.length === 0 || flashRows.length === 0) {
@@ -356,9 +358,20 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       }
       console.log('[Flash Import] custMap after insert:', Object.keys(custMap).length);
 
+      // ── ตรวจ order_no ที่มีอยู่แล้วใน DB เพื่อข้าม duplicate ──
+      const allOrderNos = flashRows.map(r => `FL-${String(r[1]||'').trim()}`).filter(o => o !== 'FL-');
+      const existingOrderNos = new Set<string>();
+      for (let i = 0; i < allOrderNos.length; i += 500) {
+        const chunk = allOrderNos.slice(i, i + 500);
+        const { data } = await supabase.from('orders').select('order_no').in('order_no', chunk);
+        (data||[]).forEach((o: any) => existingOrderNos.add(o.order_no));
+      }
+      console.log('[Flash Import] existing order_no in DB:', existingOrderNos.size);
+
       // สร้างออเดอร์ — อ่านสินค้าจาก previewOrderRows
       let added = 0;
       let skippedDup = 0;
+      let skippedExist = 0;
       let skippedNoCust = 0;
       let insertErrors = 0;
 
@@ -367,6 +380,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const tracking = String(r[1]||'').trim();
         const tel = String(r[11]||'').trim();
         if (!tracking || !tel) continue;
+
+        const orderNo = `FL-${tracking}`;
+        // ข้ามถ้ามีอยู่แล้วใน DB
+        if (existingOrderNos.has(orderNo)) { skippedExist++; continue; }
 
         const customerId = custMap[tel];
         if (!customerId) { skippedNoCust++; continue; }
@@ -412,7 +429,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         }
 
         const { error } = await supabase.from('orders').insert([{
-          order_no:    `FL-${tracking}`,
+          order_no:    orderNo,
           customer_id: customerId,
           channel:     'FLASH',
           order_date:  orderDate,
@@ -430,18 +447,21 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           imported_at: new Date().toISOString().split('T')[0],
         }]);
         if (error) {
-          console.error('[Flash insert error]', `FL-${tracking}`, error);
+          console.error('[Flash insert error]', orderNo, error);
           insertErrors++;
           continue;
         }
         added++;
       }
 
-      console.log('[Flash Import] result:', { added, skippedDup, skippedNoCust, insertErrors });
+      console.log('[Flash Import] result:', { added, skippedDup, skippedExist, skippedNoCust, insertErrors });
 
-      const skipMsg = skippedDup > 0 || skippedNoCust > 0 || insertErrors > 0
-        ? ` · ข้าม ${skippedDup} ซ้ำ · ${skippedNoCust} ไม่มีลูกค้า · ${insertErrors} error`
-        : '';
+      const skipParts: string[] = [];
+      if (skippedExist > 0)  skipParts.push(`${skippedExist} มีอยู่แล้ว`);
+      if (skippedDup > 0)    skipParts.push(`${skippedDup} ซ้ำในไฟล์`);
+      if (skippedNoCust > 0) skipParts.push(`${skippedNoCust} ไม่มีลูกค้า`);
+      if (insertErrors > 0)  skipParts.push(`${insertErrors} error`);
+      const skipMsg = skipParts.length > 0 ? ` · ข้าม ${skipParts.join(', ')}` : '';
       showToast(`✓ นำเข้าสำเร็จ · ออเดอร์ใหม่ ${added} รายการ${skipMsg}`, added > 0 ? 'success' : 'error');
 
       setShowFlashImport(false);
