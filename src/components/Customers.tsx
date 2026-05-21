@@ -312,7 +312,12 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       r.mappedPromos.length === 0 || r.mappedPromos.every((mp: any) => !mp.promoId)
     );
     if (noProductRows.length > 0) {
-      const confirmMsg = `มี ${noProductRows.length} ออเดอร์ที่ยังไม่ได้เลือกสินค้า\nจะ import โดยไม่มีสินค้าหรือไม่?\n\n(แนะนำ: กดยกเลิก แล้วใส่สินค้าก่อน)`;
+      // ดึงรายชื่อ + เบอร์ของ row ที่ขาด เพื่อแสดงให้ user เห็น
+      const missingList = noProductRows.slice(0, 5).map((r: any, i: number) =>
+        `  ${i+1}. ${r.custName || '-'} (${r.tel || '-'})`
+      ).join('\n');
+      const more = noProductRows.length > 5 ? `\n  ...และอีก ${noProductRows.length - 5} ออเดอร์` : '';
+      const confirmMsg = `❗ มี ${noProductRows.length} ออเดอร์ที่ยังไม่ได้เลือกสินค้า:\n\n${missingList}${more}\n\nกด "ตกลง" = ข้ามออเดอร์เหล่านี้ ไม่ import\nกด "ยกเลิก" = กลับไปใส่สินค้าก่อน`;
       if (!confirm(confirmMsg)) {
         return;
       }
@@ -390,6 +395,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       let skippedDup = 0;
       let skippedExist = 0;
       let skippedNoCust = 0;
+      let skippedNoProduct = 0;
       let insertErrors = 0;
       let firstError: string = '';
 
@@ -411,6 +417,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const items = (preview?.mappedPromos || [])
           .filter((mp: any) => mp.promoId)
           .map((mp: any) => ({ promoId: mp.promoId, qty: mp.qty || 1 }));
+
+        // ข้ามออเดอร์ที่ไม่มีสินค้า (user ยืนยันแล้วว่าไม่ใส่)
+        if (items.length === 0) { skippedNoProduct++; continue; }
 
         const totalThb = preview?.amtFile > 0 ? preview.amtFile : (Number(r[17])||0);
 
@@ -476,10 +485,11 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       console.log('[Flash Import] result:', { added, skippedDup, skippedExist, skippedNoCust, insertErrors });
 
       const skipParts: string[] = [];
-      if (skippedExist > 0)  skipParts.push(`${skippedExist} มีอยู่แล้ว`);
-      if (skippedDup > 0)    skipParts.push(`${skippedDup} ซ้ำในไฟล์`);
-      if (skippedNoCust > 0) skipParts.push(`${skippedNoCust} ไม่มีลูกค้า`);
-      if (insertErrors > 0)  skipParts.push(`${insertErrors} error`);
+      if (skippedExist > 0)     skipParts.push(`${skippedExist} มีอยู่แล้ว`);
+      if (skippedDup > 0)       skipParts.push(`${skippedDup} ซ้ำในไฟล์`);
+      if (skippedNoCust > 0)    skipParts.push(`${skippedNoCust} ไม่มีลูกค้า`);
+      if (skippedNoProduct > 0) skipParts.push(`${skippedNoProduct} ไม่มีสินค้า`);
+      if (insertErrors > 0)     skipParts.push(`${insertErrors} error`);
       const skipMsg = skipParts.length > 0 ? ` · ข้าม ${skipParts.join(', ')}` : '';
       const errDetail = firstError ? `\nError แรก: ${firstError}` : '';
       showToast(`✓ นำเข้าสำเร็จ · ออเดอร์ใหม่ ${added} รายการ${skipMsg}${errDetail}`, added > 0 ? 'success' : 'error');
