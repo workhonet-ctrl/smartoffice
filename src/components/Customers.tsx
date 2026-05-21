@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { TOURIST_ZIPS } from '../lib/types';
@@ -112,7 +112,18 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   // Popup ใหม่ — แสดง 8 columns พร้อมตรวจยอด (ใช้ร่วมกัน Excel+Flash)
   const [showOrderPreview, setShowOrderPreview]   = useState(false);
   const [showFinalConfirm, setShowFinalConfirm]   = useState(false);  // หน้าตรวจสอบรอบสุดท้าย
+  const previewOrderRowsRef = useRef<any[]>([]);  // เก็บค่าล่าสุดสำหรับ closure
   const [previewOrderRows, setPreviewOrderRows]   = useState<any[]>([]);  // [{date,name,facebook,tel,payment,mappedPromos,qty,amtFile,amtSystem,match,rawMappings}]
+
+  // sync ref ทุกครั้งที่ state เปลี่ยน
+  useEffect(() => {
+    previewOrderRowsRef.current = previewOrderRows;
+  }, [previewOrderRows]);
+
+  // wrapper ที่อ่าน previewOrderRows ปัจจุบันจาก ref
+  const handleFlashImport_useCurrent = (rowsArg: any[]) => {
+    return handleFlashImportDirect(rowsArg, previewOrderRowsRef.current);
+  };
   const [previewImportFn, setPreviewImportFn]     = useState<(() => Promise<void>) | null>(null);
   const [previewSaving, setPreviewSaving]         = useState(false);
   const [previewSearch, setPreviewSearch]         = useState<Record<string,string>>({});  // key = "rowIdx-promoIdx"
@@ -287,12 +298,12 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       };
     });
     setPreviewOrderRows(flashPreviewRows);
-    // capture ค่า dataRows + previewRows ใน closure — กัน state race
+    // capture เฉพาะ dataRows (raw file data ไม่เปลี่ยน)
+    // previewOrderRows อ่านจาก state ปัจจุบัน (user อาจแก้ไข promo ระหว่างทาง)
     const capturedFlashRows = dataRows;
-    const capturedPreviewRows = flashPreviewRows;
     setPreviewImportFn(() => async () => {
-      // import ตรง โดยใช้ค่าจาก closure (ไม่พึ่ง React state)
-      await handleFlashImportDirect(capturedFlashRows, capturedPreviewRows);
+      // อ่าน previewOrderRows ปัจจุบันจาก state ผ่าน wrapper
+      await handleFlashImport_useCurrent(capturedFlashRows);
     });
     setShowOrderPreview(true);
 
@@ -406,7 +417,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         // ข้ามออเดอร์ที่ไม่มีสินค้า (user ยืนยันแล้วว่าไม่ใส่)
         if (items.length === 0) { skippedNoProduct++; continue; }
 
-        const totalThb = preview?.amtFile > 0 ? preview.amtFile : (Number(r[17])||0);
+        // BANK: ใช้ยอดจากระบบ (รวมราคาสินค้า) เพราะไฟล์ Flash ของ BANK ไม่มียอด COD
+        // COD:  ใช้ยอดจากไฟล์ (ค่าเรียกเก็บ COD)
+        const codAmount = Number(r[17] || 0);
+        const paymentMethod = codAmount > 0 ? 'COD' : 'BANK';
+        const totalThb = paymentMethod === 'BANK'
+          ? (preview?.amtSystem || 0)
+          : (preview?.amtFile > 0 ? preview.amtFile : codAmount);
 
         // ข้าม duplicate tracking
         const isDup = flashDups.find(d => String(d.row[1]).trim() === tracking);
@@ -426,9 +443,6 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
               return productName || promoName;
             }).filter(Boolean).join('|')
           : '';
-
-        const codAmount = Number(r[17] || 0);
-        const paymentMethod = codAmount > 0 ? 'COD' : 'BANK';
 
         // วันที่จาก [0] เวลารับพัสดุ
         let orderDate = new Date().toISOString().split('T')[0];
@@ -2285,7 +2299,9 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           validPromos: r.mappedPromos.filter((mp: any) => mp.promoId),
         })).filter((r: any) => r.validPromos.length > 0);
         const skippedCount = previewOrderRows.length - importableRows.length;
-        const totalAmount = importableRows.reduce((s: number, r: any) => s + (r.amtFile || 0), 0);
+        // BANK ใช้ amtSystem (รวมราคาสินค้า), COD ใช้ amtFile (ค่า COD จากไฟล์)
+        const getAmount = (r: any) => r.payment === 'BANK' ? (r.amtSystem || 0) : (r.amtFile || 0);
+        const totalAmount = importableRows.reduce((s: number, r: any) => s + getAmount(r), 0);
 
         return (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
@@ -2366,7 +2382,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                           </div>
                         </td>
                         <td className="p-2 text-right text-sm font-bold text-emerald-700">
-                          ฿{(row.amtFile || 0).toLocaleString()}
+                          ฿{getAmount(row).toLocaleString()}
                         </td>
                       </tr>
                     ))}
