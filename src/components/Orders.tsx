@@ -620,8 +620,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
       while (true) {
         const { data, error } = await supabase
           .from('orders').select('*, customers(*)')
-          .order('imported_at', { ascending: false, nullsFirst: false })
-          .order('created_at', { ascending: false })  // secondary sort กัน row ทับกันเมื่อ imported_at เท่ากัน
+          .order('id', { ascending: true })  // sort by stable key (id) เพื่อไม่ให้ row ทับกัน
           .range(page * PAGE, (page + 1) * PAGE - 1);
         if (error) throw error;
         if (!data || data.length === 0) break;
@@ -629,7 +628,20 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         if (data.length < PAGE) break;
         page++;
       }
-      setOrders(all);
+      // ── Dedupe by id (กันกรณี pagination overlap หรือ row ใหม่เข้ามาระหว่าง query) ──
+      const seen = new Set<string>();
+      const unique = all.filter(o => {
+        if (seen.has(o.id)) return false;
+        seen.add(o.id);
+        return true;
+      });
+      // sort ตามวันที่ล่าสุด (descending) สำหรับการแสดงผล
+      unique.sort((a: any, b: any) => {
+        const dA = a.imported_at || a.created_at || '';
+        const dB = b.imported_at || b.created_at || '';
+        return dB.localeCompare(dA);
+      });
+      setOrders(unique);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
   };
