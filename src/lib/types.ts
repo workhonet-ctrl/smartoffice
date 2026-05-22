@@ -272,10 +272,30 @@ export const ORDER_STATUSES = [
   'รอจัดส่ง','รอขนส่ง','จัดส่งแล้ว','ยกเลิก',
 ];
 
-export const PARCEL_STATUSES = [
-  'ยังไม่มีเลขพัสดุ','รอรับพัสดุ','อยู่ระหว่างจัดส่ง',
-  'ส่งสำเร็จ','ไม่มีคนรับ','ตีกลับ','ปัญหา','รอจัดส่ง','ค้างอยู่คลัง',
+// PARCEL_STATUSES — source of truth รวม color map (ใช้ใน Orders, ParcelTracking)
+// v = ชื่อสถานะ, color = Tailwind class สำหรับ badge
+export const PARCEL_STATUSES: { v: string; color: string }[] = [
+  { v: 'ส่งสำเร็จ',          color: 'bg-green-100 text-green-700'   },
+  { v: 'อยู่ระหว่างจัดส่ง', color: 'bg-blue-100 text-blue-700'    },
+  { v: 'รอจัดส่ง',          color: 'bg-indigo-100 text-indigo-700' },
+  { v: 'ค้างอยู่คลัง',       color: 'bg-purple-100 text-purple-700' },
+  { v: 'ไม่มีคนรับ',         color: 'bg-orange-100 text-orange-700' },
+  { v: 'ตีกลับ',             color: 'bg-yellow-100 text-yellow-700' },
+  { v: 'ส่งคืน',             color: 'bg-red-100 text-red-700'      },
+  { v: 'ปัญหา',              color: 'bg-red-200 text-red-800'      },
+  { v: 'รอรับพัสดุ',         color: 'bg-slate-100 text-slate-500'  },
+  { v: 'ยังไม่มีเลขพัสดุ',   color: 'bg-slate-100 text-slate-400'  },
 ];
+
+// สถานะที่ "เช็คแล้ว" (มีข้อมูลจากขนส่ง) — ใช้กรอง unchecked ใน Orders/ParcelTracking
+export const KNOWN_PARCEL_STATUSES = new Set(
+  PARCEL_STATUSES.map(s => s.v).filter(v => v !== 'ยังไม่มีเลขพัสดุ')
+);
+
+// helper: ดึง color class จากสถานะ (fallback = slate)
+export function parcelStatusColor(status: string): string {
+  return PARCEL_STATUSES.find(s => s.v === status)?.color ?? 'bg-slate-100 text-slate-500';
+}
 
 export const EXPENSE_CATEGORIES = [
   'ค่าโฆษณา','ค่ากล่อง','ค่าส่ง','เงินเดือน',
