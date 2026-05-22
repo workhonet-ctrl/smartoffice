@@ -12,7 +12,7 @@ type PageKey =
   | 'sales-admin' | 'sales-customers' | 'sales-customers-problem' | 'sales-crm'
   | 'marketing-graphic' | 'marketing-ads' | 'marketing-ads-assign'
   | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
-  | 'orders' | 'flash-export' | 'myorder-export'
+  | 'orders' | 'flash-export' | 'myorder-export' | 'shipping-import'
   | 'pack-products' | 'requisition'
   | 'stock' | 'purchase-order' | 'suppliers'
   | 'finance-daily' | 'finance-monthly' | 'finance-yearly'
@@ -21,7 +21,7 @@ type PageKey =
 
 type SidebarProps = {
   activePage: PageKey;
-  setActivePage: (page: PageKey) => void;
+  setActivePage: (page: PageKey, subTab?: string) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   userEmail?: string;
@@ -78,9 +78,10 @@ const GROUPS = [
     key: 'warehouse', label: 'ฝ่ายคลังสินค้า', icon: Warehouse,
     accent: '#14b8a6', bg: '#f0fdfa', dot: '#14b8a6',
     menus: [
-      { key: 'orders',         label: 'ออเดอร์',          icon: ShoppingCart,    built: true },
-      { key: 'flash-export',   label: 'Flash Export',      icon: Truck,           built: true },
-      { key: 'myorder-export', label: 'MyOrder Export',    icon: FileSpreadsheet, built: true },
+      { key: 'orders',          label: 'ออเดอร์',           icon: ShoppingCart,    built: true },
+      { key: 'flash-export',    label: 'Flash Export',       icon: Truck,           built: true },
+      { key: 'myorder-export',  label: 'MyOrder Export',     icon: FileSpreadsheet, built: true },
+      { key: 'shipping-import', label: 'นำเข้าค่าขนส่ง',     icon: Truck,           built: true },
       { key: 'pack-products',  label: 'แพ็คสินค้า',        icon: PackageCheck,    built: true },
       { key: 'requisition',    label: 'ใบเบิกสินค้า',      icon: FileText,        built: true },
       { key: 'stock',          label: 'จัดการสต็อก',        icon: BarChart2,       built: true },
