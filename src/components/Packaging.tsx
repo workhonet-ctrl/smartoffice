@@ -227,16 +227,74 @@ export default function Packaging({
 
   const handleReprintFromHistory = (item: any) => {
     const snap = (item.summary_snapshot || []) as any[];
-    const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
-    const rows = snap.map((s: any) => ({
-      product: s.short_name || s.name || '-',
-      promo:   s.name || '',
-      count:   s.count || 1,
-      box:     s.box || '-',
-      bubble:  s.bubble || '-',
-      note:    s.type === 'multi' ? 'แพ็คพิเศษ' : '',
-    }));
-    openPrintWindow(rows, today, item.responsible_person || '-', item.order_count || 0);
+    const packDate = item.pack_date
+      ? new Date(item.pack_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
+      : new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+    const resp = item.responsible_person || '-';
+    const orderCount = item.order_count || 0;
+
+    // สร้าง HTML แบบเดียวกับ handlePrint (สรุปตามโปรโมชัน + แยก Flash/MyOrder ถ้ามี route)
+    // summary_snapshot ไม่มี route → แสดงเป็น section เดียว
+    let idx = 1;
+    const tableRows = snap.map((s: any) => {
+      const isMultiRow = s.type === 'multi';
+      const nameHtml = isMultiRow
+        ? `<div style="font-weight:700">${s.short_name || s.name}</div>
+           <div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div>`
+        : `<div style="font-weight:700">${s.short_name || s.name}</div>
+           <div style="font-size:11px;color:#64748b">${s.name}</div>`;
+      return `<tr${isMultiRow ? ' style="background:#fffbeb"' : ''}>
+        <td class="num">${idx++}</td>
+        <td>${nameHtml}</td>
+        <td style="text-align:center"><span class="badge">${s.count} ออเดอร์</span></td>
+        <td style="text-align:center">${s.box || '-'}</td>
+        <td style="text-align:center;color:#0369a1">${(s.bubble && s.bubble !== '-') ? s.bubble : '-'}</td>
+        <td><div class="note-box"></div></td>
+      </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html><head>
+  <meta charset="utf-8"/>
+  <title>ใบเตรียมสินค้า</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Sarabun',sans-serif;font-size:13px;color:#1e293b;padding:20px}
+    h1{font-size:20px;font-weight:700;margin-bottom:3px}
+    .meta{font-size:11px;color:#64748b;margin-bottom:14px}
+    table{width:100%;border-collapse:collapse;margin-bottom:20px}
+    th{background:#1e293b;color:white;padding:8px 10px;text-align:left;font-size:11px}
+    td{padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;vertical-align:top}
+    .num{text-align:center;color:#64748b;font-weight:700;width:28px}
+    .badge{display:inline-block;background:#cffafe;color:#164e63;border-radius:99px;padding:1px 8px;font-weight:700;font-size:12px}
+    .note-box{border:1px solid #cbd5e1;border-radius:4px;min-height:28px}
+    .footer{margin-top:24px;display:flex;gap:60px}
+    .sig{border-top:1px solid #94a3b8;width:180px;text-align:center;padding-top:5px;font-size:10px;color:#64748b;margin-top:36px}
+    @media print{body{padding:10px}}
+  </style>
+</head><body>
+  <h1>📋 ใบเตรียมสินค้า</h1>
+  <div class="meta">วันที่: ${packDate} &nbsp;|&nbsp; จำนวนออเดอร์: ${orderCount} รายการ &nbsp;|&nbsp; ผู้รับผิดชอบ: ${resp}</div>
+  <table>
+    <thead><tr>
+      <th style="width:28px">#</th>
+      <th>รายการสินค้า / โปรโมชั่น</th>
+      <th style="text-align:center;width:100px">จำนวน (ออเดอร์)</th>
+      <th style="text-align:center;width:120px">กล่อง</th>
+      <th style="text-align:center;width:90px">บับเบิ้ล</th>
+      <th style="width:120px">หมายเหตุ</th>
+    </tr></thead>
+    <tbody>${tableRows}</tbody>
+  </table>
+  <div class="footer">
+    <div class="sig">ผู้เตรียม: ${resp}</div>
+    <div class="sig">ผู้ตรวจสอบ: ___________________</div>
+  </div>
+  <script>window.onload=()=>{window.print()}</script>
+</body></html>`;
+
+    const w = window.open('', '_blank', 'width=1000,height=700');
+    if (w) { w.document.write(html); w.document.close(); }
   };
 
   const openPrintWindow = (rows: any[], today: string, resp: string, orderCount: number) => {
