@@ -258,6 +258,11 @@ export const CHANNELS = [
   'Facebook','Lazada','TikTok','Shopee','เว็บ','อื่นๆ',
 ];
 
+// ช่องทางโฆษณา/กราฟฟิก (ใช้ใน GraphicBrief, GraphicAssets, MarketingAds)
+export const GRAPHIC_CHANNELS = [
+  'Facebook','TikTok','Instagram','Line OA','เว็บไซต์','อื่นๆ',
+];
+
 export const EMPLOYEE_ROLES = [
   'CEO','HR','บัญชี','หาสินค้า','กราฟฟิก',
   'โฆษณา','แอดมิน','เทเลเซลล์',
