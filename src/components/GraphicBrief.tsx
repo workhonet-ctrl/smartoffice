@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { GRAPHIC_CHANNELS } from '../lib/types';
 
 const TYPES    = ['ภาพนิ่ง','Reels/วิดีโอ','Story','Banner','โปสเตอร์','อื่นๆ'];
-const CHANNELS = ['Facebook','TikTok','Instagram','Line OA','เว็บไซต์','อื่นๆ'];
+const CHANNELS = GRAPHIC_CHANNELS;
 const SOURCES  = ['ทีมโฆษณา','ทีมงานภายใน','HR/แอดมิน'];
 
 export default function GraphicBrief({ onCreated }: { onCreated: () => void }) {
