@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { extractQty } from '../lib/utils';
+import { calcPromoMargin, CLS_INPUT, CLS_SELECT } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { usePromoShipAvg } from '../lib/useShipCostMap';
 import GraphicBoard from './GraphicBoard';
@@ -158,28 +158,21 @@ function AdsProductList() {
   // ค่าส่งจริงเฉลี่ยต่อ promo_id — ใช้ shared hook (เหมือน ProductKPI)
   const { promoShipAvg: shipActualMap } = usePromoShipAvg();
 
-  // คำนวณ Margin เหมือน ProductKPI
-  const calcMargin = (p: PromoRow): number => {
-    const qty      = extractQty(p.name);                          // "1 แถม 1" → 2
-    const cost     = Number(p.products_master?.cost_thb||0) * qty;
-    const box      = Number(p.boxes?.price_thb||0);
-    const bubLen   = Number(p.bubbles?.length_cm||0);
-    const bub      = bubLen > 0 ? Number(p.bubbles?.price_thb||0) : 0;
-    const actual   = shipActualMap[p.id];
-    const ship     = (actual !== undefined && actual !== null) ? actual : Number(p.ship_thb||0);
-    const price    = Number(p.price_thb||0);
-    const vat      = 0;                                           // VAT (ไม่มีข้อมูลใน ADS → ใช้ 0 เหมือน KPI default)
-    const com      = price * 0.015;
-    const free2    = price * 0.02;
-    const totalCost = cost + box + bub + ship + vat + com + free2;
-    const profit   = price - totalCost;
-    return profit - 20; // Margin = กำไร - 20
-  };
+  const calcMargin = (p: PromoRow): number => calcPromoMargin({
+    name: p.name, price_thb: Number(p.price_thb || 0),
+    cost_thb: Number(p.products_master?.cost_thb || 0),
+    box_thb:  Number(p.boxes?.price_thb || 0),
+    bub_thb:  Number(p.bubbles?.length_cm || 0) > 0 ? Number(p.bubbles?.price_thb || 0) : 0,
+    ship_thb: Number(p.ship_thb || 0),
+  }, shipActualMap[p.id]).margin;
 
-  const calcRoas = (p: PromoRow): number => {
-    const margin = calcMargin(p);
-    return margin !== 0 ? Number(p.price_thb) / margin : 0;
-  };
+  const calcRoas = (p: PromoRow): number => calcPromoMargin({
+    name: p.name, price_thb: Number(p.price_thb || 0),
+    cost_thb: Number(p.products_master?.cost_thb || 0),
+    box_thb:  Number(p.boxes?.price_thb || 0),
+    bub_thb:  Number(p.bubbles?.length_cm || 0) > 0 ? Number(p.bubbles?.price_thb || 0) : 0,
+    ship_thb: Number(p.ship_thb || 0),
+  }, shipActualMap[p.id]).roas;
 
   useEffect(() => {
     const loadPromos = async () => {
@@ -359,25 +352,25 @@ function AdsExpenseReceipt() {
                 <div>
                   <label className="text-xs font-semibold text-slate-500 block mb-1">วันที่ *</label>
                   <input type="date" value={fDate} onChange={e => setFDate(e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                    className={CLS_INPUT}/>
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500 block mb-1">ยอด (฿) *</label>
                   <input type="number" value={fAmount} onChange={e => setFAmount(e.target.value)} placeholder="0.00"
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                    className={CLS_INPUT}/>
                 </div>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">ช่องทาง</label>
                 <select value={fChannel} onChange={e => setFChannel(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300">
+                  className={CLS_SELECT}>
                   {['Facebook', 'Instagram', 'TikTok', 'LINE OA', 'Google', 'Shopee', 'Lazada', 'อื่นๆ'].map(o => <option key={o}>{o}</option>)}
                 </select>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">หมายเหตุ</label>
                 <input value={fNote} onChange={e => setFNote(e.target.value)} placeholder="รายละเอียด..."
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                  className={CLS_INPUT}/>
               </div>
             </div>
             <div className="flex gap-2 mt-5">
@@ -590,22 +583,22 @@ function AdsExpenseDaily() {
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">วันที่ *</label>
                 <input type="date" value={fDate} onChange={e => setFDate(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                  className={CLS_INPUT}/>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อโฆษณา</label>
                 <input value={fAdName} onChange={e => setFAdName(e.target.value)} placeholder="เช่น ครีมกุหลาบ หน้าใส..."
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                  className={CLS_INPUT}/>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อเพจโฆษณา</label>
                 <input value={fPage} onChange={e => setFPage(e.target.value)} placeholder="เช่น Test - Level S..."
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                  className={CLS_INPUT}/>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">จำนวนเงินที่ใช้จ่ายไป (THB) *</label>
                 <input type="number" value={fSpend} onChange={e => setFSpend(e.target.value)} placeholder="0.00"
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                  className={CLS_INPUT}/>
               </div>
             </div>
             <div className="flex gap-2 mt-5">
@@ -913,12 +906,12 @@ function AdsData() {
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">รายชื่อเพจ *</label>
                 <input value={pName} onChange={e => setPName(e.target.value)} placeholder="ชื่อเพจ..."
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                  className={CLS_INPUT}/>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">บัญชีโฆษณา</label>
                 <select value={pAccount} onChange={e => setPAccount(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300">
+                  className={CLS_SELECT}>
                   <option value="">— ไม่ระบุ —</option>
                   {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
@@ -926,7 +919,7 @@ function AdsData() {
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">ผู้ดูแล</label>
                 <select value={pAdmin} onChange={e => setPAdmin(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300">
+                  className={CLS_SELECT}>
                   <option value="">— ไม่ระบุ —</option>
                   {employees
                     .filter(e => (e.employee_code||'').startsWith('IT') || (e.employee_code||'').startsWith('GM'))
@@ -940,7 +933,7 @@ function AdsData() {
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">สถานะเพจ</label>
                 <select value={pStatus} onChange={e => setPStatus(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300">
+                  className={CLS_SELECT}>
                   {PAGE_STATUS.map(s => <option key={s}>{s}</option>)}
                 </select>
               </div>
@@ -963,22 +956,22 @@ function AdsData() {
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อ Business</label>
                 <input value={aBusiness} onChange={e => setABusiness(e.target.value)} placeholder="ชื่อ Business..."
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                  className={CLS_INPUT}/>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อบัญชีโฆษณา *</label>
                 <input value={aName} onChange={e => setAName(e.target.value)} placeholder="ชื่อบัญชีโฆษณา..."
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                  className={CLS_INPUT}/>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">ID โฆษณา</label>
                 <input value={aId} onChange={e => setAId(e.target.value)} placeholder="Account ID (ไม่จำเป็น)"
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"/>
+                  className={CLS_INPUT}/>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">สถานะ</label>
                 <select value={aStatus} onChange={e => setAStatus(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300">
+                  className={CLS_SELECT}>
                   {ACC_STATUS.map(s => <option key={s}>{s}</option>)}
                 </select>
               </div>
