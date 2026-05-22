@@ -386,6 +386,32 @@ export default function MyOrderImport() {
   const [expandFiles, setExpandFiles] = useState(false);
   const [showDateModal, setShowDateModal] = useState(false);
   const [bulkDate, setBulkDate] = useState('');
+  const [showNotFound, setShowNotFound] = useState(false);
+  const [deletingNotFound, setDeletingNotFound] = useState(false);
+
+  // ลบเฉพาะรายการ ❌ ไม่พบออเดอร์
+  const deleteNotFound = async () => {
+    const notFoundKeys = Object.keys(trackingMap).filter(k => !trackingMap[k].matched);
+    if (!notFoundKeys.length) return;
+    setDeletingNotFound(true);
+    try {
+      const CHUNK = 500;
+      for (let i = 0; i < notFoundKeys.length; i += CHUNK) {
+        await supabase.from('shipping_myorder').delete()
+          .in('tracking', notFoundKeys.slice(i, i + CHUNK));
+      }
+      setTrackingMap(prev => {
+        const next = { ...prev };
+        notFoundKeys.forEach(k => delete next[k]);
+        return next;
+      });
+      setShowNotFound(false);
+    } catch (err) {
+      console.error('deleteNotFound error:', err);
+    } finally {
+      setDeletingNotFound(false);
+    }
+  };
 
   const clearAll = async () => {
     const trackings = Object.keys(trackingMap);
@@ -598,9 +624,13 @@ export default function MyOrderImport() {
                 ✓ จับคู่ได้ {cntMatched}
               </span>
               {cntNotFound > 0 && (
-                <span className="bg-red-100 text-red-600 px-3 py-1.5 rounded-full font-medium">
+                <button
+                  onClick={() => setShowNotFound(true)}
+                  className="bg-red-100 text-red-600 px-3 py-1.5 rounded-full font-medium hover:bg-red-200 transition flex items-center gap-1"
+                >
                   ❌ ไม่พบ {cntNotFound}
-                </span>
+                  <span className="text-[10px] underline">ดูรายการ</span>
+                </button>
               )}
             </div>
           )}
@@ -856,6 +886,92 @@ export default function MyOrderImport() {
                 >
                   เสร็จสิ้น
                 </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Not Found Modal ── */}
+      {showNotFound && (() => {
+        const notFoundRows = Object.values(trackingMap).filter(r => !r.matched);
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+            onClick={() => setShowNotFound(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col"
+              onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="flex items-center justify-between p-5 border-b">
+                <div>
+                  <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                    ❌ รายการที่ไม่พบออเดอร์
+                    <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded-full font-bold">
+                      {notFoundRows.length} tracking
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    tracking เหล่านี้ไม่มีในระบบออเดอร์ — อาจเป็นออเดอร์จากช่องทางอื่น หรือยังไม่ได้นำเข้า
+                  </p>
+                </div>
+                <button onClick={() => setShowNotFound(false)} className="text-slate-400 hover:text-slate-700">
+                  <X size={18}/>
+                </button>
+              </div>
+
+              {/* Table */}
+              <div className="flex-1 overflow-auto">
+                <table className="text-xs w-full">
+                  <thead className="bg-slate-100 sticky top-0">
+                    <tr>
+                      <th className="p-3 text-left whitespace-nowrap">Tracking No.</th>
+                      <th className="p-3 text-left whitespace-nowrap">เพจ</th>
+                      <th className="p-3 text-left whitespace-nowrap">ผู้รับ</th>
+                      <th className="p-3 text-right whitespace-nowrap">Freight</th>
+                      <th className="p-3 text-right whitespace-nowrap">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {notFoundRows.map(r => (
+                      <tr key={r.tracking} className="border-b hover:bg-red-50">
+                        <td className="p-3 font-mono text-purple-600">{r.tracking}</td>
+                        <td className="p-3 text-slate-600 max-w-[120px] truncate">{r.page || '-'}</td>
+                        <td className="p-3 text-slate-500">{r.consignee || '-'}</td>
+                        <td className="p-3 text-right text-purple-700">฿{fmt(r.freight)}</td>
+                        <td className="p-3 text-right font-bold text-red-700">฿{fmt(r.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-50 border-t-2 font-bold text-[11px] sticky bottom-0">
+                    <tr>
+                      <td colSpan={3} className="p-3 text-slate-600">รวม {notFoundRows.length} tracking</td>
+                      <td className="p-3 text-right text-purple-700">
+                        ฿{fmt(notFoundRows.reduce((s, r) => s + r.freight, 0))}
+                      </td>
+                      <td className="p-3 text-right text-red-700">
+                        ฿{fmt(notFoundRows.reduce((s, r) => s + r.total, 0))}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t bg-slate-50 flex items-center justify-between gap-3">
+                <p className="text-xs text-slate-400">
+                  การลบจะลบออกจากหน้าจอ <strong>และ Supabase</strong> ทั้งหมด
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={() => setShowNotFound(false)}
+                    className="px-5 py-2 bg-slate-200 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-300">
+                    ปิด
+                  </button>
+                  <button onClick={deleteNotFound} disabled={deletingNotFound}
+                    className="px-5 py-2 bg-red-500 text-white rounded-xl text-sm font-semibold hover:bg-red-600 disabled:opacity-50 flex items-center gap-2">
+                    {deletingNotFound
+                      ? <><RefreshCw size={13} className="animate-spin"/> กำลังลบ...</>
+                      : <>🗑 ลบรายการไม่พบทั้งหมด ({notFoundRows.length})</>}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
