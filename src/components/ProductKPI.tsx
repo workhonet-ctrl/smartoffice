@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { extractQty } from '../lib/utils';
+import { usePromoShipAvg } from '../lib/useShipCostMap';
 import { RefreshCw, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -42,46 +43,12 @@ export default function ProductKPI() {
   // เลือกแถวสำหรับ bulk VAT
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const [shipActualMap, setShipActualMap] = useState<Record<string,number>>({}); // promo_id → avg actual
+  // ค่าส่งจริงเฉลี่ยต่อ promo_id (จาก shipping tables) — ใช้ shared hook
+  const { promoShipAvg: shipActualMap, reloadPromoShip } = usePromoShipAvg();
 
   useEffect(() => {
-    const init = async () => {
-      await loadActualShipping(); // โหลดขนส่งจริงก่อน
-      await loadData();           // ค่อยโหลด KPI (calcRow จะได้ใช้ shipActualMap ที่พร้อมแล้ว)
-    };
-    init();
+    loadData();
   }, []);
-
-  const loadActualShipping = async () => {
-    // ดึงค่าส่งจริงเฉลี่ยต่อ promo จาก orders join shipping_flash/myorder
-    const [{ data: flash }, { data: myorder }] = await Promise.all([
-      supabase.from('shipping_flash').select('tracking, total_thb'),
-      supabase.from('shipping_myorder').select('tracking, total_thb'),
-    ]);
-    const trackMap: Record<string,number> = {};
-    [...(flash||[]), ...(myorder||[])].forEach((r:any) => {
-      if (r.tracking) trackMap[r.tracking] = Number(r.total_thb||0);
-    });
-    // ดึง orders ที่มี tracking + promo_ids
-    const { data: orders } = await supabase
-      .from('orders').select('tracking_no, promo_ids').not('tracking_no','is',null);
-    // คำนวณเฉลี่ยต่อ promo_id
-    const promoShip: Record<string, number[]> = {};
-    (orders||[]).forEach((o:any) => {
-      const cost = trackMap[o.tracking_no];
-      if (!cost) return;
-      const perPromo = cost / Math.max((o.promo_ids||[]).length, 1);
-      (o.promo_ids||[]).forEach((pid:string) => {
-        if (!promoShip[pid]) promoShip[pid] = [];
-        promoShip[pid].push(perPromo);
-      });
-    });
-    const avgMap: Record<string,number> = {};
-    Object.entries(promoShip).forEach(([pid, costs]) => {
-      avgMap[pid] = costs.reduce((s,v) => s+v, 0) / costs.length;
-    });
-    setShipActualMap(avgMap);
-  };
 
   const loadData = async () => {
     setLoading(true);
@@ -199,7 +166,7 @@ export default function ProductKPI() {
           <p className="text-xs text-slate-400 mt-0.5">{filtered.length} โปร · วิเคราะห์ต้นทุน กำไร Margin ROAS</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={loadData} disabled={loading}
+          <button onClick={() => { loadData(); reloadPromoShip(); }} disabled={loading}
             className="px-3 py-2 bg-white border rounded-lg text-xs flex items-center gap-1.5 hover:bg-slate-50">
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''}/> รีเฟรช
           </button>
