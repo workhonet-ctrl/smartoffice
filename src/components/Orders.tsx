@@ -1,26 +1,13 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
-import { Order, TOURIST_ZIPS } from '../lib/types';
+import { Order, TOURIST_ZIPS, PARCEL_STATUSES, KNOWN_PARCEL_STATUSES, parcelStatusColor } from '../lib/types';
 import { useShipCostMap } from '../lib/useShipCostMap';
 import { extractQty } from '../lib/utils';
 import { Upload, Search, CheckCircle, AlertCircle, RefreshCw, Package, XCircle, RotateCcw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 // ── ParcelTracking (inline) ───────────────────────────────────
-const PARCEL_STATUSES = [
-  { v: 'ส่งสำเร็จ',           color: 'bg-green-100 text-green-700' },
-  { v: 'อยู่ระหว่างจัดส่ง',  color: 'bg-blue-100 text-blue-700' },
-  { v: 'รอจัดส่ง',           color: 'bg-indigo-100 text-indigo-700' },
-  { v: 'ค้างอยู่คลัง',        color: 'bg-purple-100 text-purple-700' },
-  { v: 'ไม่มีคนรับ',          color: 'bg-orange-100 text-orange-700' },
-  { v: 'ตีกลับ',              color: 'bg-yellow-100 text-yellow-700' },
-  { v: 'ส่งคืน',              color: 'bg-red-100 text-red-700' },
-  { v: 'ปัญหา',               color: 'bg-red-200 text-red-800' },
-  { v: 'รอรับพัสดุ',          color: 'bg-slate-100 text-slate-500' },
-];
-
-// สถานะที่ถือว่า "เช็คแล้ว"
-const KNOWN_PARCEL_STATUSES = ['ส่งสำเร็จ','อยู่ระหว่างจัดส่ง','รอจัดส่ง','ค้างอยู่คลัง','ไม่มีคนรับ','ตีกลับ','ส่งคืน','ปัญหา','รอรับพัสดุ'];
+// PARCEL_STATUSES, KNOWN_PARCEL_STATUSES, parcelStatusColor → import จาก lib/types
 
 type TrackRow = {
   id: string; order_no: string; tracking_no: string; customer_name: string;
@@ -225,7 +212,7 @@ function ParcelTrackingPanel() {
   const filtered = allRows.filter(r =>
     (!filterRoute  || (filterRoute === 'AC' ? (r.route === 'A' || r.route === 'C') : r.route === filterRoute)) &&
     (!filterStatus || (filterStatus === 'no-tracking'
-      ? !KNOWN_PARCEL_STATUSES.includes(r.parcel_status)
+      ? !KNOWN_PARCEL_STATUSES.has(r.parcel_status)
       : r.parcel_status === filterStatus)) &&
     (!search || r.tracking_no?.toLowerCase().includes(search.toLowerCase()) || r.customer_name.toLowerCase().includes(search.toLowerCase()))
   );
@@ -252,11 +239,11 @@ function ParcelTrackingPanel() {
   const countWaiting   = allRows.filter(r => r.parcel_status === 'รอจัดส่ง').length;
   const countIssue     = allRows.filter(r => r.parcel_status === 'ปัญหา' || r.parcel_status === 'ค้างอยู่คลัง').length;
   const countTransit   = allRows.filter(r => r.parcel_status === 'อยู่ระหว่างจัดส่ง').length;
-  const countUnchecked = allRows.filter(r => !KNOWN_PARCEL_STATUSES.includes(r.parcel_status)).length;
+  const countUnchecked = allRows.filter(r => !KNOWN_PARCEL_STATUSES.has(r.parcel_status)).length;
 
   const routeLabel = (r: string) => r === 'B' ? 'Flash' : 'ไปรษณีย์';
   const routeColor = (r: string) => r === 'B' ? 'bg-orange-100 text-orange-700' : 'bg-purple-100 text-purple-700';
-  const statusColor = (s: string) => PARCEL_STATUSES.find(x => x.v === s)?.color || 'bg-slate-100 text-slate-500';
+  const statusColor = parcelStatusColor;
 
   return (
     <div className="flex flex-col h-full gap-3">
@@ -356,7 +343,7 @@ function ParcelTrackingPanel() {
                       {r.ship_date ? String(r.ship_date).split('-').reverse().join('/') : <span className="text-slate-300">-</span>}
                     </td>
                     <td className="p-3 text-center">
-                      {KNOWN_PARCEL_STATUSES.includes(r.parcel_status)
+                      {KNOWN_PARCEL_STATUSES.has(r.parcel_status)
                         ? <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusColor(r.parcel_status)}`}>{r.parcel_status}</span>
                         : <span className="text-[10px] text-slate-400">ยังไม่ได้เช็ค</span>}
                     </td>
