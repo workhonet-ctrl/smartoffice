@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { extractQty } from '../lib/utils';
 import { supabase } from '../lib/supabase';
+import { usePromoShipAvg } from '../lib/useShipCostMap';
 import GraphicBoard from './GraphicBoard';
 import GraphicTasks from './GraphicTasks';
 import GraphicBrief from './GraphicBrief';
@@ -153,7 +154,9 @@ function AdsProductList() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [kpiMap, setKpiMap] = useState<Record<string, string>>({});
-  const [shipActualMap, setShipActualMap] = useState<Record<string,number>>({});
+
+  // ค่าส่งจริงเฉลี่ยต่อ promo_id — ใช้ shared hook (เหมือน ProductKPI)
+  const { promoShipAvg: shipActualMap } = usePromoShipAvg();
 
   // คำนวณ Margin เหมือน ProductKPI
   const calcMargin = (p: PromoRow): number => {
@@ -184,33 +187,6 @@ function AdsProductList() {
         .select('id, name, short_name, price_thb, active, ship_thb, products_master(name, weight_g, cost_thb), boxes(name,price_thb), bubbles(name,length_cm,price_thb)')
         .eq('active', true).order('id');
       if (data) setPromos(data as any);
-
-      // ดึง shipActualMap (ขนส่งจริงเฉลี่ย) เหมือน ProductKPI
-      const [{ data: flash }, { data: myorder }] = await Promise.all([
-        supabase.from('shipping_flash').select('tracking, total_thb'),
-        supabase.from('shipping_myorder').select('tracking, total_thb'),
-      ]);
-      const trackMap: Record<string,number> = {};
-      [...(flash||[]), ...(myorder||[])].forEach((r:any) => {
-        if (r.tracking) trackMap[r.tracking] = Number(r.total_thb||0);
-      });
-      const { data: orders } = await supabase.from('orders')
-        .select('tracking_no, promo_ids').not('tracking_no','is',null);
-      const promoShip: Record<string,number[]> = {};
-      (orders||[]).forEach((o:any) => {
-        const cost = trackMap[o.tracking_no];
-        if (!cost) return;
-        const perPromo = cost / Math.max((o.promo_ids||[]).length, 1);
-        (o.promo_ids||[]).forEach((pid:string) => {
-          if (!promoShip[pid]) promoShip[pid] = [];
-          promoShip[pid].push(perPromo);
-        });
-      });
-      const avgMap: Record<string,number> = {};
-      Object.entries(promoShip).forEach(([pid, costs]) => {
-        avgMap[pid] = costs.reduce((s,v) => s+v, 0) / costs.length;
-      });
-      setShipActualMap(avgMap);
       setLoading(false);
     };
     loadPromos();
