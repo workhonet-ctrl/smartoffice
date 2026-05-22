@@ -63,3 +63,50 @@ export function fmtDateLong(d: string): string {
 export function todayISO(): string {
   return new Date().toISOString().split('T')[0];
 }
+
+// ── คำนวณ Margin / ROAS ต่อโปรโมชัน ────────────────────────
+// ใช้ร่วมกันใน ProductKPI และ Marketing (AdsProductList)
+// p = ข้อมูลโปร, shipAvg = ค่าส่งจริงเฉลี่ย (จาก usePromoShipAvg), vat = VAT ที่กรอกเอง
+export interface PromoMarginInput {
+  name:       string;   // ชื่อโปร (สำหรับ extractQty)
+  price_thb:  number;   // ราคาขาย
+  cost_thb:   number;   // ต้นทุนสินค้าต่อชิ้น
+  box_thb:    number;   // ราคากล่อง
+  bub_thb:    number;   // ราคาบั้บเบิ้ล (0 ถ้าไม่ใช้)
+  ship_thb:   number;   // ค่าส่งประมาณ (fallback)
+}
+
+export interface PromoMarginResult {
+  qty:       number;
+  cost:      number;   // ต้นทุนสินค้ารวม (cost_thb × qty)
+  com:       number;   // ค่า COM 1.5%
+  free2:     number;   // ค่า FREE 2%
+  shipUsed:  number;   // ค่าส่งที่ใช้จริง
+  totalCost: number;
+  profit:    number;
+  margin:    number;   // profit - 20
+  roas:      number;   // price / margin
+}
+
+export function calcPromoMargin(
+  p: PromoMarginInput,
+  shipActual?: number,   // ค่าส่งจริงเฉลี่ยจาก usePromoShipAvg (ถ้ามี ใช้แทน ship_thb)
+  vat = 0,               // VAT (กรอกเองได้ใน ProductKPI)
+): PromoMarginResult {
+  const qty      = extractQty(p.name);
+  const cost     = p.cost_thb * qty;
+  const shipUsed = (shipActual !== undefined && shipActual !== null) ? shipActual : p.ship_thb;
+  const com      = p.price_thb * 0.015;
+  const free2    = p.price_thb * 0.02;
+  const totalCost = cost + p.box_thb + p.bub_thb + shipUsed + vat + com + free2;
+  const profit   = p.price_thb - totalCost;
+  const margin   = profit - 20;
+  const roas     = margin !== 0 ? p.price_thb / margin : 0;
+  return { qty, cost, com, free2, shipUsed, totalCost, profit, margin, roas };
+}
+
+// ── Tailwind input class constants ─────────────────────────
+// ใช้แทนการ copy Tailwind string ซ้ำในฟอร์มต่างๆ
+export const CLS_INPUT   = 'w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300' as const;
+export const CLS_SELECT  = 'w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300' as const;
+export const CLS_INPUT_SM = 'w-full border rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-purple-300' as const;
