@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Search } from 'lucide-react';
+import { GRAPHIC_CHANNELS } from '../lib/types';
 
 type Task = {
   id: string; title: string; task_type: string; channel: string | null;
   assigned_to: string | null; updated_at: string;
 };
 
-const CHANNELS = ['ทั้งหมด','Facebook','TikTok','Instagram','Line OA','เว็บไซต์','อื่นๆ'];
+const CHANNELS = ['ทั้งหมด', ...GRAPHIC_CHANNELS];
 const TYPES    = ['ทั้งหมด','ภาพนิ่ง','Reels/วิดีโอ','Story','Banner','โปสเตอร์','อื่นๆ'];
 
 export default function GraphicAssets() {
