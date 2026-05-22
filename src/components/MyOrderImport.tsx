@@ -389,28 +389,52 @@ export default function MyOrderImport() {
   const [showNotFound, setShowNotFound] = useState(false);
   const [deletingNotFound, setDeletingNotFound] = useState(false);
 
-  // ลบเฉพาะรายการ ❌ ไม่พบออเดอร์
-  const deleteNotFound = async () => {
-    const notFoundKeys = Object.keys(trackingMap).filter(k => !trackingMap[k].matched);
-    if (!notFoundKeys.length) return;
+  const [notFoundSelected, setNotFoundSelected] = useState<Set<string>>(new Set());
+
+  const toggleNotFoundSelect = (tracking: string) =>
+    setNotFoundSelected(prev => {
+      const n = new Set(prev);
+      n.has(tracking) ? n.delete(tracking) : n.add(tracking);
+      return n;
+    });
+
+  const toggleSelectAll = (notFoundRows: TrackingRow[]) =>
+    setNotFoundSelected(prev =>
+      prev.size === notFoundRows.length
+        ? new Set()
+        : new Set(notFoundRows.map(r => r.tracking))
+    );
+
+  // ลบเฉพาะรายการที่เลือก (หรือทั้งหมดถ้าไม่ได้เลือกเฉพาะ)
+  const deleteSelected = async (keys: string[]) => {
+    if (!keys.length) return;
     setDeletingNotFound(true);
     try {
       const CHUNK = 500;
-      for (let i = 0; i < notFoundKeys.length; i += CHUNK) {
+      for (let i = 0; i < keys.length; i += CHUNK) {
         await supabase.from('shipping_myorder').delete()
-          .in('tracking', notFoundKeys.slice(i, i + CHUNK));
+          .in('tracking', keys.slice(i, i + CHUNK));
       }
       setTrackingMap(prev => {
         const next = { ...prev };
-        notFoundKeys.forEach(k => delete next[k]);
+        keys.forEach(k => delete next[k]);
         return next;
       });
-      setShowNotFound(false);
+      setNotFoundSelected(new Set());
+      // ถ้าลบหมดแล้ว ปิด modal
+      const remaining = Object.values(trackingMap).filter(r => !r.matched).length - keys.length;
+      if (remaining <= 0) setShowNotFound(false);
     } catch (err) {
-      console.error('deleteNotFound error:', err);
+      console.error('deleteSelected error:', err);
     } finally {
       setDeletingNotFound(false);
     }
+  };
+
+  // ลบเฉพาะรายการ ❌ ไม่พบออเดอร์ (ทั้งหมด — ใช้ deleteSelected แทน)
+  const deleteNotFound = () => {
+    const notFoundKeys = Object.keys(trackingMap).filter(k => !trackingMap[k].matched);
+    deleteSelected(notFoundKeys);
   };
 
   const clearAll = async () => {
@@ -895,11 +919,16 @@ export default function MyOrderImport() {
       {/* ── Not Found Modal ── */}
       {showNotFound && (() => {
         const notFoundRows = Object.values(trackingMap).filter(r => !r.matched);
+        const allSelected  = notFoundSelected.size === notFoundRows.length && notFoundRows.length > 0;
+        const toDelete     = notFoundSelected.size > 0
+          ? [...notFoundSelected]
+          : notFoundRows.map(r => r.tracking);
         return (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-            onClick={() => setShowNotFound(false)}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col"
+            onClick={() => { setShowNotFound(false); setNotFoundSelected(new Set()); }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
               onClick={e => e.stopPropagation()}>
+
               {/* Header */}
               <div className="flex items-center justify-between p-5 border-b">
                 <div>
@@ -913,9 +942,31 @@ export default function MyOrderImport() {
                     tracking เหล่านี้ไม่มีในระบบออเดอร์ — อาจเป็นออเดอร์จากช่องทางอื่น หรือยังไม่ได้นำเข้า
                   </p>
                 </div>
-                <button onClick={() => setShowNotFound(false)} className="text-slate-400 hover:text-slate-700">
+                <button onClick={() => { setShowNotFound(false); setNotFoundSelected(new Set()); }}
+                  className="text-slate-400 hover:text-slate-700">
                   <X size={18}/>
                 </button>
+              </div>
+
+              {/* Selection bar */}
+              <div className="px-5 py-3 border-b bg-slate-50 flex items-center gap-3 text-xs">
+                <label className="flex items-center gap-2 cursor-pointer select-none font-medium text-slate-600">
+                  <input type="checkbox"
+                    checked={allSelected}
+                    onChange={() => toggleSelectAll(notFoundRows)}
+                    className="w-4 h-4 accent-red-500 cursor-pointer"
+                  />
+                  เลือกทั้งหมด ({notFoundRows.length})
+                </label>
+                {notFoundSelected.size > 0 && (
+                  <span className="bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">
+                    เลือกแล้ว {notFoundSelected.size} รายการ
+                  </span>
+                )}
+                <span className="flex-1"/>
+                <span className="text-slate-400">
+                  {notFoundSelected.size === 0 ? 'ไม่ได้เลือก = ลบทั้งหมด' : `จะลบ ${notFoundSelected.size} รายการ`}
+                </span>
               </div>
 
               {/* Table */}
@@ -923,6 +974,7 @@ export default function MyOrderImport() {
                 <table className="text-xs w-full">
                   <thead className="bg-slate-100 sticky top-0">
                     <tr>
+                      <th className="p-3 w-10 text-center"></th>
                       <th className="p-3 text-left whitespace-nowrap">Tracking No.</th>
                       <th className="p-3 text-left whitespace-nowrap">เพจ</th>
                       <th className="p-3 text-left whitespace-nowrap">ผู้รับ</th>
@@ -931,24 +983,48 @@ export default function MyOrderImport() {
                     </tr>
                   </thead>
                   <tbody>
-                    {notFoundRows.map(r => (
-                      <tr key={r.tracking} className="border-b hover:bg-red-50">
-                        <td className="p-3 font-mono text-purple-600">{r.tracking}</td>
-                        <td className="p-3 text-slate-600 max-w-[120px] truncate">{r.page || '-'}</td>
-                        <td className="p-3 text-slate-500">{r.consignee || '-'}</td>
-                        <td className="p-3 text-right text-purple-700">฿{fmt(r.freight)}</td>
-                        <td className="p-3 text-right font-bold text-red-700">฿{fmt(r.total)}</td>
-                      </tr>
-                    ))}
+                    {notFoundRows.map(r => {
+                      const isSelected = notFoundSelected.has(r.tracking);
+                      return (
+                        <tr key={r.tracking}
+                          onClick={() => toggleNotFoundSelect(r.tracking)}
+                          className={`border-b cursor-pointer transition ${
+                            isSelected ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-slate-50'
+                          }`}>
+                          <td className="p-3 text-center">
+                            <input type="checkbox" checked={isSelected} readOnly
+                              className="w-4 h-4 accent-red-500 cursor-pointer pointer-events-none"/>
+                          </td>
+                          <td className="p-3 font-mono text-purple-600">{r.tracking}</td>
+                          <td className="p-3 text-slate-600 max-w-[120px] truncate">{r.page || '-'}</td>
+                          <td className="p-3 text-slate-500">{r.consignee || '-'}</td>
+                          <td className="p-3 text-right text-purple-700">฿{fmt(r.freight)}</td>
+                          <td className="p-3 text-right font-bold text-red-700">฿{fmt(r.total)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                   <tfoot className="bg-slate-50 border-t-2 font-bold text-[11px] sticky bottom-0">
                     <tr>
-                      <td colSpan={3} className="p-3 text-slate-600">รวม {notFoundRows.length} tracking</td>
+                      <td colSpan={4} className="p-3 text-slate-600">
+                        รวม {notFoundSelected.size > 0 ? `${notFoundSelected.size} ที่เลือก / ` : ''}
+                        {notFoundRows.length} tracking ทั้งหมด
+                      </td>
                       <td className="p-3 text-right text-purple-700">
-                        ฿{fmt(notFoundRows.reduce((s, r) => s + r.freight, 0))}
+                        ฿{fmt(
+                          (notFoundSelected.size > 0
+                            ? notFoundRows.filter(r => notFoundSelected.has(r.tracking))
+                            : notFoundRows
+                          ).reduce((s, r) => s + r.freight, 0)
+                        )}
                       </td>
                       <td className="p-3 text-right text-red-700">
-                        ฿{fmt(notFoundRows.reduce((s, r) => s + r.total, 0))}
+                        ฿{fmt(
+                          (notFoundSelected.size > 0
+                            ? notFoundRows.filter(r => notFoundSelected.has(r.tracking))
+                            : notFoundRows
+                          ).reduce((s, r) => s + r.total, 0)
+                        )}
                       </td>
                     </tr>
                   </tfoot>
@@ -958,18 +1034,18 @@ export default function MyOrderImport() {
               {/* Footer */}
               <div className="p-4 border-t bg-slate-50 flex items-center justify-between gap-3">
                 <p className="text-xs text-slate-400">
-                  การลบจะลบออกจากหน้าจอ <strong>และ Supabase</strong> ทั้งหมด
+                  การลบจะลบออกจากหน้าจอ <strong>และ Supabase</strong> ด้วย
                 </p>
                 <div className="flex gap-2">
-                  <button onClick={() => setShowNotFound(false)}
+                  <button onClick={() => { setShowNotFound(false); setNotFoundSelected(new Set()); }}
                     className="px-5 py-2 bg-slate-200 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-300">
                     ปิด
                   </button>
-                  <button onClick={deleteNotFound} disabled={deletingNotFound}
+                  <button onClick={() => deleteSelected(toDelete)} disabled={deletingNotFound}
                     className="px-5 py-2 bg-red-500 text-white rounded-xl text-sm font-semibold hover:bg-red-600 disabled:opacity-50 flex items-center gap-2">
                     {deletingNotFound
                       ? <><RefreshCw size={13} className="animate-spin"/> กำลังลบ...</>
-                      : <>🗑 ลบรายการไม่พบทั้งหมด ({notFoundRows.length})</>}
+                      : <>🗑 ลบ{notFoundSelected.size > 0 ? `รายการที่เลือก (${notFoundSelected.size})` : `ทั้งหมด (${notFoundRows.length})`}</>}
                   </button>
                 </div>
               </div>
