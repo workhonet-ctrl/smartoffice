@@ -27,8 +27,6 @@ type DaySummary = {
 // alias ให้โค้ดเดิมใช้ได้โดยไม่ต้องแก้ทุกบรรทัด
 const fmt  = fmtTHB;
 const fmtD = fmtDateLong;
-// extractPieces ใช้ extractQty จาก utils แทน (logic เหมือนกัน)
-const extractPieces = (name: string) => extractQty(name);
 
 export default function FinanceDaily() {
   const today = new Date().toISOString().split('T')[0];
@@ -119,7 +117,7 @@ export default function FinanceDaily() {
             for (let i = 0; i < o.promo_ids.length; i++) {
               const promo = promoMap[o.promo_ids[i]]; if (!promo) continue;
               const qty = Number(qtys[i]?.trim())||1;
-              const pieces = extractPieces(promo.name) * qty;
+              const pieces = extractQty(promo.name) * qty;
               const master = promo.products_master;
               const box = promo.boxes; const bub = promo.bubbles;
               oGoods += master?.cost_thb ? Number(master.cost_thb)*pieces : 0;
