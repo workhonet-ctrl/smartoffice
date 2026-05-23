@@ -611,7 +611,11 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       const currentPromos = promoOptions.length > 0 ? promoOptions : [];
       const previewRows = dataRows.map((r: any) => {
         const rawDate  = String(r[3]||'');
-        const date     = rawDate ? rawDate.split('T')[0] : '';
+        const normalizedDate = rawDate.replace(/(\d{4}-\d{2}-\d{2})\s+(\d{1,2})\.(\d{2})/, '$1T$2:$3');
+        const parsedDateP = new Date(normalizedDate);
+        const date = !isNaN(parsedDateP.getTime())
+          ? parsedDateP.toISOString().split('T')[0]
+          : rawDate.match(/(\d{4}-\d{2}-\d{2})/)?.[1] ?? '';
         const custName = String(r[4]||'');
         const facebook = String(r[5]||'');
         const tel      = String(r[6]||'');
@@ -733,8 +737,14 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         if (!customerId) continue;
 
         const rawDate  = String(row[3]||'');
-        const orderDate = rawDate ? new Date(rawDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-        const timeMatch = rawDate.match(/(\d{1,2}):(\d{2})/);
+        // รองรับ format "2026-05-06 13.03" (dot แทน colon) — replace dot-time ให้เป็น colon
+        const normalizedDate = rawDate.replace(/(\d{4}-\d{2}-\d{2})\s+(\d{1,2})\.(\d{2})/, '$1T$2:$3');
+        const parsedDate = new Date(normalizedDate);
+        const orderDate = !isNaN(parsedDate.getTime())
+          ? parsedDate.toISOString().split('T')[0]
+          : rawDate.match(/(\d{4}-\d{2}-\d{2})/)?.[1] ?? new Date().toISOString().split('T')[0];
+        // รองรับ time ทั้ง "13:03" และ "13.03"
+        const timeMatch = rawDate.match(/(\d{1,2})[.:](\d{2})\s*$/) || rawDate.match(/\s(\d{1,2})[.:](\d{2})/);
         const orderTime = timeMatch ? `${timeMatch[1].padStart(2,'0')}:${timeMatch[2]}` : '';
 
         const rawTrack    = String(row[17]||'');
@@ -752,7 +762,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const rawProds = String(row[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
         const promoIds = rawProds.map(rp=>finalPromoMap[rp]||'').filter(Boolean);
         const quantities = String(row[15]||'1');
-        const weightKg   = (Number(row[16])||0)/1000;
+        // col[16] = น้ำหนัก (กก.) — ไฟล์ระบุหน่วย กก. อยู่แล้ว (ค่า 1, 1.5, 2 = กก.)
+        // ถ้าค่า >= 100 ถือว่าเป็น กรัม → /1000, ถ้าน้อยกว่าใช้ตรงๆ
+        const weightRaw = Number(row[16]) || 0;
+        const weightKg  = weightRaw >= 100 ? weightRaw / 1000 : weightRaw;
         const postal     = String(row[11]||'').trim();
         const hasTrack   = trackingNo.length>3;
         const isTourist  = TOURIST_ZIPS.has(postal);
