@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthProvider';
-import { Plus, CreditCard as Edit2, Trash2, X, Search } from 'lucide-react';
+import { Plus, CreditCard as Edit2, Trash2, X, Search, AlertTriangle } from 'lucide-react';
 
 // ── Searchable Dropdown สำหรับกล่อง/บั้บเบิ้ล/ประเภท ──
 function SearchableDropdown({ options, value, onChange, placeholder }: {
@@ -133,6 +133,12 @@ type PromoFormState = {
   color: string;
   item_type: string;
 };
+
+type DeleteTarget = {
+  type: 'master' | 'promo';
+  id: string;
+  name: string;
+} | null;
 
 const emptyMasterForm: MasterFormState = {
   id: '',
@@ -291,6 +297,8 @@ export default function Products() {
   const [showBulkForm, setShowBulkForm] = useState(false);
   const [editingMaster, setEditingMaster] = useState<ProductMaster | null>(null);
   const [editingPromo, setEditingPromo] = useState<ProductPromoRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [masterForm, setMasterForm] = useState<MasterFormState>(emptyMasterForm);
   const [promoForm, setPromoForm] = useState<PromoFormState>(emptyPromoForm);
@@ -624,58 +632,89 @@ export default function Products() {
     }
   };
 
-  const deleteMaster = async (id: string) => {
+  const openDeleteMasterModal = (master: ProductMaster) => {
     if (!isAdmin) {
       alert('permission denied');
       return;
     }
 
-    const hasPromos = promos.some((p) => p.master_id === id);
+    const hasPromos = promos.some((p) => p.master_id === master.id);
 
     if (hasPromos) {
       alert('ไม่สามารถลบ M ได้ เนื่องจากยังมี P ที่ผูกอยู่');
       return;
     }
 
-    if (!confirm('ยืนยันการลบ?')) return;
-
-    try {
-      const { error } = await supabase.from('products_master').delete().eq('id', id);
-      if (error) throw error;
-      await loadData();
-    } catch (error) {
-      console.error('Error deleting master:', error);
-      alert('ลบ Master ไม่สำเร็จ');
-    }
+    setDeleteTarget({
+      type: 'master',
+      id: master.id,
+      name: `${master.id} - ${master.name}`,
+    });
   };
 
-  const deletePromo = async (id: string) => {
+  const openDeletePromoModal = (promo: ProductPromoRow) => {
     if (!isAdmin) {
       alert('permission denied');
       return;
     }
 
-    if (!confirm('ยืนยันการลบ?')) return;
+    setDeleteTarget({
+      type: 'promo',
+      id: promo.id,
+      name: `${promo.id} - ${promo.name}`,
+    });
+  };
+
+  const closeDeleteModal = () => {
+    if (deleting) return;
+    setDeleteTarget(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+
+    if (!isAdmin) {
+      alert('permission denied');
+      setDeleteTarget(null);
+      return;
+    }
+
+    setDeleting(true);
 
     try {
-      const { error: mappingDeleteError } = await supabase
-        .from('product_mappings')
-        .delete()
-        .eq('promo_id', id);
+      if (deleteTarget.type === 'master') {
+        const { error } = await supabase
+          .from('products_master')
+          .delete()
+          .eq('id', deleteTarget.id);
 
-      if (mappingDeleteError) throw mappingDeleteError;
+        if (error) throw error;
+      }
 
-      const { error: promoDeleteError } = await supabase
-        .from('products_promo')
-        .delete()
-        .eq('id', id);
+      if (deleteTarget.type === 'promo') {
+        const { error: mappingDeleteError } = await supabase
+          .from('product_mappings')
+          .delete()
+          .eq('promo_id', deleteTarget.id);
 
-      if (promoDeleteError) throw promoDeleteError;
+        if (mappingDeleteError) throw mappingDeleteError;
 
+        const { error: promoDeleteError } = await supabase
+          .from('products_promo')
+          .delete()
+          .eq('id', deleteTarget.id);
+
+        if (promoDeleteError) throw promoDeleteError;
+      }
+
+      showToast('✓ ลบสินค้าสำเร็จ');
+      setDeleteTarget(null);
       await loadData();
     } catch (error) {
-      console.error('Error deleting promo:', error);
-      alert('ลบ Promo ไม่สำเร็จ');
+      console.error('Error deleting product:', error);
+      showToast('ลบสินค้าไม่สำเร็จ', 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -793,7 +832,7 @@ export default function Products() {
 
                         {isAdmin && (
                           <button
-                            onClick={() => deleteMaster(m.id)}
+                            onClick={() => openDeleteMasterModal(m)}
                             className="text-red-600 hover:text-red-800"
                           >
                             <Trash2 size={16} />
@@ -916,7 +955,7 @@ export default function Products() {
 
                         {isAdmin && (
                           <button
-                            onClick={() => deletePromo(p.id)}
+                            onClick={() => openDeletePromoModal(p)}
                             className="text-red-600 hover:text-red-800"
                           >
                             <Trash2 size={16} />
@@ -1414,6 +1453,61 @@ export default function Products() {
                     : `บันทึก ${bulkRows.filter(r => r.name && r.price_thb > 0 && r.box_id && r.bubble_id).length} โปร`}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-start gap-3">
+              <div className="w-11 h-11 rounded-full bg-red-100 text-red-600 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle size={22} />
+              </div>
+
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-slate-900">ยืนยันการลบสินค้า</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  การลบนี้ไม่สามารถย้อนกลับได้ กรุณาตรวจสอบให้แน่ใจก่อนลบ
+                </p>
+              </div>
+
+              <button
+                onClick={closeDeleteModal}
+                disabled={deleting}
+                className="text-slate-400 hover:text-slate-600 disabled:opacity-40"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-5">
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
+                <p className="text-xs font-medium text-slate-500 mb-1">รายการที่จะลบ</p>
+                <p className="text-sm font-semibold text-slate-900 break-words">{deleteTarget.name}</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  ประเภท: {deleteTarget.type === 'master' ? 'Master Product' : 'Promo Product'}
+                </p>
+              </div>
+            </div>
+
+            <div className="px-5 py-4 bg-slate-50 flex justify-end gap-3">
+              <button
+                onClick={closeDeleteModal}
+                disabled={deleting}
+                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+              >
+                ยกเลิก
+              </button>
+
+              <button
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 flex items-center gap-2"
+              >
+                {deleting ? 'กำลังลบ...' : 'ลบสินค้า'}
+              </button>
             </div>
           </div>
         </div>
