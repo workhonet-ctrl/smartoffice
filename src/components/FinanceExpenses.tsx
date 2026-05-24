@@ -1,8 +1,7 @@
 import { useState, useEffect, type ChangeEvent } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, Search, Trash2, X, Upload, Download } from 'lucide-react';
+import { Plus, Search, Trash2, X, Upload, Download, Truck } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import ShippingPage from './ShippingPage';   // ← เปลี่ยนจาก FlashShippingImport
 
 type ExpRecord = {
   id: string; doc_no: string | null; expense_date: string;
@@ -18,7 +17,13 @@ const EXP_CATS = ['ค่าวัตถุดิบ/สินค้า','ค่
 const fmt = (n:number) => n.toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtDate = (d:string) => new Date(d).toLocaleDateString('th-TH');
 
-export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: string } = {}) {
+export default function FinanceExpenses({
+  initialSubTab,
+  onGoToShippingImport,
+}: {
+  initialSubTab?: string;
+  onGoToShippingImport?: () => void;
+} = {}) {
   const [subTab, setSubTab]   = useState<SubTab>((initialSubTab as SubTab) || 'records');
 
   // sync เมื่อกดเมนูซ้ายบาร์เปลี่ยน tab
@@ -169,6 +174,17 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
     XLSX.writeFile(wb, `Expenses_${dateFrom}_${dateTo}.xlsx`);
   };
 
+  const exportShippingExcel = () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(shippingRows.map(r => ({
+      วันที่: fmtDate(r.date),
+      แหล่งที่มา: r.source === 'flash' ? 'Flash Express' : 'MYORDER',
+      Tracking: r.tracking,
+      ค่าส่ง: r.amount,
+    }))), 'ค่าขนส่ง');
+    XLSX.writeFile(wb, `Shipping_Report_${dateFrom}_${dateTo}.xlsx`);
+  };
+
   const filtered = records.filter(r => {
     const matchCat  = catFilter==='ทั้งหมด' || r.category===catFilter;
     const matchSrch = !search || r.description.toLowerCase().includes(search.toLowerCase()) || (r.doc_no||'').includes(search);
@@ -191,23 +207,21 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
           📢 ค่าโฆษณา <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='ads'?'bg-pink-100 text-pink-700':'bg-slate-200 text-slate-500'}`}>{records.filter(r=>r.category==='ค่าโฆษณา').length}</span>
         </button>
         <button onClick={()=>setSubTab('shipping')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='shipping'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
-          🚚 ค่าขนส่ง <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='shipping'?'bg-blue-100 text-blue-700':'bg-slate-200 text-slate-500'}`}>{records.filter(r=>r.category==='ค่าจัดส่ง').length}</span>
+          🚚 ค่าขนส่ง <span className={`ml-1 px-1.5 py-0.5 rounded-full text-xs ${subTab==='shipping'?'bg-blue-100 text-blue-700':'bg-slate-200 text-slate-500'}`}>{shippingRows.length}</span>
         </button>
         <button onClick={()=>setSubTab('all')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${subTab==='all'?'bg-white shadow text-slate-800':'text-slate-500'}`}>
           📋 ทั้งหมด
         </button>
       </div>
 
-      {/* Date filter — ซ่อนเมื่ออยู่ใน tab ค่าขนส่ง (ShippingPage มี state ของตัวเอง) */}
-      {subTab !== 'shipping' && (
-        <div className="shrink-0 flex gap-2 mb-3 flex-wrap items-center">
-          <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"/>
-          <span className="text-slate-400">–</span>
-          <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"/>
-        </div>
-      )}
+      {/* Date filter */}
+      <div className="shrink-0 flex gap-2 mb-3 flex-wrap items-center">
+        <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
+          className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"/>
+        <span className="text-slate-400">–</span>
+        <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
+          className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"/>
+      </div>
 
       {/* ── Tab: ใบบันทึกรายจ่าย ── */}
       {subTab === 'records' && (
@@ -511,11 +525,126 @@ export default function FinanceExpenses({ initialSubTab }: { initialSubTab?: str
         );
       })()}
 
-      {/* ── Tab: ค่าขนส่ง → ShippingPage (Flash + MYORDER) ──
-          ใช้ hidden แทน && เพื่อไม่ให้ unmount — สลับ tab แล้วกลับมา ข้อมูลไม่หาย */}
-      <div className={`flex-1 min-h-0 flex flex-col -mx-4 -mb-4 ${subTab === 'shipping' ? '' : 'hidden'}`}>
-        <ShippingPage />
-      </div>
+      {/* ── Tab: ค่าขนส่ง — รายงาน/สรุปเท่านั้น ── */}
+      {subTab === 'shipping' && (() => {
+        const q = search.toLowerCase();
+        const tabRows = shippingRows.filter(r =>
+          !q ||
+          r.tracking.toLowerCase().includes(q) ||
+          (r.source === 'flash' ? 'flash express' : 'myorder').includes(q)
+        );
+        const tabTotal = tabRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+        const flashRows = tabRows.filter(r => r.source === 'flash');
+        const myOrderRows = tabRows.filter(r => r.source === 'myorder');
+        const flashTotal = flashRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+        const myOrderTotal = myOrderRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+        return (
+          <>
+            <div className="shrink-0 bg-blue-50 border border-blue-200 rounded-xl p-4 mb-3 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center shrink-0">
+                  <Truck size={20} />
+                </div>
+                <div>
+                  <div className="font-bold text-slate-800">รายงานค่าส่ง</div>
+                  <div className="text-sm text-slate-500 mt-0.5">
+                    หน้านี้ใช้สำหรับตรวจยอดและสรุปบัญชีเท่านั้น หากต้องการอัปโหลดไฟล์ ให้ไปที่เมนูฝ่ายคลังสินค้า
+                  </div>
+                </div>
+              </div>
+
+              {onGoToShippingImport && (
+                <button
+                  onClick={onGoToShippingImport}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium flex items-center justify-center gap-2"
+                >
+                  <Upload size={15} /> ไปหน้านำเข้าค่าขนส่ง
+                </button>
+              )}
+            </div>
+
+            <div className="shrink-0 flex gap-3 mb-3 flex-wrap items-center">
+              <div className="rounded-xl px-4 py-3 border bg-blue-50 border-blue-200">
+                <div className="text-xs text-slate-500 font-semibold mb-0.5">ค่าส่งรวม</div>
+                <div className="text-xl font-bold text-blue-700">฿{fmt(tabTotal)}</div>
+                <div className="text-xs text-slate-400">{tabRows.length} tracking</div>
+              </div>
+
+              <div className="rounded-xl px-4 py-3 border bg-orange-50 border-orange-200">
+                <div className="text-xs text-slate-500 font-semibold mb-0.5">Flash Express</div>
+                <div className="text-xl font-bold text-orange-700">฿{fmt(flashTotal)}</div>
+                <div className="text-xs text-slate-400">{flashRows.length} tracking</div>
+              </div>
+
+              <div className="rounded-xl px-4 py-3 border bg-purple-50 border-purple-200">
+                <div className="text-xs text-slate-500 font-semibold mb-0.5">MYORDER</div>
+                <div className="text-xl font-bold text-purple-700">฿{fmt(myOrderTotal)}</div>
+                <div className="text-xs text-slate-400">{myOrderRows.length} tracking</div>
+              </div>
+
+              <div className="relative">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                <input value={search} onChange={e=>setSearch(e.target.value)}
+                  placeholder="ค้นหา Tracking..."
+                  className="pl-8 pr-3 py-2 border rounded-lg text-xs w-56 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+              </div>
+
+              <button
+                onClick={exportShippingExcel}
+                className="px-3 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center gap-2 text-sm"
+              >
+                <Download size={13}/> Export รายงาน
+              </button>
+            </div>
+
+            <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+              <table className="text-sm w-full" style={{minWidth:'650px'}}>
+                <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0">
+                  <tr>
+                    <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                    <th className="p-3 text-left whitespace-nowrap">แหล่งที่มา</th>
+                    <th className="p-3 text-left whitespace-nowrap">Tracking</th>
+                    <th className="p-3 text-right whitespace-nowrap">ค่าส่ง (฿)</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {tabRows.length===0 && (
+                    <tr>
+                      <td colSpan={4} className="p-8 text-center text-slate-400">ไม่มีข้อมูลค่าส่งในช่วงนี้</td>
+                    </tr>
+                  )}
+
+                  {tabRows.map(r=>(
+                    <tr key={`${r.source}-${r.id}`} className="border-b hover:bg-blue-50">
+                      <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{fmtDate(r.date)}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                          r.source === 'flash'
+                            ? 'bg-orange-100 text-orange-700'
+                            : 'bg-purple-100 text-purple-700'
+                        }`}>
+                          {r.source === 'flash' ? 'Flash Express' : 'MYORDER'}
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono text-xs text-blue-600">{r.tracking}</td>
+                      <td className="p-3 text-right font-bold text-blue-700">฿{fmt(Number(r.amount))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+
+                <tfoot className="bg-slate-50 border-t-2 sticky bottom-0">
+                  <tr>
+                    <td colSpan={3} className="p-3 text-right font-semibold text-slate-600">รวม {tabRows.length} tracking</td>
+                    <td className="p-3 text-right font-bold text-blue-700 text-base">฿{fmt(tabTotal)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </>
+        );
+      })()}
 
       {/* Modal เพิ่มรายจ่าย */}
       {showModal && (
