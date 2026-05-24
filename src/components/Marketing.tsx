@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { calcPromoMargin, CLS_INPUT, CLS_SELECT } from '../lib/utils';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/AuthProvider';
 import { usePromoShipAvg } from '../lib/useShipCostMap';
 import GraphicBoard from './GraphicBoard';
 import GraphicTasks from './GraphicTasks';
@@ -55,10 +56,28 @@ export default function Marketing({ page }: { page: MarketingPage }) {
 
 // ── ADS Module ────────────────────────────────────────────────────────────
 function AdsModule() {
+  const { user } = useAuth();
+  const role = user?.app_metadata?.role || user?.user_metadata?.role;
+  const isAdmin = role === 'admin';
+  const isFinance = role === 'finance';
+  const isHr = role === 'hr';
+  const canAccessFinanceExpense = isAdmin || isFinance;
+  const canAccessEmployeeData = isAdmin || isHr;
+
   const [sub, setSub] = useState<AdsSub>('board');
   const [subOpen, setSubOpen] = useState(false); // mobile drawer
 
   const groups = ['', 'สินค้า', 'ลงค่าโฆษณา', 'จัดการข้อมูล'];
+  const visibleAdsMenu = useMemo(() => ADS_MENU.filter(item => {
+    if (item.key === 'expense-receipt' || item.key === 'expense-daily') return canAccessFinanceExpense;
+    if (item.key === 'data') return canAccessEmployeeData;
+    return true;
+  }), [canAccessFinanceExpense, canAccessEmployeeData]);
+
+  useEffect(() => {
+    const canSeeCurrentSub = visibleAdsMenu.some(item => item.key === sub);
+    if (!canSeeCurrentSub) setSub('board');
+  }, [sub, visibleAdsMenu]);
 
   return (
     <div className="flex h-screen overflow-hidden relative">
@@ -90,7 +109,7 @@ function AdsModule() {
         </div>
         <div className="flex-1 overflow-y-auto px-2">
           {groups.map(group => {
-            const items = ADS_MENU.filter(m => (m.group || '') === group);
+            const items = visibleAdsMenu.filter(m => (m.group || '') === group);
             if (items.length === 0) return null;
             return (
               <div key={group} className="mb-3">
@@ -119,9 +138,9 @@ function AdsModule() {
         {sub === 'report'          && <AdsReport />}
         {sub === 'add-product'     && <Products />}
         {sub === 'product-list'    && <AdsProductList />}
-        {sub === 'expense-receipt' && <AdsExpenseReceipt />}
-        {sub === 'expense-daily'   && <AdsExpenseDaily />}
-        {sub === 'data'            && <AdsData />}
+        {sub === 'expense-receipt' && canAccessFinanceExpense && <AdsExpenseReceipt />}
+        {sub === 'expense-daily'   && canAccessFinanceExpense && <AdsExpenseDaily />}
+        {sub === 'data'            && canAccessEmployeeData && <AdsData />}
       </div>
     </div>
   );
