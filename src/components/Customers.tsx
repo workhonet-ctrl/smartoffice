@@ -887,26 +887,12 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         unmapped: unmappedProds,
       });
 
-      if (unmappedProds.length > 0) {
-        // โหลด promo options แล้วเปิด modal ให้ user จับคู่เอง
-        const { data: promos } = await supabase
-          .from('products_promo')
-          .select('id, name, short_name, price_thb, products_master(name)')
-          .eq('active', true)
-          .order('id');
-        setPromoOptions((promos || []).map((p: any) => ({
-          ...p,
-          master_name: p.products_master?.name || '',
-        })));
-        setUnmappedList(unmappedProds);
-        const defaults: Record<string, string> = {};
-        unmappedProds.forEach(({name}) => { defaults[name] = ''; });
-        setMappingSelects(defaults);
-        setShowMappingModal(true);
-        showToast(`✓ นำเข้าสำเร็จ · พบสินค้า ${unmappedProds.length} รายการยังไม่มีในระบบ`, 'warning');
-      } else {
-        showToast(`✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded} ข้าม ${orderSkipped}`);
-      }
+      // ไม่เปิด modal จับคู่สินค้าอีกรอบหลัง import แล้ว
+      // เพราะรอบนี้ให้ยึดรายการที่ผู้ใช้เลือกเองในหน้า “ตรวจสอบรอบสุดท้ายก่อน Import” เป็นหลัก
+      // ถ้าออเดอร์ไหนไม่มีสินค้าที่เลือกจริง ๆ จะถูกข้ามเฉพาะออเดอร์นั้น
+      showToast(
+        `✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded} ข้าม ${orderSkipped}`
+      );
       loadCustomers();
     } catch (err) {
       console.error(err);
