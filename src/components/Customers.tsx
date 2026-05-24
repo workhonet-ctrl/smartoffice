@@ -654,8 +654,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const handleConfirmImport = async () => {
     if (!pendingImportData) return;
     const { dataRows, unmappedProds, e } = pendingImportData;
-    // ใช้ previewMappingSelects เป็น autoPromoMap ที่ user แก้ไขแล้ว
-    const finalPromoMap = { ...previewMappingSelects };
+    // ใช้รายการใน previewOrderRows เป็นตัวจริงในการ import
     setShowPreviewModal(false);
     setPendingImportData(null);
     setImporting(true); setImportResult(null);
@@ -732,8 +731,12 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // ── Step 5: batch insert orders ────────────────────────────────────
       const ordersToInsert: any[] = [];
       let orderSkipped = 0;
+      const currentPreviewRows = previewOrderRowsRef.current.length > 0
+        ? previewOrderRowsRef.current
+        : previewOrderRows;
 
-      for (const row of dataRows) {
+      for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
+        const row = dataRows[rowIndex];
         const orderNo = String(row[1]||'').trim();
         if (!orderNo) continue;
         if (existingOrderSet.has(orderNo)) { orderSkipped++; continue; }
@@ -741,6 +744,22 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const tel = String(row[6]||'').trim();
         const customerId = telToId[tel];
         if (!customerId) continue;
+
+        // ใช้รายการสินค้าที่ผู้ใช้จับคู่/เพิ่มเองในหน้า Preview เป็นหลัก
+        // เพื่อรองรับเคสไม่มีโปรตรงตัว เช่น สั่ง 4 กระป๋อง → เลือกโปร 2 กระป๋อง x2 เอง
+        const previewRow = currentPreviewRows[rowIndex];
+        const selectedPromos = (previewRow?.mappedPromos || [])
+          .filter((mp: any) => mp?.promoId)
+          .map((mp: any) => ({
+            promoId: mp.promoId,
+            promo: mp.promo,
+            qty: Number(mp.qty) || 1,
+          }));
+
+        if (selectedPromos.length === 0) {
+          orderSkipped++;
+          continue;
+        }
 
         const rawDate  = String(row[3]||'');
         // รองรับ format "2026-05-06 13.03" (dot แทน colon) — replace dot-time ให้เป็น colon
@@ -765,9 +784,8 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           else courier=courierMatch[1];
         }
 
-        const rawProds = String(row[14]||'').split('|').map((s:string)=>s.trim()).filter(Boolean);
-        const promoIds = rawProds.map(rp=>finalPromoMap[rp]||'').filter(Boolean);
-        const quantities = String(row[15]||'1');
+        const promoIds = selectedPromos.map((item: any) => item.promoId);
+        const quantities = selectedPromos.map((item: any) => String(item.qty || 1)).join('|');
         // col[16] = น้ำหนัก (กก.) — ไฟล์ระบุหน่วย กก. อยู่แล้ว (ค่า 1, 1.5, 2 = กก.)
         // ถ้าค่า >= 100 ถือว่าเป็น กรัม → /1000, ถ้าน้อยกว่าใช้ตรงๆ
         const weightRaw = Number(row[16]) || 0;
@@ -785,9 +803,17 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           order_no: orderNo, customer_id: customerId,
           channel: String(row[2]||'').trim()||null,
           order_date: orderDate, order_time: orderTime||null,
-          raw_prod: String(row[14]||'').trim()||null,
+          raw_prod: selectedPromos.map((item: any) => {
+            const promo = item.promo;
+            const productName = (promo?.short_name || promo?.master_name || '').trim();
+            const promoName = (promo?.name || '').trim();
+            const displayName = productName && promoName
+              ? `${productName} ${promoName}`
+              : (productName || promoName || item.promoId);
+            return item.qty > 1 ? `${displayName} x${item.qty}` : displayName;
+          }).join('|') || String(row[14]||'').trim() || null,
           promo_ids: promoIds,
-          quantity: quantities.split('|').reduce((s:number,n:string)=>s+(Number(n.trim())||1),0),
+          quantity: selectedPromos.reduce((s: number, item: any) => s + (Number(item.qty) || 1), 0),
           quantities, weight_kg: weightKg,
           tracking_no: hasTrack?trackingNo:null,
           courier: courier||null,
@@ -2068,7 +2094,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                     <div className="absolute top-full left-0 right-0 bg-white border rounded-lg shadow-xl z-50 max-h-44 overflow-auto mt-0.5">
                                       {promoOptions
                                         .filter((p:any) => {
-                                          const s = (previewSearch[`${idx}-${mi}`]||'').toLowerCase();
+                                          const s = (previewSearch[`${origIdx}-${mi}`]||'').toLowerCase();
                                           if (!s) return true;
                                           return (p.short_name||'').toLowerCase().includes(s)
                                             || (p.name||'').toLowerCase().includes(s)
@@ -2078,7 +2104,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                           <button key={p.id}
                                             onMouseDown={() => {
                                               setPreviewOrderRows(prev => prev.map((r, ri) => {
-                                                if (ri !== idx) return r;
+                                                if (ri !== origIdx) return r;
                                                 const newPromos = r.mappedPromos.map((m:any, mj:number) => {
                                                   if (mj !== mi) return m;
                                                   return { ...m, promoId: p.id, promo: p };
