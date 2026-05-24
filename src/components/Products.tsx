@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/AuthProvider';
 import { Plus, CreditCard as Edit2, Trash2, X, Search } from 'lucide-react';
 
 // ── Searchable Dropdown สำหรับกล่อง/บั้บเบิ้ล/ประเภท ──
@@ -12,32 +13,55 @@ function SearchableDropdown({ options, value, onChange, placeholder }: {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
+
   const selected = options.find(o => o.value === value);
   const filtered = options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()));
+
   return (
     <div ref={ref} className="relative">
-      <button type="button" onClick={() => { setOpen(v => !v); setQ(''); }}
-        className={`w-full text-left border rounded px-3 py-2 text-sm flex items-center justify-between ${selected ? 'text-slate-800' : 'text-slate-400'}`}>
+      <button
+        type="button"
+        onClick={() => { setOpen(v => !v); setQ(''); }}
+        className={`w-full text-left border rounded px-3 py-2 text-sm flex items-center justify-between ${selected ? 'text-slate-800' : 'text-slate-400'}`}
+      >
         <span className="truncate">{selected ? selected.label : (placeholder || 'เลือก...')}</span>
         <span className="text-slate-400 ml-1">▼</span>
       </button>
+
       {open && (
         <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg">
           <div className="p-2 border-b flex items-center gap-2 bg-slate-50 rounded-t-lg">
-            <Search size={13} className="text-slate-400"/>
-            <input autoFocus type="text" value={q} onChange={e => setQ(e.target.value)}
-              placeholder="พิมพ์เพื่อค้นหา..." className="flex-1 text-sm bg-transparent outline-none"/>
+            <Search size={13} className="text-slate-400" />
+            <input
+              autoFocus
+              type="text"
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="พิมพ์เพื่อค้นหา..."
+              className="flex-1 text-sm bg-transparent outline-none"
+            />
           </div>
+
           <div className="max-h-44 overflow-y-auto">
-            {filtered.length === 0 && <div className="p-3 text-xs text-slate-400 text-center">ไม่พบ</div>}
+            {filtered.length === 0 && (
+              <div className="p-3 text-xs text-slate-400 text-center">ไม่พบ</div>
+            )}
+
             {filtered.map(o => (
-              <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
-                className={`w-full text-left px-3 py-2 text-sm hover:bg-cyan-50 ${value === o.value ? 'bg-cyan-50 font-semibold' : ''}`}>
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => { onChange(o.value); setOpen(false); }}
+                className={`w-full text-left px-3 py-2 text-sm hover:bg-cyan-50 ${value === o.value ? 'bg-cyan-50 font-semibold' : ''}`}
+              >
                 {o.label}
               </button>
             ))}
@@ -207,6 +231,7 @@ function getNextMasterId(masters: ProductMaster[]) {
   const nums = masters
     .map((m) => Number(String(m.id).replace(/^M/i, '')))
     .filter((n) => !Number.isNaN(n));
+
   const next = (nums.length ? Math.max(...nums) : 0) + 1;
   return `M${String(next).padStart(4, '0')}`;
 }
@@ -223,6 +248,7 @@ function buildPromoId(masterId: string, suffix: number) {
 
 function getNextPromoId(promos: ProductPromoRow[], masterId: string) {
   const masterNum = masterId.replace(/^M/i, '').padStart(4, '0');
+
   const matched = promos
     .filter((p) => String(p.id).startsWith(`P${masterNum}-`))
     .map((p) => {
@@ -238,14 +264,23 @@ function getNextPromoId(promos: ProductPromoRow[], masterId: string) {
 function extractQty(promoName: string): number {
   const tamMatch = promoName.match(/(\d+)\s*แถม\s*(\d+)/);
   if (tamMatch) return parseInt(tamMatch[1]) + parseInt(tamMatch[2]);
+
   const unitMatch = promoName.match(/\(?\s*(\d+)\s*(?:กระป๋อง|ชิ้น|แพ็ค|ซอง|กล่อง|ขวด|ถุง|อัน)/i);
   if (unitMatch) return parseInt(unitMatch[1]);
+
   const firstNum = promoName.match(/(\d+)/);
   if (firstNum) return parseInt(firstNum[1]);
+
   return 1;
 }
 
 export default function Products() {
+  const { user } = useAuth();
+
+  const isAdmin =
+    user?.app_metadata?.role === 'admin' ||
+    user?.user_metadata?.role === 'admin';
+
   const [masters, setMasters] = useState<ProductMaster[]>([]);
   const [promos, setPromos] = useState<ProductPromoRow[]>([]);
   const [boxes, setBoxes] = useState<Box[]>([]);
@@ -262,16 +297,36 @@ export default function Products() {
 
   // Bulk add state
   const [bulkMasterId, setBulkMasterId] = useState('');
-  type BulkRow = { name: string; short_name: string; price_thb: number; box_id: string; bubble_id: string; item_type: string };
-  const emptyBulkRow: BulkRow = { name: '', short_name: '', price_thb: 0, box_id: '', bubble_id: '', item_type: 'พัสดุ' };
+
+  type BulkRow = {
+    name: string;
+    short_name: string;
+    price_thb: number;
+    box_id: string;
+    bubble_id: string;
+    item_type: string;
+  };
+
+  const emptyBulkRow: BulkRow = {
+    name: '',
+    short_name: '',
+    price_thb: 0,
+    box_id: '',
+    bubble_id: '',
+    item_type: 'พัสดุ',
+  };
+
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([{ ...emptyBulkRow }]);
   const [bulkSaving, setBulkSaving] = useState(false);
+
   // Toast notification
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
+
   // Search
   const [searchMaster, setSearchMaster] = useState('');
   const [searchPromo, setSearchPromo] = useState('');
@@ -437,18 +492,21 @@ export default function Products() {
           const { error: insertError } = await supabase
             .from('products_promo')
             .insert([payload]);
+
           if (insertError) throw insertError;
 
           const { error: mappingError } = await supabase
             .from('product_mappings')
             .update({ promo_id: newId })
             .eq('promo_id', oldId);
+
           if (mappingError) throw mappingError;
 
           const { error: deleteOldError } = await supabase
             .from('products_promo')
             .delete()
             .eq('id', oldId);
+
           if (deleteOldError) throw deleteOldError;
         }
       } else {
@@ -464,6 +522,7 @@ export default function Products() {
           [{ raw_name: payload.name.trim(), promo_id: payload.id }],
           { onConflict: 'raw_name' }
         );
+
       if (mapErr) console.warn('mapping upsert warning:', mapErr.message);
 
       setShowPromoForm(false);
@@ -479,35 +538,69 @@ export default function Products() {
 
   // ── Bulk Save ──
   const saveBulkPromos = async () => {
-    if (!bulkMasterId) { showToast('กรุณาเลือก Master Product', 'error'); return; }
-    const validRows = bulkRows.filter(r => r.name.trim() && r.price_thb > 0 && r.box_id && r.bubble_id);
-    if (validRows.length === 0) { showToast('กรุณากรอกข้อมูลอย่างน้อย 1 แถวให้ครบ', 'error'); return; }
+    if (!bulkMasterId) {
+      showToast('กรุณาเลือก Master Product', 'error');
+      return;
+    }
+
+    const validRows = bulkRows.filter(
+      r => r.name.trim() && r.price_thb > 0 && r.box_id && r.bubble_id
+    );
+
+    if (validRows.length === 0) {
+      showToast('กรุณากรอกข้อมูลอย่างน้อย 1 แถวให้ครบ', 'error');
+      return;
+    }
+
     setBulkSaving(true);
+
     try {
-      // ดึง promos ล่าสุดเพื่อนับ suffix
-      const { data: latestPromos } = await supabase.from('products_promo').select('id').order('id', { ascending: true });
-      const currentPromos = (latestPromos || []) as { id: string }[];
       let insertCount = 0;
+
       for (const row of validRows) {
-        const nextId = getNextPromoId([...promos, ...currentPromos.map(p => ({ ...p, master_id: '', name: '', short_name: null, price_thb: 0, box_id: null, bubble_id: null, color: null, item_type: null, active: true, boxes: null, bubbles: null }))], bulkMasterId);
         // re-fetch each iteration to avoid duplicate id
-        const { data: freshPromos } = await supabase.from('products_promo').select('id').eq('master_id', bulkMasterId);
-        const freshId = getNextPromoId((freshPromos || []).map((p: any) => ({ ...p, master_id: bulkMasterId, name: '', short_name: null, price_thb: 0, box_id: null, bubble_id: null, color: null, item_type: null, active: true, boxes: null, bubbles: null })), bulkMasterId);
-        const { error } = await supabase.from('products_promo').insert([{
-          id: freshId,
-          master_id: bulkMasterId,
-          name: row.name.trim(),
-          short_name: row.short_name.trim() || null,
-          price_thb: Number(row.price_thb) || 0,
-          box_id: row.box_id || null,
-          bubble_id: row.bubble_id || null,
-          color: 'ไม่มี',
-          item_type: row.item_type || 'พัสดุ',
-        }]);
+        const { data: freshPromos } = await supabase
+          .from('products_promo')
+          .select('id')
+          .eq('master_id', bulkMasterId);
+
+        const freshId = getNextPromoId(
+          (freshPromos || []).map((p: any) => ({
+            ...p,
+            master_id: bulkMasterId,
+            name: '',
+            short_name: null,
+            price_thb: 0,
+            box_id: null,
+            bubble_id: null,
+            color: null,
+            item_type: null,
+            active: true,
+            boxes: null,
+            bubbles: null,
+          })),
+          bulkMasterId
+        );
+
+        const { error } = await supabase.from('products_promo').insert([
+          {
+            id: freshId,
+            master_id: bulkMasterId,
+            name: row.name.trim(),
+            short_name: row.short_name.trim() || null,
+            price_thb: Number(row.price_thb) || 0,
+            box_id: row.box_id || null,
+            bubble_id: row.bubble_id || null,
+            color: 'ไม่มี',
+            item_type: row.item_type || 'พัสดุ',
+          },
+        ]);
+
         if (error) {
           console.error('insert error:', error);
         } else {
           insertCount++;
+
           // upsert mapping → trigger remap orders
           await supabase
             .from('product_mappings')
@@ -517,6 +610,7 @@ export default function Products() {
             );
         }
       }
+
       showToast(`✓ บันทึกสำเร็จ ${insertCount} โปร และ sync ออเดอร์แล้ว`);
       setShowBulkForm(false);
       setBulkMasterId('');
@@ -531,11 +625,18 @@ export default function Products() {
   };
 
   const deleteMaster = async (id: string) => {
+    if (!isAdmin) {
+      alert('permission denied');
+      return;
+    }
+
     const hasPromos = promos.some((p) => p.master_id === id);
+
     if (hasPromos) {
       alert('ไม่สามารถลบ M ได้ เนื่องจากยังมี P ที่ผูกอยู่');
       return;
     }
+
     if (!confirm('ยืนยันการลบ?')) return;
 
     try {
@@ -549,6 +650,11 @@ export default function Products() {
   };
 
   const deletePromo = async (id: string) => {
+    if (!isAdmin) {
+      alert('permission denied');
+      return;
+    }
+
     if (!confirm('ยืนยันการลบ?')) return;
 
     try {
@@ -579,6 +685,7 @@ export default function Products() {
     <div className="p-6">
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-slate-800 mb-4">จัดการสินค้า</h2>
+
         <div className="flex gap-3">
           <button
             onClick={openAddMasterForm}
@@ -586,14 +693,20 @@ export default function Products() {
           >
             <Plus size={20} /> เพิ่ม Master (M)
           </button>
+
           <button
             onClick={openAddPromoForm}
             className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center gap-2"
           >
             <Plus size={20} /> เพิ่ม Promo (P)
           </button>
+
           <button
-            onClick={() => { setShowBulkForm(true); setBulkMasterId(''); setBulkRows([{ ...emptyBulkRow }]); }}
+            onClick={() => {
+              setShowBulkForm(true);
+              setBulkMasterId('');
+              setBulkRows([{ ...emptyBulkRow }]);
+            }}
             className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 flex items-center gap-2"
           >
             <Plus size={20} /> เพิ่มหลายโปรพร้อมกัน
@@ -603,18 +716,37 @@ export default function Products() {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* ── Master Products ── */}
-        <div className="bg-white rounded-xl shadow p-4 flex flex-col" style={{maxHeight:'calc(100vh - 220px)', minHeight:'300px'}}>
+        <div
+          className="bg-white rounded-xl shadow p-4 flex flex-col"
+          style={{ maxHeight: 'calc(100vh - 220px)', minHeight: '300px' }}
+        >
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-lg font-bold text-cyan-600">Master Products (M)</h3>
-            <span className="text-xs text-slate-400">{masters.filter(m => !searchMaster || m.id.toLowerCase().includes(searchMaster.toLowerCase()) || m.name.toLowerCase().includes(searchMaster.toLowerCase())).length} รายการ</span>
+            <span className="text-xs text-slate-400">
+              {
+                masters.filter(
+                  m =>
+                    !searchMaster ||
+                    m.id.toLowerCase().includes(searchMaster.toLowerCase()) ||
+                    m.name.toLowerCase().includes(searchMaster.toLowerCase())
+                ).length
+              }{' '}
+              รายการ
+            </span>
           </div>
+
           {/* Search */}
           <div className="relative mb-3">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
-            <input type="text" value={searchMaster} onChange={e => setSearchMaster(e.target.value)}
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchMaster}
+              onChange={e => setSearchMaster(e.target.value)}
               placeholder="ค้นหา รหัส M หรือชื่อสินค้า..."
-              className="w-full pl-8 pr-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-200"/>
+              className="w-full pl-8 pr-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-200"
+            />
           </div>
+
           {/* Table */}
           <div className="overflow-auto flex-1">
             <table className="w-full text-sm">
@@ -627,23 +759,61 @@ export default function Products() {
                   <th className="p-2 text-center whitespace-nowrap">จัดการ</th>
                 </tr>
               </thead>
+
               <tbody>
                 {masters
-                  .filter(m => !searchMaster || m.id.toLowerCase().includes(searchMaster.toLowerCase()) || m.name.toLowerCase().includes(searchMaster.toLowerCase()))
+                  .filter(
+                    m =>
+                      !searchMaster ||
+                      m.id.toLowerCase().includes(searchMaster.toLowerCase()) ||
+                      m.name.toLowerCase().includes(searchMaster.toLowerCase())
+                  )
                   .map((m) => (
-                  <tr key={m.id} className="border-b hover:bg-slate-50">
-                    <td className="p-2 font-mono text-xs">{m.id}</td>
-                    <td className="p-2">{m.name}</td>
-                    <td className="p-2 text-right">{Number(m.cost_thb).toLocaleString()}</td>
-                    <td className="p-2 text-right">{m.weight_g}</td>
-                    <td className="p-2 text-center">
-                      <button onClick={() => { setEditingMaster(m); setMasterForm({ id: m.id, name: m.name, cost_thb: Number(m.cost_thb) || 0, weight_g: Number(m.weight_g) || 0 }); setShowMasterForm(true); }} className="text-blue-600 hover:text-blue-800 mr-2"><Edit2 size={16}/></button>
-                      <button onClick={() => deleteMaster(m.id)} className="text-red-600 hover:text-red-800"><Trash2 size={16}/></button>
+                    <tr key={m.id} className="border-b hover:bg-slate-50">
+                      <td className="p-2 font-mono text-xs">{m.id}</td>
+                      <td className="p-2">{m.name}</td>
+                      <td className="p-2 text-right">{Number(m.cost_thb).toLocaleString()}</td>
+                      <td className="p-2 text-right">{m.weight_g}</td>
+                      <td className="p-2 text-center">
+                        <button
+                          onClick={() => {
+                            setEditingMaster(m);
+                            setMasterForm({
+                              id: m.id,
+                              name: m.name,
+                              cost_thb: Number(m.cost_thb) || 0,
+                              weight_g: Number(m.weight_g) || 0,
+                            });
+                            setShowMasterForm(true);
+                          }}
+                          className="text-blue-600 hover:text-blue-800 mr-2"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+
+                        {isAdmin && (
+                          <button
+                            onClick={() => deleteMaster(m.id)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+
+                {masters.filter(
+                  m =>
+                    !searchMaster ||
+                    m.id.toLowerCase().includes(searchMaster.toLowerCase()) ||
+                    m.name.toLowerCase().includes(searchMaster.toLowerCase())
+                ).length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="p-4 text-center text-slate-400 text-sm">
+                      ไม่พบสินค้า
                     </td>
                   </tr>
-                ))}
-                {masters.filter(m => !searchMaster || m.id.toLowerCase().includes(searchMaster.toLowerCase()) || m.name.toLowerCase().includes(searchMaster.toLowerCase())).length === 0 && (
-                  <tr><td colSpan={5} className="p-4 text-center text-slate-400 text-sm">ไม่พบสินค้า</td></tr>
                 )}
               </tbody>
             </table>
@@ -651,18 +821,38 @@ export default function Products() {
         </div>
 
         {/* ── Promo Products ── */}
-        <div className="bg-white rounded-xl shadow p-4 flex flex-col" style={{maxHeight:'calc(100vh - 220px)', minHeight:'300px'}}>
+        <div
+          className="bg-white rounded-xl shadow p-4 flex flex-col"
+          style={{ maxHeight: 'calc(100vh - 220px)', minHeight: '300px' }}
+        >
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-lg font-bold text-green-600">Promo Products (P)</h3>
-            <span className="text-xs text-slate-400">{promos.filter(p => !searchPromo || p.id.toLowerCase().includes(searchPromo.toLowerCase()) || p.name.toLowerCase().includes(searchPromo.toLowerCase()) || (p.short_name || '').toLowerCase().includes(searchPromo.toLowerCase())).length} รายการ</span>
+            <span className="text-xs text-slate-400">
+              {
+                promos.filter(
+                  p =>
+                    !searchPromo ||
+                    p.id.toLowerCase().includes(searchPromo.toLowerCase()) ||
+                    p.name.toLowerCase().includes(searchPromo.toLowerCase()) ||
+                    (p.short_name || '').toLowerCase().includes(searchPromo.toLowerCase())
+                ).length
+              }{' '}
+              รายการ
+            </span>
           </div>
+
           {/* Search */}
           <div className="relative mb-3">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
-            <input type="text" value={searchPromo} onChange={e => setSearchPromo(e.target.value)}
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchPromo}
+              onChange={e => setSearchPromo(e.target.value)}
               placeholder="ค้นหา รหัส P ชื่อโปร หรือชื่อสั้น..."
-              className="w-full pl-8 pr-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-200"/>
+              className="w-full pl-8 pr-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-200"
+            />
           </div>
+
           {/* Table */}
           <div className="overflow-auto flex-1">
             <table className="w-full text-sm">
@@ -678,28 +868,76 @@ export default function Products() {
                   <th className="p-2 text-center whitespace-nowrap">จัดการ</th>
                 </tr>
               </thead>
+
               <tbody>
                 {promos
-                  .filter(p => !searchPromo || p.id.toLowerCase().includes(searchPromo.toLowerCase()) || p.name.toLowerCase().includes(searchPromo.toLowerCase()) || (p.short_name || '').toLowerCase().includes(searchPromo.toLowerCase()))
+                  .filter(
+                    p =>
+                      !searchPromo ||
+                      p.id.toLowerCase().includes(searchPromo.toLowerCase()) ||
+                      p.name.toLowerCase().includes(searchPromo.toLowerCase()) ||
+                      (p.short_name || '').toLowerCase().includes(searchPromo.toLowerCase())
+                  )
                   .map((p) => (
-                  <tr key={p.id} className="border-b hover:bg-slate-50">
-                    <td className="p-2 font-mono text-xs">{p.id}</td>
-                    <td className="p-2 max-w-[160px] truncate">{p.name}</td>
-                    <td className="p-2 text-slate-500 text-xs">{p.short_name || '-'}</td>
-                    <td className="p-2 text-center">
-                      <span className="px-2 py-0.5 bg-slate-100 rounded-full text-xs font-bold text-slate-700">{extractQty(p.name)}</span>
-                    </td>
-                    <td className="p-2 text-right font-medium">{Number(p.price_thb).toLocaleString()}</td>
-                    <td className="p-2 text-xs whitespace-nowrap">{p.boxes?.name || '-'}</td>
-                    <td className="p-2 text-xs whitespace-nowrap">{p.bubbles?.name || '-'}</td>
-                    <td className="p-2 text-center whitespace-nowrap">
-                      <button onClick={() => { setEditingPromo(p); setPromoForm({ id: p.id, master_id: p.master_id, name: p.name, short_name: p.short_name || '', price_thb: Number(p.price_thb) || 0, ship_thb: Number((p as any).ship_thb) || 0, box_id: p.box_id || '', bubble_id: p.bubble_id || '', color: p.color || '', item_type: p.item_type || 'อื่นๆ' }); setShowPromoForm(true); }} className="text-blue-600 hover:text-blue-800 mr-2"><Edit2 size={16}/></button>
-                      <button onClick={() => deletePromo(p.id)} className="text-red-600 hover:text-red-800"><Trash2 size={16}/></button>
+                    <tr key={p.id} className="border-b hover:bg-slate-50">
+                      <td className="p-2 font-mono text-xs">{p.id}</td>
+                      <td className="p-2 max-w-[160px] truncate">{p.name}</td>
+                      <td className="p-2 text-slate-500 text-xs">{p.short_name || '-'}</td>
+                      <td className="p-2 text-center">
+                        <span className="px-2 py-0.5 bg-slate-100 rounded-full text-xs font-bold text-slate-700">
+                          {extractQty(p.name)}
+                        </span>
+                      </td>
+                      <td className="p-2 text-right font-medium">{Number(p.price_thb).toLocaleString()}</td>
+                      <td className="p-2 text-xs whitespace-nowrap">{p.boxes?.name || '-'}</td>
+                      <td className="p-2 text-xs whitespace-nowrap">{p.bubbles?.name || '-'}</td>
+                      <td className="p-2 text-center whitespace-nowrap">
+                        <button
+                          onClick={() => {
+                            setEditingPromo(p);
+                            setPromoForm({
+                              id: p.id,
+                              master_id: p.master_id,
+                              name: p.name,
+                              short_name: p.short_name || '',
+                              price_thb: Number(p.price_thb) || 0,
+                              ship_thb: Number((p as any).ship_thb) || 0,
+                              box_id: p.box_id || '',
+                              bubble_id: p.bubble_id || '',
+                              color: p.color || '',
+                              item_type: p.item_type || 'อื่นๆ',
+                            });
+                            setShowPromoForm(true);
+                          }}
+                          className="text-blue-600 hover:text-blue-800 mr-2"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+
+                        {isAdmin && (
+                          <button
+                            onClick={() => deletePromo(p.id)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+
+                {promos.filter(
+                  p =>
+                    !searchPromo ||
+                    p.id.toLowerCase().includes(searchPromo.toLowerCase()) ||
+                    p.name.toLowerCase().includes(searchPromo.toLowerCase()) ||
+                    (p.short_name || '').toLowerCase().includes(searchPromo.toLowerCase())
+                ).length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="p-4 text-center text-slate-400 text-sm">
+                      ไม่พบสินค้า
                     </td>
                   </tr>
-                ))}
-                {promos.filter(p => !searchPromo || p.id.toLowerCase().includes(searchPromo.toLowerCase()) || p.name.toLowerCase().includes(searchPromo.toLowerCase()) || (p.short_name || '').toLowerCase().includes(searchPromo.toLowerCase())).length === 0 && (
-                  <tr><td colSpan={8} className="p-4 text-center text-slate-400 text-sm">ไม่พบสินค้า</td></tr>
                 )}
               </tbody>
             </table>
@@ -712,6 +950,7 @@ export default function Products() {
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">{editingMaster ? 'แก้ไข' : 'เพิ่ม'} Master Product</h3>
+
               <button
                 onClick={() => {
                   setShowMasterForm(false);
@@ -766,7 +1005,10 @@ export default function Products() {
                 />
               </div>
 
-              <button onClick={saveMaster} className="w-full bg-cyan-500 text-white py-2 rounded hover:bg-cyan-600">
+              <button
+                onClick={saveMaster}
+                className="w-full bg-cyan-500 text-white py-2 rounded hover:bg-cyan-600"
+              >
                 บันทึก
               </button>
             </div>
@@ -779,6 +1021,7 @@ export default function Products() {
           <div className="bg-white rounded-lg p-6 max-w-md w-full max-h-screen overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">{editingPromo ? 'แก้ไข' : 'เพิ่ม'} Promo Product</h3>
+
               <button
                 onClick={() => {
                   setShowPromoForm(false);
@@ -800,6 +1043,7 @@ export default function Products() {
                     const masterId = e.target.value;
 
                     let nextId = '';
+
                     if (masterId) {
                       if (editingPromo) {
                         const suffix = getPromoSuffixFromId(promoForm.id || editingPromo.id);
@@ -846,15 +1090,17 @@ export default function Products() {
                   className="w-full border rounded px-3 py-2"
                   placeholder="เช่น นมถั่วสุขภาพ 3 กระป๋อง / 1 แถม 1"
                 />
-                {/* แสดงจำนวนที่ตรวจพบ real-time */}
+
                 {promoForm.name && (
                   <div className="mt-1.5 flex items-center gap-2">
                     <span className="text-xs text-slate-500">จำนวนที่ตรวจพบ:</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                      extractQty(promoForm.name) > 1
-                        ? 'bg-cyan-100 text-cyan-700'
-                        : 'bg-orange-100 text-orange-600'
-                    }`}>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                        extractQty(promoForm.name) > 1
+                          ? 'bg-cyan-100 text-cyan-700'
+                          : 'bg-orange-100 text-orange-600'
+                      }`}
+                    >
                       {extractQty(promoForm.name)} ชิ้น
                     </span>
                     <span className="text-xs text-slate-400">
@@ -896,7 +1142,9 @@ export default function Products() {
                   placeholder="เช่น 60"
                   min="0"
                 />
-                <p className="text-xs text-slate-400 mt-0.5">ค่าขนส่งสำหรับสินค้าขนาดนี้ — ใช้คำนวณกำไรในบัญชีรายวัน</p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  ค่าขนส่งสำหรับสินค้าขนาดนี้ — ใช้คำนวณกำไรในบัญชีรายวัน
+                </p>
               </div>
 
               <div>
@@ -905,7 +1153,10 @@ export default function Products() {
                   value={promoForm.box_id}
                   onChange={v => setPromoForm({ ...promoForm, box_id: v })}
                   placeholder="ค้นหากล่องพัสดุ..."
-                  options={sortedBoxes.map(b => ({ value: b.id, label: `${b.name}${formatBoxSize(b) ? ` - ${formatBoxSize(b)}` : ''} - ฿${Number(b.price_thb || 0).toFixed(2)}` }))}
+                  options={sortedBoxes.map(b => ({
+                    value: b.id,
+                    label: `${b.name}${formatBoxSize(b) ? ` - ${formatBoxSize(b)}` : ''} - ฿${Number(b.price_thb || 0).toFixed(2)}`,
+                  }))}
                 />
               </div>
 
@@ -915,7 +1166,10 @@ export default function Products() {
                   value={promoForm.bubble_id}
                   onChange={v => setPromoForm({ ...promoForm, bubble_id: v })}
                   placeholder="ค้นหาบั้บเบิ้ล..."
-                  options={sortedBubbles.map(b => ({ value: b.id, label: `ยาว ${formatBubbleLength(b)} - ฿${Number(b.price_thb || 0).toFixed(2)}` }))}
+                  options={sortedBubbles.map(b => ({
+                    value: b.id,
+                    label: `ยาว ${formatBubbleLength(b)} - ฿${Number(b.price_thb || 0).toFixed(2)}`,
+                  }))}
                 />
               </div>
 
@@ -935,117 +1189,192 @@ export default function Products() {
                 <SearchableDropdown
                   value={promoForm.item_type}
                   onChange={v => setPromoForm({ ...promoForm, item_type: v })}
-                  options={['พัสดุ','อาหารแห้ง','ของใช้','เครื่องสำอางค์','เสื้อผ้า','อุปกรณ์ไอที','สินค้าแบรนด์','อะไหล่รถยนต์','รองเท้า-กระเป๋า','เฟอร์นิเจอร์','เอกสาร','อื่นๆ'].map(t => ({ value: t, label: t }))}
+                  options={[
+                    'พัสดุ',
+                    'อาหารแห้ง',
+                    'ของใช้',
+                    'เครื่องสำอางค์',
+                    'เสื้อผ้า',
+                    'อุปกรณ์ไอที',
+                    'สินค้าแบรนด์',
+                    'อะไหล่รถยนต์',
+                    'รองเท้า-กระเป๋า',
+                    'เฟอร์นิเจอร์',
+                    'เอกสาร',
+                    'อื่นๆ',
+                  ].map(t => ({ value: t, label: t }))}
                 />
               </div>
 
-              <button onClick={savePromo} className="w-full bg-green-500 text-white py-2 rounded hover:bg-green-600">
+              <button
+                onClick={savePromo}
+                className="w-full bg-green-500 text-white py-2 rounded hover:bg-green-600"
+              >
                 บันทึก
               </button>
             </div>
           </div>
         </div>
       )}
+
       {/* ======== Modal: เพิ่มหลายโปรพร้อมกัน ======== */}
       {showBulkForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 w-full max-w-5xl max-h-[90vh] flex flex-col">
-            {/* Header */}
             <div className="flex justify-between items-center mb-4">
               <div>
                 <h3 className="text-xl font-bold text-slate-800">เพิ่มหลายโปรพร้อมกัน</h3>
                 <p className="text-sm text-slate-500 mt-0.5">เลือก Master ครั้งเดียว แล้วกรอกโปรได้หลายแถว</p>
               </div>
-              <button onClick={() => setShowBulkForm(false)} className="text-slate-400 hover:text-slate-600"><X size={22}/></button>
+              <button
+                onClick={() => setShowBulkForm(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X size={22} />
+              </button>
             </div>
 
-            {/* เลือก Master */}
             <div className="mb-4">
-              <label className="block text-sm font-medium mb-1">Master Product <span className="text-red-500">*</span></label>
-              <select value={bulkMasterId} onChange={e => setBulkMasterId(e.target.value)}
-                className="border rounded-lg px-3 py-2 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-purple-300">
+              <label className="block text-sm font-medium mb-1">
+                Master Product <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={bulkMasterId}
+                onChange={e => setBulkMasterId(e.target.value)}
+                className="border rounded-lg px-3 py-2 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-purple-300"
+              >
                 <option value="">เลือก Master</option>
-                {masters.map(m => <option key={m.id} value={m.id}>{m.id} — {m.name}</option>)}
+                {masters.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.id} — {m.name}
+                  </option>
+                ))}
               </select>
             </div>
 
-            {/* ตาราง bulk */}
             <div className="flex-1 overflow-auto">
               <table className="w-full text-sm border-collapse">
                 <thead className="bg-slate-100 sticky top-0">
                   <tr>
                     <th className="p-2 text-left font-medium text-slate-600 w-8">#</th>
-                    <th className="p-2 text-left font-medium text-slate-600 min-w-[200px]">ชื่อโปรโมชัน <span className="text-red-400">*</span></th>
+                    <th className="p-2 text-left font-medium text-slate-600 min-w-[200px]">
+                      ชื่อโปรโมชัน <span className="text-red-400">*</span>
+                    </th>
                     <th className="p-2 text-left font-medium text-slate-600 min-w-[140px]">ชื่อสั้น</th>
-                    <th className="p-2 text-right font-medium text-slate-600 w-28">ราคา (฿) <span className="text-red-400">*</span></th>
-                    <th className="p-2 text-left font-medium text-slate-600 min-w-[160px]">กล่อง <span className="text-red-400">*</span></th>
-                    <th className="p-2 text-left font-medium text-slate-600 min-w-[130px]">บั้บเบิ้ล <span className="text-red-400">*</span></th>
+                    <th className="p-2 text-right font-medium text-slate-600 w-28">
+                      ราคา (฿) <span className="text-red-400">*</span>
+                    </th>
+                    <th className="p-2 text-left font-medium text-slate-600 min-w-[160px]">
+                      กล่อง <span className="text-red-400">*</span>
+                    </th>
+                    <th className="p-2 text-left font-medium text-slate-600 min-w-[130px]">
+                      บั้บเบิ้ล <span className="text-red-400">*</span>
+                    </th>
                     <th className="p-2 text-left font-medium text-slate-600 min-w-[120px]">ประเภท</th>
                     <th className="p-2 w-8"></th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {bulkRows.map((row, i) => (
                     <tr key={i} className="border-b hover:bg-slate-50">
                       <td className="p-2 text-slate-400 text-xs text-center">{i + 1}</td>
-                      {/* ชื่อโปร */}
+
                       <td className="p-2">
-                        <input type="text" value={row.name}
-                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], name: e.target.value }; setBulkRows(r); }}
+                        <input
+                          type="text"
+                          value={row.name}
+                          onChange={e => {
+                            const r = [...bulkRows];
+                            r[i] = { ...r[i], name: e.target.value };
+                            setBulkRows(r);
+                          }}
                           placeholder="เช่น นมถั่ว 3 กระป๋อง"
-                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300"/>
+                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300"
+                        />
                         {row.name && (
                           <span className={`text-xs mt-0.5 ${extractQty(row.name) > 1 ? 'text-cyan-600' : 'text-orange-400'}`}>
                             จำนวน: {extractQty(row.name)} ชิ้น
                           </span>
                         )}
                       </td>
-                      {/* ชื่อสั้น */}
+
                       <td className="p-2">
-                        <input type="text" value={row.short_name}
-                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], short_name: e.target.value }; setBulkRows(r); }}
+                        <input
+                          type="text"
+                          value={row.short_name}
+                          onChange={e => {
+                            const r = [...bulkRows];
+                            r[i] = { ...r[i], short_name: e.target.value };
+                            setBulkRows(r);
+                          }}
                           placeholder="ชื่อสั้น"
-                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300"/>
+                          className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-300"
+                        />
                       </td>
-                      {/* ราคา */}
+
                       <td className="p-2">
-                        <input type="number" value={row.price_thb || ''}
-                          onChange={e => { const r = [...bulkRows]; r[i] = { ...r[i], price_thb: Number(e.target.value) }; setBulkRows(r); }}
+                        <input
+                          type="number"
+                          value={row.price_thb || ''}
+                          onChange={e => {
+                            const r = [...bulkRows];
+                            r[i] = { ...r[i], price_thb: Number(e.target.value) };
+                            setBulkRows(r);
+                          }}
                           placeholder="0"
-                          className="w-full border rounded px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-1 focus:ring-purple-300"/>
+                          className="w-full border rounded px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-1 focus:ring-purple-300"
+                        />
                       </td>
-                      {/* กล่อง */}
+
                       <td className="p-2 min-w-[150px]">
                         <SearchableDropdown
                           value={row.box_id}
-                          onChange={v => { const r = [...bulkRows]; r[i] = { ...r[i], box_id: v }; setBulkRows(r); }}
+                          onChange={v => {
+                            const r = [...bulkRows];
+                            r[i] = { ...r[i], box_id: v };
+                            setBulkRows(r);
+                          }}
                           placeholder="เลือกกล่อง..."
                           options={sortedBoxes.map(b => ({ value: b.id, label: b.name }))}
                         />
                       </td>
-                      {/* บั้บเบิ้ล */}
+
                       <td className="p-2 min-w-[130px]">
                         <SearchableDropdown
                           value={row.bubble_id}
-                          onChange={v => { const r = [...bulkRows]; r[i] = { ...r[i], bubble_id: v }; setBulkRows(r); }}
+                          onChange={v => {
+                            const r = [...bulkRows];
+                            r[i] = { ...r[i], bubble_id: v };
+                            setBulkRows(r);
+                          }}
                           placeholder="เลือกบั้บเบิ้ล..."
                           options={sortedBubbles.map(b => ({ value: b.id, label: `ยาว ${formatBubbleLength(b)}` }))}
                         />
                       </td>
-                      {/* ประเภท */}
+
                       <td className="p-2 min-w-[120px]">
                         <SearchableDropdown
                           value={row.item_type}
-                          onChange={v => { const r = [...bulkRows]; r[i] = { ...r[i], item_type: v }; setBulkRows(r); }}
-                          options={['พัสดุ','อาหารแห้ง','ของใช้','เครื่องสำอางค์','เสื้อผ้า','อุปกรณ์ไอที','อื่นๆ'].map(t => ({ value: t, label: t }))}
+                          onChange={v => {
+                            const r = [...bulkRows];
+                            r[i] = { ...r[i], item_type: v };
+                            setBulkRows(r);
+                          }}
+                          options={['พัสดุ', 'อาหารแห้ง', 'ของใช้', 'เครื่องสำอางค์', 'เสื้อผ้า', 'อุปกรณ์ไอที', 'อื่นๆ'].map(t => ({
+                            value: t,
+                            label: t,
+                          }))}
                         />
                       </td>
-                      {/* ลบแถว */}
+
                       <td className="p-2 text-center">
                         {bulkRows.length > 1 && (
-                          <button onClick={() => setBulkRows(bulkRows.filter((_, idx) => idx !== i))}
-                            className="text-red-400 hover:text-red-600">
-                            <X size={16}/>
+                          <button
+                            onClick={() => setBulkRows(bulkRows.filter((_, idx) => idx !== i))}
+                            className="text-red-400 hover:text-red-600"
+                          >
+                            <X size={16} />
                           </button>
                         )}
                       </td>
@@ -1055,30 +1384,47 @@ export default function Products() {
               </table>
             </div>
 
-            {/* Footer */}
             <div className="mt-4 pt-4 border-t flex items-center justify-between">
               <button
                 onClick={() => setBulkRows([...bulkRows, { ...emptyBulkRow }])}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm text-slate-600 flex items-center gap-2">
-                <Plus size={15}/> เพิ่มแถว
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm text-slate-600 flex items-center gap-2"
+              >
+                <Plus size={15} /> เพิ่มแถว
               </button>
+
               <div className="flex gap-3">
-                <span className="text-sm text-slate-400 self-center">{bulkRows.filter(r => r.name && r.price_thb > 0 && r.box_id && r.bubble_id).length} แถวพร้อมบันทึก</span>
-                <button onClick={() => setShowBulkForm(false)} className="px-4 py-2 bg-slate-200 rounded-lg text-sm hover:bg-slate-300">ยกเลิก</button>
-                <button onClick={saveBulkPromos} disabled={bulkSaving || !bulkMasterId}
-                  className="px-5 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-40 font-medium text-sm">
-                  {bulkSaving ? 'กำลังบันทึก...' : `บันทึก ${bulkRows.filter(r => r.name && r.price_thb > 0 && r.box_id && r.bubble_id).length} โปร`}
+                <span className="text-sm text-slate-400 self-center">
+                  {bulkRows.filter(r => r.name && r.price_thb > 0 && r.box_id && r.bubble_id).length} แถวพร้อมบันทึก
+                </span>
+
+                <button
+                  onClick={() => setShowBulkForm(false)}
+                  className="px-4 py-2 bg-slate-200 rounded-lg text-sm hover:bg-slate-300"
+                >
+                  ยกเลิก
+                </button>
+
+                <button
+                  onClick={saveBulkPromos}
+                  disabled={bulkSaving || !bulkMasterId}
+                  className="px-5 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-40 font-medium text-sm"
+                >
+                  {bulkSaving
+                    ? 'กำลังบันทึก...'
+                    : `บันทึก ${bulkRows.filter(r => r.name && r.price_thb > 0 && r.box_id && r.bubble_id).length} โปร`}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
-      {/* ======== Toast Notification ======== */}
+
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-lg text-white text-sm font-medium transition-all ${
-          toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
-        }`}>
+        <div
+          className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-lg text-white text-sm font-medium transition-all ${
+            toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'
+          }`}
+        >
           <span>{toast.type === 'success' ? '✓' : '✕'}</span>
           <span>{toast.msg}</span>
         </div>
