@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/AuthProvider';
 import { Order, TOURIST_ZIPS, PARCEL_STATUSES, KNOWN_PARCEL_STATUSES, parcelStatusColor } from '../lib/types';
 import { useShipCostMap } from '../lib/useShipCostMap';
 import { extractQty } from '../lib/utils';
@@ -505,6 +506,12 @@ function getCarrierLabel(route: string | null) {
 }
 
 export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]) => void }) {
+  const { user } = useAuth();
+
+  const isAdmin =
+    user?.app_metadata?.role === 'admin' ||
+    user?.user_metadata?.role === 'admin';
+
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -1036,6 +1043,11 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   };
 
   const handleDeleteOrder = async (order: Order) => {
+    if (!isAdmin) {
+      alert('permission denied');
+      return;
+    }
+
     const name = order.customers?.name || order.order_no;
     if (!confirm(`ลบออเดอร์ "${order.order_no}"\nลูกค้า: ${name}\n\nออเดอร์จะหายจากทุกหน้า (Flash Export, MyOrder Export)\nและยอดรวมลูกค้าจะอัพเดตอัตโนมัติ\n\nยืนยันลบ?`)) return;
     const { error } = await supabase.from('orders').delete().eq('id', order.id);
@@ -1259,47 +1271,55 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                   className="px-3 py-1.5 bg-red-500 text-white rounded-lg text-xs font-bold hover:bg-red-600 flex items-center gap-1.5">
                   ⚠ Track ซ้ำ ({dupCount})
                 </button>
-                <button
-                  onClick={async () => {
-                    if (!confirm(`ลบออเดอร์ที่ Tracking ซ้ำ?\n(เก็บรายการแรก ลบรายการที่ซ้ำ)`)) return;
-                    // Query DB โดยตรง — ไม่ใช้ state เพื่อกัน false positive
-                    const { data: allOrders } = await supabase
-                      .from('orders')
-                      .select('id, tracking_no, created_at')
-                      .not('tracking_no', 'is', null)
-                      .order('created_at', { ascending: true });
-
-                    if (!allOrders) return;
-
-                    // นับ tracking ที่ซ้ำจริงใน DB
-                    const seenTrack: Record<string, string> = {}; // tracking → id แรก
-                    const deleteIds: string[] = [];
-                    allOrders.forEach(o => {
-                      const t = (o.tracking_no || '').trim();
-                      if (!t || t.length <= 3) return;
-                      if (!seenTrack[t]) {
-                        seenTrack[t] = o.id; // เก็บ id แรก
-                      } else {
-                        deleteIds.push(o.id); // ซ้ำ → ลบ
+                {isAdmin && (
+                  <button
+                    onClick={async () => {
+                      if (!isAdmin) {
+                        alert('permission denied');
+                        return;
                       }
-                    });
 
-                    if (deleteIds.length === 0) {
-                      showToast('ไม่พบ Tracking ซ้ำใน DB', 'warning');
+                      if (!confirm(`ลบออเดอร์ที่ Tracking ซ้ำ?\n(เก็บรายการแรก ลบรายการที่ซ้ำ)`)) return;
+                      // Query DB โดยตรง — ไม่ใช้ state เพื่อกัน false positive
+                      const { data: allOrders } = await supabase
+                        .from('orders')
+                        .select('id, tracking_no, created_at')
+                        .not('tracking_no', 'is', null)
+                        .order('created_at', { ascending: true });
+
+                      if (!allOrders) return;
+
+                      // นับ tracking ที่ซ้ำจริงใน DB
+                      const seenTrack: Record<string, string> = {}; // tracking → id แรก
+                      const deleteIds: string[] = [];
+                      allOrders.forEach(o => {
+                        const t = (o.tracking_no || '').trim();
+                        if (!t || t.length <= 3) return;
+                        if (!seenTrack[t]) {
+                          seenTrack[t] = o.id; // เก็บ id แรก
+                        } else {
+                          deleteIds.push(o.id); // ซ้ำ → ลบ
+                        }
+                      });
+
+                      if (deleteIds.length === 0) {
+                        showToast('ไม่พบ Tracking ซ้ำใน DB', 'warning');
+                        loadOrders();
+                        return;
+                      }
+
+                      const CHUNK = 100;
+                      for (let i = 0; i < deleteIds.length; i += CHUNK) {
+                        await supabase.from('orders').delete().in('id', deleteIds.slice(i, i + CHUNK));
+                      }
+                      showToast(`✓ ลบออเดอร์ Track ซ้ำ ${deleteIds.length} รายการแล้ว`);
                       loadOrders();
-                      return;
-                    }
-
-                    const CHUNK = 100;
-                    for (let i = 0; i < deleteIds.length; i += CHUNK) {
-                      await supabase.from('orders').delete().in('id', deleteIds.slice(i, i + CHUNK));
-                    }
-                    showToast(`✓ ลบออเดอร์ Track ซ้ำ ${deleteIds.length} รายการแล้ว`);
-                    loadOrders();
-                  }}
-                  className="px-3 py-1.5 bg-red-700 text-white rounded-lg text-xs font-bold hover:bg-red-800 flex items-center gap-1.5">
-                  🗑 ลบ Track ซ้ำ
-                </button>
+                    }}
+                    className="px-3 py-1.5 bg-red-700 text-white rounded-lg text-xs font-bold hover:bg-red-800 flex items-center gap-1.5"
+                  >
+                    🗑 ลบ Track ซ้ำ
+                  </button>
+                )}
               </div>
             )}
             {/* Clear filters */}
@@ -1572,12 +1592,15 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                     </td>
                     {/* ลบออเดอร์ */}
                     <td className="p-3 text-center">
-                      <button
-                        onClick={() => handleDeleteOrder(o)}
-                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                        title="ลบออเดอร์">
-                        🗑
-                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={() => handleDeleteOrder(o)}
+                          className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                          title="ลบออเดอร์"
+                        >
+                          🗑
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
