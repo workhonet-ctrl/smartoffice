@@ -12,7 +12,7 @@ const PAGE_LABELS: Record<FinPage, { label: string; icon: any; sub: string }> = 
   expenses: { label: 'รายจ่าย',       icon: FileText,   sub: 'PO + ใบบันทึกรายจ่าย' },
 };
 
-export default function Finance({ page = 'daily', subTab }: { page?: FinPage; subTab?: string }) {
+export default function Finance({ page = 'daily', subTab, onGoToShippingImport }: { page?: FinPage; subTab?: string; onGoToShippingImport?: () => void }) {
   const meta = PAGE_LABELS[page];
   const Icon = meta.icon;
 
@@ -37,7 +37,7 @@ export default function Finance({ page = 'daily', subTab }: { page?: FinPage; su
         {page === 'daily'    && <FinanceDaily />}
         {page === 'monthly'  && <FinanceMonthly />}
         {page === 'yearly'   && <FinanceYearly />}
-        {page === 'expenses' && <FinanceExpenses initialSubTab={subTab} />}
+        {page === 'expenses' && <FinanceExpenses initialSubTab={subTab} onGoToShippingImport={onGoToShippingImport} />}
       </div>
     </div>
   );
