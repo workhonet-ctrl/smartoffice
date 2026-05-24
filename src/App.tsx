@@ -87,7 +87,7 @@ export default function App() {
       case 'finance-monthly': return <Finance page="monthly" />;
       case 'finance-yearly':  return <Finance page="yearly" />;
       case 'finance-income':  return <FinanceIncome codState={codState} setCodState={setCodState} />;
-      case 'finance-expenses': return <Finance page="expenses" subTab={expenseSubTab} />;
+      case 'finance-expenses': return <Finance page="expenses" subTab={expenseSubTab} onGoToShippingImport={() => setActivePage('shipping-import')} />;
       case 'finance-cost':    return <ComingSoon title="ต้นทุนสินค้า" description="วิเคราะห์ต้นทุนและกำไรรายสินค้า" />;
       case 'hr-recruit': return <ComingSoon title="สรรหาพนักงาน" description="ระบบรับสมัครและคัดเลือกพนักงาน" />;
       case 'hr':         return <HR />;
