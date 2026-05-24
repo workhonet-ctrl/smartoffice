@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/AuthProvider';
 import { TOURIST_ZIPS } from '../lib/types';
 import { useShipCostMap } from '../lib/useShipCostMap';
 import { fmtTHB, fmtInt } from '../lib/utils';
@@ -32,6 +33,11 @@ const fmt  = fmtInt;
 const fmt2 = fmtTHB;
 
 export default function Customers({ onGoToProducts, problemOnly = false }: { onGoToProducts?: () => void; problemOnly?: boolean } = {}) {
+  const { user } = useAuth();
+  const isAdmin =
+    user?.app_metadata?.role === 'admin' ||
+    user?.user_metadata?.role === 'admin';
+
   const [customers, setCustomers]   = useState<Customer[]>([]);
   // ถ้าเป็นหน้าเคสมีปัญหา → เก็บ customer_id ที่มีออเดอร์สถานะปัญหา
   const [problemCustomerIds, setProblemCustomerIds] = useState<Set<string> | null>(null);
@@ -900,6 +906,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   };
 
   const handleBulkDelete = async () => {
+    if (!isAdmin) {
+      alert('permission denied');
+      return;
+    }
     if (selectedIds.size === 0) return;
     // ดึงข้อมูลจาก customers ที่ถูกเลือก (ค้นจาก filtered ทั้งหมดได้เลย)
     const selectedList = customers.filter(c => selectedIds.has(c.id));
@@ -925,6 +935,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
 
   const handleDelete = async (c: Customer, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!isAdmin) {
+      alert('permission denied');
+      return;
+    }
     if (c.order_count > 0) {
       if (!confirm(`ลูกค้า "${c.name}" มี ${c.order_count} ออเดอร์\n⚠ ออเดอร์ทั้งหมดจะถูกลบด้วย ข้อมูลจะหายถาวร\nยืนยันลบ?`)) return;
     } else {
@@ -1141,6 +1155,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   };
 
   const handleDeleteOrder = async (orderId: string, orderNo: string) => {
+    if (!isAdmin) {
+      alert('permission denied');
+      return;
+    }
     if (!confirm(`ลบออเดอร์ "${orderNo}"?\nข้อมูลจะหายถาวร`)) return;
     // หา order ก่อนลบ — เอาไว้ optimistic update customer stats
     const orderToDelete = custOrders.find(o => o.id === orderId);
@@ -1410,15 +1428,17 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           >
             ยกเลิก
           </button>
-          <button
-            onClick={handleBulkDelete}
-            disabled={bulkDeleting}
-            className="ml-auto px-4 py-2 bg-red-500 text-white rounded-lg text-sm font-medium
-                       hover:bg-red-600 disabled:opacity-50 flex items-center gap-2"
-          >
-            <Trash2 size={14}/>
-            {bulkDeleting ? 'กำลังลบ...' : `ลบ ${selectedIds.size} คน`}
-          </button>
+          {isAdmin && (
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="ml-auto px-4 py-2 bg-red-500 text-white rounded-lg text-sm font-medium
+                         hover:bg-red-600 disabled:opacity-50 flex items-center gap-2"
+            >
+              <Trash2 size={14}/>
+              {bulkDeleting ? 'กำลังลบ...' : `ลบ ${selectedIds.size} คน`}
+            </button>
+          )}
         </div>
       )}
 
@@ -1598,11 +1618,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                         title="แก้ไขข้อมูลลูกค้า">
                         <Edit2 size={14}/>
                       </button>
-                      <button onClick={e => handleDelete(c, e)}
-                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                        title="ลบลูกค้า">
-                        🗑
-                      </button>
+                      {isAdmin && (
+                        <button onClick={e => handleDelete(c, e)}
+                          className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                          title="ลบลูกค้า">
+                          🗑
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -1689,11 +1711,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
                                   title="แก้ไขออเดอร์">
                                   <Edit2 size={13}/>
                                 </button>
-                                <button onClick={() => handleDeleteOrder(o.id, o.order_no)}
-                                  className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition"
-                                  title="ลบออเดอร์">
-                                  <Trash2 size={13}/>
-                                </button>
+                                {isAdmin && (
+                                  <button onClick={() => handleDeleteOrder(o.id, o.order_no)}
+                                    className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition"
+                                    title="ลบออเดอร์">
+                                    <Trash2 size={13}/>
+                                  </button>
+                                )}
                               </div>
                             </div>
                           ))}
