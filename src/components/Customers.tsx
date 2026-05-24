@@ -101,6 +101,7 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
   const [editOrderDropdownOpen, setEditOrderDropdownOpen] = useState(false);
   const [importResult, setImportResult] = useState<{
     added: number; updated: number; skipped: number;
+    orderAdded?: number; orderErrors?: number; firstOrderError?: string;
     unmapped: {name:string; qty:string}[];
   } | null>(null);
 
@@ -728,9 +729,10 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
       // รวม telMap
       const telToId: Record<string,string> = { ...existingCustMap, ...newCustIdMap };
 
-      // ── Step 5: batch insert orders ────────────────────────────────────
+      // ── Step 5: เตรียม orders จากรายการที่เลือกเองในหน้า Preview ─────────────────
       const ordersToInsert: any[] = [];
       let orderSkipped = 0;
+      const seenImportOrderNos = new Set<string>();
       const currentPreviewRows = previewOrderRowsRef.current.length > 0
         ? previewOrderRowsRef.current
         : previewOrderRows;
@@ -739,22 +741,47 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         const row = dataRows[rowIndex];
         const orderNo = String(row[1]||'').trim();
         if (!orderNo) continue;
-        if (existingOrderSet.has(orderNo)) { orderSkipped++; continue; }
+        if (existingOrderSet.has(orderNo) || seenImportOrderNos.has(orderNo)) {
+          orderSkipped++;
+          continue;
+        }
+        seenImportOrderNos.add(orderNo);
 
         const tel = String(row[6]||'').trim();
         const customerId = telToId[tel];
-        if (!customerId) continue;
+        if (!customerId) {
+          orderSkipped++;
+          continue;
+        }
 
         // ใช้รายการสินค้าที่ผู้ใช้จับคู่/เพิ่มเองในหน้า Preview เป็นหลัก
         // เพื่อรองรับเคสไม่มีโปรตรงตัว เช่น สั่ง 4 กระป๋อง → เลือกโปร 2 กระป๋อง x2 เอง
         const previewRow = currentPreviewRows[rowIndex];
-        const selectedPromos = (previewRow?.mappedPromos || [])
+        const selectedPromosRaw = (previewRow?.mappedPromos || [])
           .filter((mp: any) => mp?.promoId)
-          .map((mp: any) => ({
-            promoId: mp.promoId,
-            promo: mp.promo,
-            qty: Number(mp.qty) || 1,
-          }));
+          .map((mp: any) => {
+            const promo = mp.promo || promoOptions.find((p: any) => p.id === mp.promoId) || null;
+            return {
+              promoId: mp.promoId,
+              promo,
+              qty: Number(mp.qty) || 1,
+            };
+          });
+
+        // รวม promoId ซ้ำให้เป็น 1 รายการ พร้อมบวกจำนวนรอบ
+        // เช่น ผู้ใช้เลือก “ซุปใส 2 กระป๋อง” 2 ครั้ง → promoIds=[Pxxxx], quantities='2'
+        const selectedPromoMap: Record<string, any> = {};
+        selectedPromosRaw.forEach((item: any) => {
+          if (!item.promoId) return;
+          if (!selectedPromoMap[item.promoId]) {
+            selectedPromoMap[item.promoId] = { ...item, qty: 0 };
+          }
+          selectedPromoMap[item.promoId].qty += Number(item.qty) || 1;
+          if (!selectedPromoMap[item.promoId].promo && item.promo) {
+            selectedPromoMap[item.promoId].promo = item.promo;
+          }
+        });
+        const selectedPromos = Object.values(selectedPromoMap);
 
         if (selectedPromos.length === 0) {
           orderSkipped++;
@@ -826,12 +853,27 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         });
       }
 
-      // batch insert orders (500 ต่อครั้ง)
+      // insert orders ทีละรายการ เพื่อไม่ให้ 1 แถวที่ error ทำให้ทั้งชุดไม่ถูกบันทึก
       let orderAdded = 0;
-      for (let i=0; i<ordersToInsert.length; i+=500) {
-        const { error } = await supabase.from('orders').insert(ordersToInsert.slice(i,i+500));
-        if (!error) orderAdded += Math.min(500, ordersToInsert.length-i);
-        else console.error('batch order insert error:', error);
+      let orderErrors = 0;
+      let firstOrderError = '';
+      for (const payload of ordersToInsert) {
+        const { error } = await supabase.from('orders').insert([payload]);
+        if (!error) {
+          orderAdded++;
+          existingOrderSet.add(payload.order_no);
+          continue;
+        }
+
+        orderErrors++;
+        const detail = [
+          error.message,
+          error.details,
+          error.hint,
+          error.code,
+        ].filter(Boolean).join(' | ');
+        if (!firstOrderError) firstOrderError = `${payload.order_no}: ${detail || 'unknown error'}`;
+        console.error('order insert error:', payload.order_no, error, payload);
       }
 
       // อัพเดต tracking ให้ orders ที่มีอยู่แล้วแต่ยังไม่มี tracking
@@ -880,18 +922,33 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
         orderAdded += updates.length; // นับรวมด้วย
       }
 
+      const stillUnmappedNames = new Set<string>();
+      currentPreviewRows.forEach((row: any) => {
+        (row?.mappedPromos || []).forEach((mp: any) => {
+          if (!mp?.promoId && mp?.rawName) stillUnmappedNames.add(mp.rawName);
+        });
+      });
+      const remainingUnmapped = unmappedProds.filter((u) => stillUnmappedNames.has(u.name));
+
       setImportResult({
         added: custAdded,
         updated: custUpdated,
         skipped: orderSkipped,
-        unmapped: unmappedProds,
+        orderAdded,
+        orderErrors,
+        firstOrderError,
+        unmapped: remainingUnmapped,
       });
 
       // ไม่เปิด modal จับคู่สินค้าอีกรอบหลัง import แล้ว
       // เพราะรอบนี้ให้ยึดรายการที่ผู้ใช้เลือกเองในหน้า “ตรวจสอบรอบสุดท้ายก่อน Import” เป็นหลัก
       // ถ้าออเดอร์ไหนไม่มีสินค้าที่เลือกจริง ๆ จะถูกข้ามเฉพาะออเดอร์นั้น
+      const orderErrorMsg = orderErrors > 0
+        ? ` · error ${orderErrors}${firstOrderError ? ` (${firstOrderError})` : ''}`
+        : '';
       showToast(
-        `✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded} ข้าม ${orderSkipped}`
+        `✓ ลูกค้า +${custAdded} อัพเดต ${custUpdated} · ออเดอร์ +${orderAdded} ข้าม ${orderSkipped}${orderErrorMsg}`,
+        orderErrors > 0 && orderAdded === 0 ? 'error' : 'success'
       );
       loadCustomers();
     } catch (err) {
@@ -1259,7 +1316,13 @@ export default function Customers({ onGoToProducts, problemOnly = false }: { onG
           {importResult && (
             <div className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 space-y-0.5">
               <div>👥 ลูกค้า: เพิ่ม <strong>{importResult.added}</strong> · อัพเดต <strong>{importResult.updated}</strong></div>
-              <div>📋 ออเดอร์: บันทึก <strong>{importResult.added + importResult.updated}</strong> · ข้าม {importResult.skipped} ซ้ำ</div>
+              <div>
+                📋 ออเดอร์: บันทึก <strong>{importResult.orderAdded ?? 0}</strong> · ข้าม {importResult.skipped}
+                {importResult.orderErrors ? <span className="text-red-600"> · error {importResult.orderErrors}</span> : null}
+              </div>
+              {importResult.firstOrderError && (
+                <div className="text-red-600">Error แรก: {importResult.firstOrderError}</div>
+              )}
               {importResult.unmapped.length > 0 && (
                 <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg text-orange-700">
                   <div className="font-semibold mb-1">⚠ สินค้ายังไม่มีในระบบ ({importResult.unmapped.length} รายการ)</div>
