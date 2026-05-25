@@ -257,15 +257,167 @@ export default function Packaging({
   })();
 
 
+  const buildRichSummarySnapshot = () => [
+    ...summaryGroups.grouped.map(g => ({
+      promo_id: g.promoId,
+      name: g.promo_name || g.short_name,
+      short_name: g.short_name || g.promo_name,
+      product_name: g.short_name || g.promo_name,
+      promo_name: g.promo_name || '',
+      count: g.count,
+      box: g.box_name,
+      bubble: g.bubble_name && !g.bubble_name.includes('0 cm') ? g.bubble_name : '-',
+      type: 'single',
+    })),
+    ...summaryGroups.multiOrders.map(o => ({
+      name: o.promos.map(p => {
+        const productName = p.short_name || p.name;
+        const promoName = p.name && p.name !== productName ? ` ${p.name}` : '';
+        const qtyText = p.qty > 1 ? ` x${p.qty}` : '';
+        return `${productName}${promoName}${qtyText}`;
+      }).join(', '),
+      short_name: o.promos.map(p => p.short_name || p.name).join(' + '),
+      product_name: o.promos.map(p => p.short_name || p.name).join(' + '),
+      promo_name: 'แพ็คพิเศษ',
+      promos: o.promos.map(p => ({
+        id: p.id,
+        short_name: p.short_name || p.name,
+        product_name: p.short_name || p.name,
+        promo_name: p.name || '',
+        name: p.name || '',
+        qty: p.qty || 1,
+      })),
+      count: 1,
+      box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '',
+      bubble: (() => {
+        const b = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
+        return b ? `ยาว ${b.length_cm} cm` : '-';
+      })(),
+      type: 'multi',
+    })),
+  ];
+
+  const buildRichOrdersSnapshot = () => orders.map(o => ({
+    order_no: o.order_no,
+    customer: o.customers?.name,
+    promos: o.promos.map(p => {
+      const productName = p.short_name || p.name;
+      const promoName = p.name && p.name !== productName ? ` ${p.name}` : '';
+      const qtyText = p.qty > 1 ? ` x${p.qty}` : '';
+      return `${productName}${promoName}${qtyText}`;
+    }).join(', '),
+    promo_details: o.promos.map(p => ({
+      id: p.id,
+      short_name: p.short_name || p.name,
+      product_name: p.short_name || p.name,
+      promo_name: p.name || '',
+      qty: p.qty || 1,
+    })),
+  }));
+
+  const historyOrderKey = (ordersSnapshot: any[] | null | undefined) =>
+    (ordersSnapshot || [])
+      .map((o: any) => String(o?.order_no || '').trim())
+      .filter(Boolean)
+      .sort()
+      .join('|');
+
+  const currentHistoryOrderKey = () =>
+    orders.map(o => String(o.order_no || '').trim()).filter(Boolean).sort().join('|');
+
+  const historySnapshotScore = (item: any) => {
+    const snap = (item?.summary_snapshot || []) as any[];
+    const richScore = snap.reduce((score: number, s: any) => {
+      const hasPromoDetails = Array.isArray(s?.promos) && s.promos.length > 0;
+      return score
+        + (s?.promo_name ? 3 : 0)
+        + (s?.product_name ? 3 : 0)
+        + (s?.promo_id ? 2 : 0)
+        + (hasPromoDetails ? 6 : 0);
+    }, 0);
+    const statusScore = item?.status === 'approved' ? 2 : item?.status === 'printed' ? 1 : 0;
+    return richScore + statusScore;
+  };
+
+  const dedupePrintHistory = (rows: any[]) => {
+    const best = new Map<string, any>();
+    rows.forEach(item => {
+      const orderKey = historyOrderKey(item.orders_snapshot);
+      const fallbackKey = [
+        item.pack_date || '',
+        item.responsible_person || '',
+        item.order_count || '',
+        new Date(item.created_at).toISOString().slice(0, 16),
+      ].join('|');
+      const key = orderKey
+        ? `${item.pack_date || ''}|${item.responsible_person || ''}|${item.order_count || ''}|${orderKey}`
+        : fallbackKey;
+      const current = best.get(key);
+      if (!current || historySnapshotScore(item) > historySnapshotScore(current)) {
+        best.set(key, item);
+      }
+    });
+    return Array.from(best.values()).sort((a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  };
+
+  const savePackHistory = async (status: 'printed' | 'pending', responsibleName: string) => {
+    const packDateDb = new Date().toISOString().split('T')[0];
+    const ordersSnapshot = buildRichOrdersSnapshot();
+    const summarySnapshot = buildRichSummarySnapshot();
+    const orderKey = historyOrderKey(ordersSnapshot);
+
+    const payload = {
+      pack_date: packDateDb,
+      responsible_person: responsibleName || 'ไม่ระบุ',
+      order_count: orders.length,
+      orders_snapshot: ordersSnapshot,
+      summary_snapshot: summarySnapshot,
+      status,
+    };
+
+    const { data: candidates } = await supabase
+      .from('pack_history')
+      .select('id, status, orders_snapshot, created_at')
+      .eq('pack_date', packDateDb)
+      .eq('responsible_person', payload.responsible_person)
+      .eq('order_count', orders.length)
+      .in('status', ['printed', 'pending', 'approved'])
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const existing = (candidates || []).find((h: any) => historyOrderKey(h.orders_snapshot) === orderKey);
+
+    if (existing?.id) {
+      const nextStatus = existing.status === 'approved' ? 'approved' : status;
+      const { data, error } = await supabase
+        .from('pack_history')
+        .update({ ...payload, status: nextStatus })
+        .eq('id', existing.id)
+        .select('id')
+        .single();
+      return { data, error };
+    }
+
+    const { data, error } = await supabase
+      .from('pack_history')
+      .insert([payload])
+      .select('id')
+      .single();
+    return { data, error };
+  };
+
+
   const loadPrintHistory = async () => {
     setLoadingHistory(true);
     const { data } = await supabase
       .from('pack_history')
-      .select('id, pack_date, responsible_person, order_count, status, created_at, summary_snapshot')
+      .select('id, pack_date, responsible_person, order_count, status, created_at, summary_snapshot, orders_snapshot')
       .in('status', ['printed', 'approved'])
       .order('created_at', { ascending: false })
-      .limit(50);
-    setPrintHistory(data || []);
+      .limit(80);
+    setPrintHistory(dedupePrintHistory(data || []));
     setLoadingHistory(false);
   };
 
@@ -418,75 +570,14 @@ export default function Packaging({
 
   const handlePrint = async () => {
     const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
-    // ── บันทึกประวัติการปริ้นลง pack_history ──
-    const summarySnapshot = [
-      ...summaryGroups.grouped.map(g => ({
-        promo_id: g.promoId,
-        name: g.promo_name || g.short_name,
-        short_name: g.short_name || g.promo_name,
-        product_name: g.short_name || g.promo_name,
-        promo_name: g.promo_name || '',
-        count: g.count,
-        box: g.box_name,
-        bubble: g.bubble_name && !g.bubble_name.includes('0 cm') ? g.bubble_name : '-',
-        type:'single'
-      })),
-      ...summaryGroups.multiOrders.map(o => ({
-        name: o.promos.map(p => {
-          const productName = p.short_name || p.name;
-          const promoName = p.name && p.name !== productName ? ` ${p.name}` : '';
-          const qtyText = p.qty > 1 ? ` x${p.qty}` : '';
-          return `${productName}${promoName}${qtyText}`;
-        }).join(', '),
-        short_name: o.promos.map(p => p.short_name || p.name).join(' + '),
-        product_name: o.promos.map(p => p.short_name || p.name).join(' + '),
-        promo_name: 'แพ็คพิเศษ',
-        promos: o.promos.map(p => ({
-          id: p.id,
-          short_name: p.short_name || p.name,
-          product_name: p.short_name || p.name,
-          promo_name: p.name || '',
-          name: p.name || '',
-          qty: p.qty || 1,
-        })),
-        count: 1,
-        box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '',
-        bubble: (() => {
-          const b = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
-          return b ? `ยาว ${b.length_cm} cm` : '-';
-        })(),
-        type:'multi'
-      })),
-    ];
-    const ordersSnapshot = orders.map(o => ({
-      order_no: o.order_no, customer: o.customers?.name,
-      promos: o.promos.map(p => {
-        const productName = p.short_name || p.name;
-        const promoName = p.name && p.name !== productName ? ` ${p.name}` : '';
-        const qtyText = p.qty > 1 ? ` x${p.qty}` : '';
-        return `${productName}${promoName}${qtyText}`;
-      }).join(', '),
-      promo_details: o.promos.map(p => ({
-        id: p.id,
-        short_name: p.short_name || p.name,
-        product_name: p.short_name || p.name,
-        promo_name: p.name || '',
-        qty: p.qty || 1,
-      })),
-    }));
-
-    const { error: phError } = await supabase.from('pack_history').insert([{
-      pack_date: new Date().toISOString().split('T')[0],
-      responsible_person: responsible || 'ไม่ระบุ',
-      order_count: orders.length,
-      orders_snapshot: ordersSnapshot,
-      summary_snapshot: summarySnapshot,
-      status: 'printed',
-    }]);
+    // ── บันทึก/อัปเดตประวัติการปริ้นลง pack_history ──
+    // ถ้าปริ้นชุดออเดอร์เดิมซ้ำในวันเดียวกัน จะอัปเดตรายการเดิมแทนการสร้างแถวซ้ำ
+    const { error: phError } = await savePackHistory('printed', responsible || 'ไม่ระบุ');
     if (phError) {
-      console.error('[pack_history insert error]', phError);
+      console.error('[pack_history save error]', phError);
       alert('บันทึกประวัติปริ้นไม่สำเร็จ: ' + phError.message);
     }
+
     // ── สร้าง HTML แบบใบสรุป (เหมือนแท็บใบสรุปบนหน้าจอ) ────────────────
 
     const makeGroupedRows2 = (subset: PackOrder[]) => {
@@ -604,27 +695,8 @@ export default function Packaging({
     if (!canCreateRequisition || !onCreateRequisition) return;
     setSaving(true);
     try {
-      const ordersSnapshot = orders.map(o => ({
-        order_no: o.order_no, customer: o.customers?.name,
-        promos: o.promos.map(p => ({ name: p.short_name||p.name, qty: p.qty })),
-        is_multi: isMulti(o),
-      }));
-      const summarySnapshot = [
-        ...summaryGroups.grouped.map(g => ({ name: g.short_name||g.promo_name, count: g.count, box: g.box_name, type:'single' })),
-        ...summaryGroups.multiOrders.map(o => ({
-          name: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
-          count: 1, box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '', type:'multi'
-        })),
-      ];
-
-      const { data: ph, error } = await supabase.from('pack_history').insert([{
-        pack_date: new Date().toISOString().split('T')[0],
-        responsible_person: responsible,
-        order_count: orders.length,
-        orders_snapshot: ordersSnapshot,
-        summary_snapshot: summarySnapshot,
-        status: 'pending',
-      }]).select('id').single();
+      // ใช้ประวัติชุดเดียวกับปุ่มปริ้น ถ้ามีอยู่แล้วจะอัปเดต ไม่สร้างแถวซ้ำ
+      const { data: ph, error } = await savePackHistory('pending', responsible);
 
       if (error) {
         console.error('pack_history insert error:', error);
