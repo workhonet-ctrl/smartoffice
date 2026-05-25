@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { extractQty } from '../lib/utils';
 import { Package, ClipboardList, FileText, AlertCircle, Printer, History, RefreshCw } from 'lucide-react';
 
 type PackOrder = {
@@ -155,7 +154,7 @@ export default function Packaging({
         const promos: PromoDetail[] = rawProds.map((rp:string, i:number) => {
           const pid = o.promo_ids?.[i] || mappingMap[rp];
           const promoData = pid ? promoMap[pid] : null;
-          const qty = promoData?.name ? extractQty(promoData.name) : (Number(qtys[i]?.trim())||1);
+          const qty = Number(qtys[i]?.trim()) || 1; // จำนวนชุดของโปรนี้ในออเดอร์ เช่น โปร 2 กระป๋อง x2
           return {
             id: pid||`raw-${i}`, name: promoData?.name||rp,
             short_name: promoData?.short_name||null, qty,
@@ -178,6 +177,14 @@ export default function Packaging({
   const chanBadge = (o: PackOrder) => (o.courier === 'FLASH' || o.route === 'B')
     ? <span className="ml-1 px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-[9px] font-bold">FLASH</span>
     : <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[9px] font-bold">MyOrder</span>;
+
+  const promoRepeat = (p: { qty?: number | null }) => Math.max(1, Number(p?.qty) || 1);
+  const orderPackCount = (o: PackOrder) => o.promos.reduce((sum, p) => sum + promoRepeat(p), 0);
+  const promoRepeatText = (p: { qty?: number | null }) => {
+    const q = promoRepeat(p);
+    return q > 1 ? ` x${q}` : '';
+  };
+
 
   const escHtml = (value: any) => String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -238,8 +245,9 @@ export default function Packaging({
       const grouped: Record<string, { promoId: string; short_name: string; promo_name: string; box_name: string; bubble_name: string; count: number }> = {};
       for (const o of subset) {
         const p = o.promos[0]; if (!p) continue;
-        if (grouped[p.id]) grouped[p.id].count++;
-        else grouped[p.id] = { promoId: p.id, short_name: p.short_name||'', promo_name: p.name, box_name: p.box_name, bubble_name: p.bubble_name, count: 1 };
+        const repeat = promoRepeat(p);
+        if (grouped[p.id]) grouped[p.id].count += repeat;
+        else grouped[p.id] = { promoId: p.id, short_name: p.short_name||'', promo_name: p.name, box_name: p.box_name, bubble_name: p.bubble_name, count: repeat };
       }
       return Object.values(grouped);
     };
@@ -439,7 +447,7 @@ export default function Packaging({
       return `<tr${isMultiRow ? ' style="background:#fffbeb"' : ''}>
         <td class="num">${idx++}</td>
         <td>${nameHtml}</td>
-        <td style="text-align:center"><span class="badge">${s.count} ออเดอร์</span></td>
+        <td style="text-align:center"><span class="badge">${s.count} ชุด</span></td>
         <td style="text-align:center">${escHtml(s.box || '-')}</td>
         <td style="text-align:center;color:#0369a1">${(s.bubble && s.bubble !== '-') ? escHtml(s.bubble) : '-'}</td>
         <td><div class="note-box"></div></td>
@@ -472,7 +480,7 @@ export default function Packaging({
     <thead><tr>
       <th style="width:28px">#</th>
       <th>รายการสินค้า / โปรโมชั่น</th>
-      <th style="text-align:center;width:100px">จำนวน (ออเดอร์)</th>
+      <th style="text-align:center;width:100px">จำนวน (ชุด)</th>
       <th style="text-align:center;width:120px">กล่อง</th>
       <th style="text-align:center;width:90px">บับเบิ้ล</th>
       <th style="width:120px">หมายเหตุ</th>
@@ -498,7 +506,7 @@ export default function Packaging({
             <div style="margin-bottom:2px">
               ${r.promos.length > 1 ? '<span style="background:#e0f2fe;color:#0369a1;border-radius:3px;padding:0 4px;font-size:10px;margin-right:3px">' + (pi+1) + '</span>' : ''}
               <span style="font-weight:600;color:#1e293b">${p.short_name || p.name}</span>
-              <span style="color:#64748b;font-size:11px"> / ${p.name}</span>
+              <span style="color:#64748b;font-size:11px"> / ${p.name}${Number(p.qty) > 1 ? ` x${Number(p.qty)}` : ``}</span>
             </div>`).join('')
         : `<span style="color:#1e293b">${r.product}</span>`;
       const channelBadge = r.isFlash
@@ -585,8 +593,9 @@ export default function Packaging({
       for (const o of subset.filter(o2 => o2.promos.length === 1)) {
         const p = o.promos[0]; if (!p) continue;
         const bub = p.bubble_name && !p.bubble_name.includes('0 cm') ? p.bubble_name : '-';
-        if (grouped[p.id]) grouped[p.id].count++;
-        else grouped[p.id] = { short_name: p.short_name||'', promo_name: p.name, box: p.box_name||'-', bubble: bub, count: 1 };
+        const repeat = promoRepeat(p);
+        if (grouped[p.id]) grouped[p.id].count += repeat;
+        else grouped[p.id] = { short_name: p.short_name||'', promo_name: p.name, box: p.box_name||'-', bubble: bub, count: repeat };
       }
       return Object.values(grouped);
     };
@@ -605,7 +614,7 @@ export default function Packaging({
           <td class="num">${idx++}</td>
           <td><div style="font-weight:700">${g.short_name || g.promo_name}</div>
               <div style="font-size:11px;color:#64748b">${g.promo_name}</div></td>
-          <td style="text-align:center"><span class="badge">${g.count} ออเดอร์</span></td>
+          <td style="text-align:center"><span class="badge">${g.count} ชุด</span></td>
           <td style="text-align:center">${g.box}</td>
           <td style="text-align:center;color:#0369a1">${g.bubble !== '-' ? g.bubble : '-'}</td>
           <td><div class="note-box"></div></td>
@@ -618,7 +627,7 @@ export default function Packaging({
         const ph = o.promos.map((p2, pi) =>
           `<div><span style="background:#fef3c7;color:#92400e;border-radius:3px;padding:0 3px;font-size:10px">${pi+1}</span>
            <strong>${p2.short_name || p2.name}</strong>
-           <span style="color:#64748b;font-size:11px"> ${p2.name}</span></div>`).join('');
+           <span style="color:#64748b;font-size:11px"> ${p2.name}${promoRepeatText(p2)}</span></div>`).join('');
         html2 += `<tr style="background:#fffbeb">
           <td class="num">${idx++}</td>
           <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
@@ -670,7 +679,7 @@ export default function Packaging({
     <thead><tr>
       <th style="width:28px">#</th>
       <th>รายการสินค้า / โปรโมชั่น</th>
-      <th style="text-align:center;width:100px">จำนวน (ออเดอร์)</th>
+      <th style="text-align:center;width:100px">จำนวน (ชุด)</th>
       <th style="text-align:center;width:120px">กล่อง</th>
       <th style="text-align:center;width:90px">บับเบิ้ล</th>
       <th style="width:120px">หมายเหตุ</th>
@@ -903,7 +912,7 @@ export default function Packaging({
                               <span className="w-5 h-5 rounded-full bg-cyan-100 text-cyan-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{pi+1}</span>
                               <div>
                                 {p.short_name && <div className="font-medium text-slate-800 text-sm">{p.short_name}</div>}
-                                <div className="text-xs text-slate-500">{p.name}</div>
+                                <div className="text-xs text-slate-500">{p.name}{promoRepeatText(p)}</div>
                               </div>
                             </div>
                           ))}
@@ -911,12 +920,12 @@ export default function Packaging({
                       ) : (
                         <div>
                           {o.promos[0]?.short_name && <div className="font-medium text-slate-800">{o.promos[0].short_name}</div>}
-                          <div className="text-xs text-slate-500">{o.promos[0]?.name || o.raw_prod || '-'}</div>
+                          <div className="text-xs text-slate-500">{o.promos[0] ? `${o.promos[0].name}${promoRepeatText(o.promos[0])}` : (o.raw_prod || '-')}</div>
                         </div>
                       )}
                     </td>
                     <td className="p-3 text-center whitespace-nowrap">
-                      <div className="font-bold text-slate-700 text-sm">1</div>
+                      <div className="font-bold text-slate-700 text-sm">{orderPackCount(o)}</div>
                       {multi && <div className="text-[10px] text-slate-400">{o.promos.length} รายการ</div>}
                     </td>
                     <td className="p-3 whitespace-nowrap">
@@ -983,7 +992,7 @@ export default function Packaging({
                   <th className="p-3 text-center w-10 whitespace-nowrap">#</th>
                   <th className="p-3 text-left whitespace-nowrap">วันที่แพ็ค</th>
                   <th className="p-3 text-left whitespace-nowrap">รายการสินค้า</th>
-                  <th className="p-3 text-center whitespace-nowrap">จำนวน (ออเดอร์)</th>
+                  <th className="p-3 text-center whitespace-nowrap">จำนวน (ชุด)</th>
                   <th className="p-3 text-left whitespace-nowrap">กล่อง</th>
                   <th className="p-3 text-left whitespace-nowrap">บั้บเบิ้ล</th>
                 </tr>
@@ -1006,10 +1015,10 @@ export default function Packaging({
                     <td className="p-3 min-w-[160px]">
                       {g.short_name && <div className="font-semibold text-slate-800 whitespace-nowrap">{g.short_name}</div>}
                       <div className="text-xs text-slate-500 whitespace-nowrap">{g.promo_name}</div>
-                      <div className="text-xs text-cyan-600 font-bold mt-0.5">จำนวน {g.count} ออเดอร์</div>
+                      <div className="text-xs text-cyan-600 font-bold mt-0.5">จำนวน {g.count} ชุด</div>
                     </td>
                     <td className="p-3 text-center whitespace-nowrap">
-                      <span className="px-3 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-sm font-bold">{g.count} ออเดอร์</span>
+                      <span className="px-3 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-sm font-bold">{g.count} ชุด</span>
                     </td>
                     <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.box_name}</td>
                     <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.bubble_name}</td>
@@ -1075,10 +1084,10 @@ export default function Packaging({
                     <td className="p-3 min-w-[160px]">
                       {g.short_name && <div className="font-semibold text-slate-800 whitespace-nowrap">{g.short_name}</div>}
                       <div className="text-xs text-slate-500 whitespace-nowrap">{g.promo_name}</div>
-                      <div className="text-xs text-cyan-600 font-bold mt-0.5">จำนวน {g.count} ออเดอร์</div>
+                      <div className="text-xs text-cyan-600 font-bold mt-0.5">จำนวน {g.count} ชุด</div>
                     </td>
                     <td className="p-3 text-center whitespace-nowrap">
-                      <span className="px-3 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-sm font-bold">{g.count} ออเดอร์</span>
+                      <span className="px-3 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-sm font-bold">{g.count} ชุด</span>
                     </td>
                     <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.box_name}</td>
                     <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.bubble_name}</td>
@@ -1220,7 +1229,7 @@ export default function Packaging({
                             return (
                               <div key={i} className="text-xs text-slate-600">
                                 <div>
-                                  {productName} — <span className="font-medium">{s.count} ออเดอร์</span>
+                                  {productName} — <span className="font-medium">{s.count} ชุด</span>
                                 </div>
                                 {promoName && promoName !== productName && (
                                   <div className="text-[10px] text-slate-400 ml-2">{promoName}</div>
