@@ -179,6 +179,50 @@ export default function Packaging({
     ? <span className="ml-1 px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-[9px] font-bold">FLASH</span>
     : <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[9px] font-bold">MyOrder</span>;
 
+  const escHtml = (value: any) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  const getSnapshotProductName = (s: any) =>
+    s?.product_name || s?.short_name || s?.master_name || s?.product || '';
+
+  const getSnapshotPromoName = (s: any) => {
+    const productName = getSnapshotProductName(s);
+    if (s?.promo_name) return s.promo_name;
+    if (s?.name && s.name !== productName) return s.name;
+    return '';
+  };
+
+  const renderSnapshotProductPromoHtml = (s: any) => {
+    if (Array.isArray(s?.promos) && s.promos.length > 0) {
+      return s.promos.map((p: any, pi: number) => {
+        const productName = p.product_name || p.short_name || p.master_name || p.product || p.name || '';
+        const promoName = p.promo_name || p.name || '';
+        const qty = Number(p.qty) || 1;
+        const qtyText = qty > 1 ? ` x${qty}` : '';
+        const promoLine = promoName && promoName !== productName
+          ? `<div style="font-size:11px;color:#64748b;margin-top:1px">${escHtml(promoName)}${qtyText}</div>`
+          : (qty > 1 ? `<div style="font-size:11px;color:#64748b;margin-top:1px">${qtyText.trim()}</div>` : '');
+        return `<div style="margin-bottom:${pi === s.promos.length - 1 ? '0' : '4px'}">
+          ${s.promos.length > 1 ? `<span style="background:#e0f2fe;color:#0369a1;border-radius:3px;padding:0 4px;font-size:10px;margin-right:3px">${pi + 1}</span>` : ''}
+          <span style="font-weight:700">${escHtml(productName || promoName || '-')}</span>
+          ${promoLine}
+        </div>`;
+      }).join('');
+    }
+
+    const productName = getSnapshotProductName(s);
+    const promoName = getSnapshotPromoName(s);
+    const mainText = productName || promoName || s?.name || '-';
+    const promoLine = promoName && promoName !== mainText
+      ? `<div style="font-size:11px;color:#64748b;margin-top:1px">${escHtml(promoName)}</div>`
+      : '';
+    return `<div style="font-weight:700">${escHtml(mainText)}</div>${promoLine}`;
+  };
+
   // validate กล่อง/บั้บเบิ้ล — multi-product orders ต้องเลือกครบ
   const multiOrders        = orders.filter(isMulti);
   const multiIncomplete    = multiOrders.filter(o => !override[o.id]?.box_id);
@@ -238,17 +282,14 @@ export default function Packaging({
     let idx = 1;
     const tableRows = snap.map((s: any) => {
       const isMultiRow = s.type === 'multi';
-      const nameHtml = isMultiRow
-        ? `<div style="font-weight:700">${s.short_name || s.name}</div>
-           <div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div>`
-        : `<div style="font-weight:700">${s.short_name || s.name}</div>
-           <div style="font-size:11px;color:#64748b">${s.name}</div>`;
+      const nameHtml = `${renderSnapshotProductPromoHtml(s)}
+        ${isMultiRow ? '<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div>' : ''}`;
       return `<tr${isMultiRow ? ' style="background:#fffbeb"' : ''}>
         <td class="num">${idx++}</td>
         <td>${nameHtml}</td>
         <td style="text-align:center"><span class="badge">${s.count} ออเดอร์</span></td>
-        <td style="text-align:center">${s.box || '-'}</td>
-        <td style="text-align:center;color:#0369a1">${(s.bubble && s.bubble !== '-') ? s.bubble : '-'}</td>
+        <td style="text-align:center">${escHtml(s.box || '-')}</td>
+        <td style="text-align:center;color:#0369a1">${(s.bubble && s.bubble !== '-') ? escHtml(s.bubble) : '-'}</td>
         <td><div class="note-box"></div></td>
       </tr>`;
     }).join('');
@@ -380,16 +421,34 @@ export default function Packaging({
     // ── บันทึกประวัติการปริ้นลง pack_history ──
     const summarySnapshot = [
       ...summaryGroups.grouped.map(g => ({
+        promo_id: g.promoId,
         name: g.promo_name || g.short_name,
         short_name: g.short_name || g.promo_name,
+        product_name: g.short_name || g.promo_name,
+        promo_name: g.promo_name || '',
         count: g.count,
         box: g.box_name,
         bubble: g.bubble_name && !g.bubble_name.includes('0 cm') ? g.bubble_name : '-',
         type:'single'
       })),
       ...summaryGroups.multiOrders.map(o => ({
-        name: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
+        name: o.promos.map(p => {
+          const productName = p.short_name || p.name;
+          const promoName = p.name && p.name !== productName ? ` ${p.name}` : '';
+          const qtyText = p.qty > 1 ? ` x${p.qty}` : '';
+          return `${productName}${promoName}${qtyText}`;
+        }).join(', '),
         short_name: o.promos.map(p => p.short_name || p.name).join(' + '),
+        product_name: o.promos.map(p => p.short_name || p.name).join(' + '),
+        promo_name: 'แพ็คพิเศษ',
+        promos: o.promos.map(p => ({
+          id: p.id,
+          short_name: p.short_name || p.name,
+          product_name: p.short_name || p.name,
+          promo_name: p.name || '',
+          name: p.name || '',
+          qty: p.qty || 1,
+        })),
         count: 1,
         box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '',
         bubble: (() => {
@@ -401,7 +460,19 @@ export default function Packaging({
     ];
     const ordersSnapshot = orders.map(o => ({
       order_no: o.order_no, customer: o.customers?.name,
-      promos: o.promos.map(p => `${p.short_name||p.name}×${p.qty}`).join(', '),
+      promos: o.promos.map(p => {
+        const productName = p.short_name || p.name;
+        const promoName = p.name && p.name !== productName ? ` ${p.name}` : '';
+        const qtyText = p.qty > 1 ? ` x${p.qty}` : '';
+        return `${productName}${promoName}${qtyText}`;
+      }).join(', '),
+      promo_details: o.promos.map(p => ({
+        id: p.id,
+        short_name: p.short_name || p.name,
+        product_name: p.short_name || p.name,
+        promo_name: p.name || '',
+        qty: p.qty || 1,
+      })),
     }));
 
     const { error: phError } = await supabase.from('pack_history').insert([{
@@ -1071,11 +1142,20 @@ export default function Packaging({
                       </td>
                       <td className="p-3">
                         <div className="flex flex-col gap-0.5 max-h-20 overflow-auto">
-                          {snap.slice(0, 3).map((s: any, i: number) => (
-                            <div key={i} className="text-xs text-slate-600">
-                              {s.short_name || s.name} — <span className="font-medium">{s.count} ออเดอร์</span>
-                            </div>
-                          ))}
+                          {snap.slice(0, 3).map((s: any, i: number) => {
+                            const productName = getSnapshotProductName(s) || s.name || '-';
+                            const promoName = getSnapshotPromoName(s);
+                            return (
+                              <div key={i} className="text-xs text-slate-600">
+                                <div>
+                                  {productName} — <span className="font-medium">{s.count} ออเดอร์</span>
+                                </div>
+                                {promoName && promoName !== productName && (
+                                  <div className="text-[10px] text-slate-400 ml-2">{promoName}</div>
+                                )}
+                              </div>
+                            );
+                          })}
                           {snap.length > 3 && <div className="text-xs text-slate-400">+{snap.length - 3} รายการ</div>}
                         </div>
                       </td>
