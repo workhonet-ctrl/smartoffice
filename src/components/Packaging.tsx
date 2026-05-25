@@ -172,7 +172,7 @@ export default function Packaging({
     } finally { setLoading(false); }
   };
 
-  const isMulti  = (o: PackOrder) => o.promos.length > 1 || o.promos.some(p => promoRepeat(p) > 1);
+  const isMulti  = (o: PackOrder) => o.promos.length > 1;
   const isFlash  = (o: PackOrder) => o.courier === 'FLASH' || o.route === 'B';
   const chanBadge = (o: PackOrder) => (o.courier === 'FLASH' || o.route === 'B')
     ? <span className="ml-1 px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-[9px] font-bold">FLASH</span>
@@ -295,7 +295,7 @@ export default function Packaging({
         name: p.name || '',
         qty: p.qty || 1,
       })),
-      count: orderPackCount(o),
+      count: 1,
       box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '',
       bubble: (() => {
         const b = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
@@ -590,7 +590,7 @@ export default function Packaging({
 
     const makeGroupedRows2 = (subset: PackOrder[]) => {
       const grouped: Record<string, { short_name: string; promo_name: string; box: string; bubble: string; count: number }> = {};
-      for (const o of subset.filter(o2 => !isMulti(o2))) {
+      for (const o of subset.filter(o2 => o2.promos.length === 1)) {
         const p = o.promos[0]; if (!p) continue;
         const bub = p.bubble_name && !p.bubble_name.includes('0 cm') ? p.bubble_name : '-';
         const repeat = promoRepeat(p);
@@ -604,8 +604,8 @@ export default function Packaging({
     const myordOrd  = orders.filter(o => o.courier !== 'FLASH' && (o as any).route !== 'B');
     const fSingle   = makeGroupedRows2(flashOrd);
     const mSingle   = makeGroupedRows2(myordOrd);
-    const fMultis   = flashOrd.filter(isMulti);
-    const mMultis   = myordOrd.filter(isMulti);
+    const fMultis   = flashOrd.filter(o => o.promos.length > 1);
+    const mMultis   = myordOrd.filter(o => o.promos.length > 1);
 
     const buildRows = (grouped: typeof fSingle, multis: typeof fMultis, startIdx: number) => {
       let html2 = ''; let idx = startIdx;
@@ -631,7 +631,7 @@ export default function Packaging({
         html2 += `<tr style="background:#fffbeb">
           <td class="num">${idx++}</td>
           <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
-          <td style="text-align:center"><span class="badge">${orderPackCount(o)} ชุด</span></td>
+          <td style="text-align:center"><span class="badge">1 ออเดอร์</span></td>
           <td style="text-align:center">${bxName}</td>
           <td style="text-align:center;color:#0369a1">${buName !== '-' ? buName : '-'}</td>
           <td><div class="note-box"></div></td>
@@ -926,7 +926,7 @@ export default function Packaging({
                     </td>
                     <td className="p-3 text-center whitespace-nowrap">
                       <div className="font-bold text-slate-700 text-sm">{orderPackCount(o)}</div>
-                      {multi && <div className="text-[10px] text-slate-400">{o.promos.length > 1 ? `${o.promos.length} รายการ` : 'เลือกกล่องเอง'}</div>}
+                      {multi && <div className="text-[10px] text-slate-400">{o.promos.length} รายการ</div>}
                     </td>
                     <td className="p-3 whitespace-nowrap">
                       {multi ? (
@@ -1039,7 +1039,7 @@ export default function Packaging({
                               <span className="w-4 h-4 rounded-full bg-amber-200 text-amber-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{pi+1}</span>
                               <div>
                                 {p.short_name && <div className="font-semibold text-slate-800 text-sm whitespace-nowrap">{p.short_name}</div>}
-                                <div className="text-xs text-slate-500 whitespace-nowrap">{p.name}{promoRepeatText(p)}</div>
+                                <div className="text-xs text-slate-500 whitespace-nowrap">{p.name}</div>
                               </div>
                             </div>
                           ))}
@@ -1047,7 +1047,7 @@ export default function Packaging({
                         <span className="text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-0.5 rounded-full">⭐ แพ็คพิเศษ FLASH</span>
                       </td>
                       <td className="p-3 text-center whitespace-nowrap">
-                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">{orderPackCount(o)} ชุด</span>
+                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">1 ออเดอร์</span>
                       </td>
                       <td className="p-3 whitespace-nowrap">
                         <select value={selBox || ''} onChange={e => setOverride(p => ({ ...p, [o.id]: { ...p[o.id], box_id: e.target.value } }))}
@@ -1108,7 +1108,7 @@ export default function Packaging({
                               <span className="w-4 h-4 rounded-full bg-amber-200 text-amber-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{pi+1}</span>
                               <div>
                                 {p.short_name && <div className="font-semibold text-slate-800 text-sm whitespace-nowrap">{p.short_name}</div>}
-                                <div className="text-xs text-slate-500 whitespace-nowrap">{p.name}{promoRepeatText(p)}</div>
+                                <div className="text-xs text-slate-500 whitespace-nowrap">{p.name}</div>
                               </div>
                             </div>
                           ))}
@@ -1116,7 +1116,7 @@ export default function Packaging({
                         <span className="text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-0.5 rounded-full">⭐ แพ็คพิเศษ MyOrder</span>
                       </td>
                       <td className="p-3 text-center whitespace-nowrap">
-                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">{orderPackCount(o)} ชุด</span>
+                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">1 ออเดอร์</span>
                       </td>
                       <td className="p-3 whitespace-nowrap">
                         <select value={selBox || ''} onChange={e => setOverride(p => ({ ...p, [o.id]: { ...p[o.id], box_id: e.target.value } }))}
