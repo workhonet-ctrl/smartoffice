@@ -527,6 +527,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [filterRoute,  setFilterRoute]  = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPay,    setFilterPay]    = useState('');
+  const [filterTracking, setFilterTracking] = useState<'all' | 'has' | 'missing'>('all');
+  const [filterShipCost, setFilterShipCost] = useState<'all' | 'has' | 'missing'>('all');
   const ORDER_PAGE_SIZE = 500;
   const [orderPage, setOrderPage] = useState<'all' | number>(0);
   const [importedOrders, setImportedOrders] = useState<Array<Record<string, unknown>>>([]);
@@ -557,7 +559,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [checkingDups, setCheckingDups] = useState(false);
 
   useEffect(() => { loadOrders(); loadPromoOptions(); }, []);
-  useEffect(() => { if (orderPage !== 'all') setOrderPage(0); }, [search, dateFrom, dateTo, dateField, filterRoute, filterStatus, filterPay]);
+  useEffect(() => { if (orderPage !== 'all') setOrderPage(0); }, [search, dateFrom, dateTo, dateField, filterRoute, filterStatus, filterPay, filterTracking, filterShipCost]);
 
   // refresh เมื่อ switch กลับมาแท็บ orders
   useEffect(() => {
@@ -1062,7 +1064,16 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   ))];
   const allMapped = uniqueRawProds.every(rp => !!mappings[rp]);
 
-  // filter ด้วย search + วันที่ + route + status + pay
+  const getTrackingKey = (o: Order) => String(o.tracking_no || '').trim();
+  const hasTrackingNo = (o: Order) => getTrackingKey(o).length > 0;
+  const hasRealShipCost = (o: Order) => {
+    const tracking = getTrackingKey(o);
+    if (!tracking) return false;
+    const value = shipCostMap[tracking];
+    return value !== undefined && value !== null && Number(value) > 0;
+  };
+
+  // filter ด้วย search + วันที่ + route + status + pay + tracking + ค่าส่งจริง
   const filtered = orders.filter(o => {
     if (search) {
       const q = search.toLowerCase();
@@ -1089,6 +1100,10 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
       } else if (o.order_status !== filterStatus) return false;
     }
     if (filterPay    && o.payment_status !== filterPay)   return false;
+    if (filterTracking === 'has' && !hasTrackingNo(o)) return false;
+    if (filterTracking === 'missing' && hasTrackingNo(o)) return false;
+    if (filterShipCost === 'has' && !hasRealShipCost(o)) return false;
+    if (filterShipCost === 'missing' && hasRealShipCost(o)) return false;
     return true;
   });
 
@@ -1258,6 +1273,20 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               <option value="รอชำระเงิน">รอชำระเงิน</option>
               <option value="ชำระแล้ว">ชำระแล้ว</option>
             </select>
+            {/* Tracking filter */}
+            <select value={filterTracking} onChange={e => setFilterTracking(e.target.value as 'all' | 'has' | 'missing')}
+              className="border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
+              <option value="all">Tracking: ทั้งหมด</option>
+              <option value="has">มี Tracking</option>
+              <option value="missing">ไม่มี Tracking</option>
+            </select>
+            {/* Real shipping cost filter */}
+            <select value={filterShipCost} onChange={e => setFilterShipCost(e.target.value as 'all' | 'has' | 'missing')}
+              className="border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
+              <option value="all">ค่าส่งจริง: ทั้งหมด</option>
+              <option value="has">มีค่าส่งจริง</option>
+              <option value="missing">ไม่มีค่าส่งจริง</option>
+            </select>
             {/* ข้อ 3: ปุ่ม scroll ไปยัง tracking ซ้ำ */}
             {dupCount > 0 && (
               <div className="flex items-center gap-1.5">
@@ -1323,8 +1352,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               </div>
             )}
             {/* Clear filters */}
-            {(filterRoute || filterStatus || filterPay || dateFrom || dateTo || search) && (
-              <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setFilterRoute(''); setFilterStatus(''); setFilterPay(''); }}
+            {(filterRoute || filterStatus || filterPay || filterTracking !== 'all' || filterShipCost !== 'all' || dateFrom || dateTo || search) && (
+              <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setFilterRoute(''); setFilterStatus(''); setFilterPay(''); setFilterTracking('all'); setFilterShipCost('all'); }}
                 className="px-2.5 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs hover:bg-slate-200">
                 ล้างตัวกรอง ✕
               </button>
@@ -1582,8 +1611,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                     </td>
                     {/* ค่าส่งจริง */}
                     <td className="p-3 text-right whitespace-nowrap">
-                      {o.tracking_no && shipCostMap[o.tracking_no]
-                        ? <span className="text-blue-600 font-medium text-xs">฿{Number(shipCostMap[o.tracking_no]).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                      {hasRealShipCost(o)
+                        ? <span className="text-blue-600 font-medium text-xs">฿{Number(shipCostMap[getTrackingKey(o)]).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
                         : <span className="text-slate-200 text-xs">-</span>}
                     </td>
                     {/* สถานะออเดอร์ */}
