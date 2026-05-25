@@ -205,6 +205,14 @@ export default function Packaging({
     return `รวม ${totalText} ${unitInfo.unit}/กล่อง`;
   };
 
+  const snapshotPackCount = (s: any) => {
+    // ประวัติเก่าบางรายการเคยเก็บ count เป็นจำนวนชุดโปร เช่น 2 กระป๋อง x2
+    // แต่ในใบเตรียมสินค้า count ต้องหมายถึงจำนวนแพ็ค/จำนวนกล่อง
+    if (Number(s?.pack_count) > 0) return Number(s.pack_count);
+    if (s?.type === 'multi' || (Array.isArray(s?.promos) && s.promos.length > 0)) return 1;
+    return Math.max(1, Number(s?.count) || 1);
+  };
+
 
   const escHtml = (value: any) => String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -297,6 +305,7 @@ export default function Packaging({
       product_name: g.short_name || g.promo_name,
       promo_name: g.promo_name || '',
       count: g.count,
+      pack_count: g.count,
       box: g.box_name,
       bubble: g.bubble_name && !g.bubble_name.includes('0 cm') ? g.bubble_name : '-',
       type: 'single',
@@ -320,6 +329,7 @@ export default function Packaging({
         qty: p.qty || 1,
       })),
       count: orderPackCount(o),
+      pack_count: orderPackCount(o),
       box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '',
       bubble: (() => {
         const b = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
@@ -471,7 +481,7 @@ export default function Packaging({
       return `<tr${isMultiRow ? ' style="background:#fffbeb"' : ''}>
         <td class="num">${idx++}</td>
         <td>${nameHtml}</td>
-        <td style="text-align:center"><span class="badge">${s.count} ชุด</span></td>
+        <td style="text-align:center"><span class="badge">${snapshotPackCount(s)} ชุด</span></td>
         <td style="text-align:center">${escHtml(s.box || '-')}</td>
         <td style="text-align:center;color:#0369a1">${(s.bubble && s.bubble !== '-') ? escHtml(s.bubble) : '-'}</td>
         <td><div class="note-box"></div></td>
@@ -1257,7 +1267,7 @@ export default function Packaging({
                             return (
                               <div key={i} className="text-xs text-slate-600">
                                 <div>
-                                  {productName} — <span className="font-medium">{s.count} ชุด</span>
+                                  {productName} — <span className="font-medium">{snapshotPackCount(s)} ชุด</span>
                                 </div>
                                 {promoName && promoName !== productName && (
                                   <div className="text-[10px] text-slate-400 ml-2">{promoName}</div>
