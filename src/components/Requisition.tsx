@@ -14,6 +14,26 @@ function extractQty(name: string): number {
   return f ? parseInt(f[1]) : 1;
 }
 
+function cleanBoxName(name: string): string {
+  return String(name || '')
+    .replace(/^(กล่อง)\s+\1\s+/i, '$1 ')
+    .replace(/^กล่อง\s+(?=กล่อง\s+)/i, '')
+    .trim();
+}
+
+function displayBoxName(name: string): string {
+  const clean = cleanBoxName(name);
+  if (!clean) return '';
+  return clean.startsWith('กล่อง') ? clean : `กล่อง ${clean}`;
+}
+
+function parseOrderQuantities(value: unknown, count: number): number[] {
+  const parts = String(value || '')
+    .split('|')
+    .map(s => Number(String(s).trim()) || 1);
+  return Array.from({ length: count }, (_, i) => Math.max(1, parts[i] || 1));
+}
+
 function printDoc(docNo: string, docDate: string, items: any[], note: string) {
   const dateStr = new Date(docDate).toLocaleDateString('th-TH', { day:'2-digit', month:'2-digit', year:'numeric' });
   const rows = items.filter(it => it.name?.trim()).map((it, i) => `
@@ -152,7 +172,7 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
           .select('summary_snapshot').eq('id', packHistoryId).maybeSingle();
         const snap = (ph?.summary_snapshot || []) as any[];
         multiBoxes = snap.filter((s: any) => s.type === 'multi' && s.box)
-          .map((s: any) => ({ box: s.box, count: s.count || 1 }));
+          .map((s: any) => ({ box: cleanBoxName(s.box), count: Number(s.pack_count || s.count || 1) || 1 }));
       }
 
       // นับกล่องจาก multi-orders (จาก snapshot) — ใช้ชื่อกล่องเป็น key
@@ -165,11 +185,13 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
 
       for (const order of orders) {
         const rawProds = (order.raw_prod || '').split('|').map((s:string) => s.trim()).filter(Boolean);
-        const isMultiOrder = rawProds.length > 1;
+        const promoIds = Array.isArray(order.promo_ids) ? order.promo_ids : [];
+        const repeatQtys = parseOrderQuantities(order.quantities, Math.max(rawProds.length, promoIds.length));
+        const isComplexOrder = rawProds.length > 1 || promoIds.length > 1 || repeatQtys.some(q => q > 1);
         let orderBoxName = '', orderBubKey = '', orderBubName = '';
 
-        for (let i = 0; i < rawProds.length; i++) {
-          const pid = order.promo_ids?.[i];
+        for (let i = 0; i < Math.max(rawProds.length, promoIds.length); i++) {
+          const pid = promoIds[i];
           if (!pid) continue;
           const { data: promo } = await supabase.from('products_promo')
             .select('id, name, box_id, bubble_id, boxes(id,name), bubbles(id,name,length_cm), products_master(id,name)')
@@ -177,25 +199,27 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
           if (!promo) continue;
           const master = (promo as any).products_master;
           if (master?.id) {
-            const qty = extractQty(promo.name);
+            // จำนวนสินค้า = จำนวนชิ้นในโปร × จำนวนชุดที่เลือก เช่น 2 กระป๋อง x2 = 4 ชิ้น
+            const qty = extractQty(promo.name) * (repeatQtys[i] || 1);
             if (masterMap[master.id]) masterMap[master.id].qty += qty;
             else masterMap[master.id] = { name: master.name, qty };
           }
-          // นับกล่อง/บั้บเบิ้ลเฉพาะ single-product (multi ดึงจาก snapshot แล้ว)
-          if (!isMultiOrder && i === 0) {
+          // นับกล่อง/บั้บเบิ้ลเฉพาะออเดอร์ปกติเท่านั้น
+          // เคสซับซ้อน เช่น 2 กระป๋อง x2 หรือหลายโปร ใช้กล่องที่เลือกเองจาก pack_history snapshot
+          if (!isComplexOrder && i === 0) {
             const box = (promo as any).boxes;
             const bub = (promo as any).bubbles;
-            if (promo.box_id && box) { orderBoxName = box.name; }
+            if (promo.box_id && box) { orderBoxName = cleanBoxName(box.name); }
             if (promo.bubble_id && bub && Number(bub.length_cm) > 0) { orderBubKey = promo.bubble_id; orderBubName = `ยาว ${Number(bub.length_cm)} cm`; }
           }
         }
         // ใช้ชื่อกล่องเป็น key เดียวกับ multi เพื่อให้รวมกันได้
-        if (!isMultiOrder && orderBoxName) {
+        if (!isComplexOrder && orderBoxName) {
           const key = `box-name-${orderBoxName}`;
           if (boxMap[key]) boxMap[key].qty++;
           else boxMap[key] = { name: orderBoxName, qty: 1 };
         }
-        if (!isMultiOrder && orderBubKey) {
+        if (!isComplexOrder && orderBubKey) {
           if (bubbleMap[orderBubKey]) bubbleMap[orderBubKey].qty++;
           else bubbleMap[orderBubKey] = { name: orderBubName, qty: 1 };
         }
@@ -204,7 +228,7 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
       setMultiCount(multiCnt);
       const result: ReqItem[] = [
         ...Object.entries(masterMap).map(([id, {name, qty}]) => ({ key:`p-${id}`, name, qty, unit:'ชิ้น', type:'product' as const })),
-        ...Object.entries(boxMap).map(([id, {name, qty}])    => ({ key:`box-${id}`, name:`กล่อง ${name}`, qty, unit:'อัน', type:'box' as const })),
+        ...Object.entries(boxMap).map(([id, {name, qty}])    => ({ key:`box-${id}`, name: displayBoxName(name), qty, unit:'อัน', type:'box' as const })),
         ...Object.entries(bubbleMap).map(([id, {name, qty}]) => ({ key:`bub-${id}`, name:`บั้บเบิ้ล ${name}`, qty, unit:'แผ่น', type:'bubble' as const })),
       ];
       setItems(result);
@@ -298,7 +322,7 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
       const validItems = items.filter(it => it.name.trim()).map(it => ({
         ...it,
         // แก้ชื่อซ้ำ "กล่อง กล่อง X" → "กล่อง X" ก่อน save
-        name: it.name.replace(/^(กล่อง) \1\s+/, '$1 ').trim(),
+        name: it.type === 'box' ? displayBoxName(it.name) : it.name.trim(),
       }));
 
       // resolve stock_item_id สำหรับทุก item ก่อน insert
