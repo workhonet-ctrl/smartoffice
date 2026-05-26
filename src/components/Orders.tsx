@@ -572,6 +572,26 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const { shipCostMap, reloadShipCost } = useShipCostMap();
   const [editingShipDate, setEditingShipDate] = useState<string|null>(null);
 
+  const getExportTotalQuantity = (o: Order) => {
+    const promoIds = Array.isArray(o.promo_ids) ? o.promo_ids : [];
+    const qtys = String((o as any).quantities || '')
+      .split('|')
+      .map((q: string) => Number(q.trim()) || 1);
+
+    if (promoIds.length > 0) {
+      const totalFromPromos = promoIds.reduce((sum, promoId, idx) => {
+        const promo = promoMap[promoId];
+        const sizePerSet = promo ? extractQty(promo.name) : 0;
+        const setQty = qtys[idx] || 1;
+        return sum + (sizePerSet * setQty);
+      }, 0);
+
+      if (totalFromPromos > 0) return totalFromPromos;
+    }
+
+    return Number(o.quantity) || '';
+  };
+
   const handleExportExcel = () => {
     const toExport = filtered.filter(o => selectedOrders.size > 0 ? selectedOrders.has(o.id) : true);
     const rows = toExport.map(o => ({
@@ -586,7 +606,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
       'รหัสไปรษณีย์':   o.customers?.postal_code || '',
       'ช่องทาง':        o.channel || '',
       'สินค้า':         o.raw_prod || '',
-      'จำนวน':          o.quantity || '',
+      'จำนวน':          getExportTotalQuantity(o),
       'ขนส่ง':          o.courier || (o.route === 'B' ? 'FLASH' : 'ไปรษณีย์'),
       'Tracking':       o.tracking_no || '',
       'ยอดรวม':         o.total_thb || '',
