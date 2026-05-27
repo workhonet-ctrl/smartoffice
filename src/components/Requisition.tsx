@@ -260,11 +260,13 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
       const toInsert: any[] = [];
       for (const item of itemsToReturn) {
         // หา stock_item_id จากชื่อ
-        const cleanName = item.name.replace(/^(กล่อง) \s+/, '$1 ').trim();
-        const { data: si } = await supabase
-          .from('stock_items').select('id')
-          .or(`name.eq.${cleanName},name.eq.${item.name}`)
-          .maybeSingle();
+        const cleanName = cleanBoxName(item.name);
+        const nameCandidates = Array.from(new Set([cleanName, item.name].filter(Boolean)));
+        const { data: stockMatches } = await supabase
+          .from('stock_items').select('id, name')
+          .in('name', nameCandidates)
+          .limit(1);
+        const si = stockMatches?.[0];
 
         if (si?.id) {
           toInsert.push({
@@ -297,9 +299,19 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
       const { error } = await supabase.from('stock_transactions').insert(toInsert);
       if (error) throw error;
 
-      showToast(`✓ คืนสต็อก ${toInsert.length} รายการจากใบเบิก ${returnDoc.doc_no}`);
+      // คืนสต็อกแล้วให้ลบใบเบิกออกจากประวัติทันที
+      // หมายเหตุ: ลบเฉพาะ record ใบเบิก ไม่ลบ stock_transactions ที่เพิ่งสร้างเป็นหลักฐานการคืนสต็อก
+      const { error: deleteReqError } = await supabase
+        .from('requisitions')
+        .delete()
+        .eq('id', returnDoc.id);
+      if (deleteReqError) throw deleteReqError;
+
+      setHistory(prev => prev.filter(h => h.id !== returnDoc.id));
+      showToast(`✓ คืนสต็อกและลบใบเบิก ${returnDoc.doc_no} ออกจากประวัติแล้ว`);
       setShowReturnModal(false);
       setReturnDoc(null);
+      setReturnQtys({});
     } catch (err: any) {
       showToast('❌ ' + (err.message || 'unknown'), 'error');
     } finally { setReturnSaving(false); }
@@ -589,8 +601,8 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
                 </tr>
               </thead>
               <tbody>
-                {hLoading && <tr><td colSpan={8} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
-                {!hLoading && filteredHistory.length === 0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">ไม่พบข้อมูล</td></tr>}
+                {hLoading && <tr><td colSpan={9} className="p-8 text-center text-slate-400">กำลังโหลด...</td></tr>}
+                {!hLoading && filteredHistory.length === 0 && <tr><td colSpan={9} className="p-8 text-center text-slate-400">ไม่พบข้อมูล</td></tr>}
                 {filteredHistory.map(h => {
                   const itemList = (h.items||[]).filter((it:any) => it.name?.trim());
                   const totalQty = itemList.reduce((s:number, it:any) => s + Number(it.qty), 0);
@@ -636,14 +648,27 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
 
       {/* ── Modal: คืนสต็อก ── */}
       {showReturnModal && returnDoc && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
-              <div>
-                <h2 className="text-base font-bold text-slate-800">↩ คืนสต็อก</h2>
-                <p className="text-xs text-slate-400 mt-0.5">ใบเบิก <span className="font-mono text-blue-600">{returnDoc.doc_no}</span> — กรอกจำนวนที่ต้องการคืน</p>
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border-4 border-pink-100">
+            <div className="relative px-6 py-5 shrink-0 bg-gradient-to-r from-pink-400 via-orange-300 to-yellow-300 text-white">
+              <div className="absolute -top-8 -right-8 w-28 h-28 bg-white/20 rounded-full" />
+              <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-white/15 rounded-full" />
+              <div className="relative flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-white/95 text-pink-500 flex items-center justify-center text-2xl shadow-lg">↩</div>
+                  <div>
+                    <h2 className="text-xl font-extrabold drop-shadow-sm">ยืนยันคืนสต็อก?</h2>
+                    <p className="text-sm text-white/95 mt-1">ใบเบิก <span className="font-mono font-bold bg-white/25 px-2 py-0.5 rounded-lg">{returnDoc.doc_no}</span></p>
+                  </div>
+                </div>
+                <button onClick={() => setShowReturnModal(false)} className="relative p-2 hover:bg-white/20 rounded-xl text-white text-lg">✕</button>
               </div>
-              <button onClick={() => setShowReturnModal(false)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400">✕</button>
+            </div>
+            <div className="px-6 pt-5">
+              <div className="rounded-2xl border-2 border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-sm">
+                <div className="font-extrabold text-red-800 flex items-center gap-2">⚠️ หากคืนสต็อกแล้ว จะไม่สามารถกู้กลับมาได้</div>
+                <div className="mt-1 text-xs leading-5">ระบบจะคืนจำนวนสินค้า/กล่องกลับเข้าสต็อก และลบใบเบิกนี้ออกจากประวัติทันที กรุณาตรวจจำนวนให้ถูกต้องก่อนยืนยัน</div>
+              </div>
             </div>
             <div className="flex-1 overflow-auto px-6 py-4">
               <table className="w-full text-sm">
@@ -651,7 +676,7 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
                   <tr className="border-b bg-slate-50">
                     <th className="p-2 text-left text-xs text-slate-500 font-medium">รายการสินค้า</th>
                     <th className="p-2 text-center text-xs text-slate-500 font-medium w-20">เบิกไป</th>
-                    <th className="p-2 text-center text-xs text-slate-500 font-medium w-24">คืน</th>
+                    <th className="p-2 text-center text-xs text-pink-600 font-bold w-24">จำนวนที่จะคืน</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -669,30 +694,31 @@ export default function Requisition({ packHistoryId }: { packHistoryId?: string 
                             ...prev,
                             [i]: Math.min(Number(e.target.value) || 0, Number(it.qty))
                           }))}
-                          className={`border rounded-lg px-2 py-1 text-xs text-center w-20 focus:outline-none focus:ring-2 focus:ring-amber-300
-                            ${(returnQtys[i] || 0) > 0 ? 'border-amber-300 bg-amber-50' : ''}`}/>
+                          className={`border rounded-xl px-2 py-1.5 text-xs text-center w-20 focus:outline-none focus:ring-2 focus:ring-pink-300 font-bold
+                            ${(returnQtys[i] || 0) > 0 ? 'border-pink-300 bg-pink-50 text-pink-700' : ''}`}/>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <div className="px-6 py-4 border-t flex items-center justify-between shrink-0 bg-slate-50 rounded-b-2xl">
-              <div className="text-xs text-slate-500">
+            <div className="px-6 py-4 border-t flex items-center justify-between shrink-0 bg-gradient-to-r from-pink-50 to-orange-50 rounded-b-3xl">
+              <div className="text-xs text-slate-600">
                 คืน{' '}
-                <span className="font-bold text-amber-600">
+                <span className="font-extrabold text-pink-600 text-base">
                   {Object.values(returnQtys).reduce((s, v) => s + (v || 0), 0)}
                 </span>
                 {' '}หน่วย จาก {(returnDoc.items || []).reduce((s: number, it: any) => s + Number(it.qty || 0), 0)} หน่วย
+                <div className="text-[11px] text-red-500 mt-0.5">ยืนยันแล้วจะลบใบเบิกนี้ออกจากประวัติทันที</div>
               </div>
               <div className="flex gap-2">
                 <button onClick={() => setShowReturnModal(false)}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-medium">
+                  className="px-4 py-2 bg-white text-slate-700 rounded-xl hover:bg-slate-100 text-sm font-bold border border-slate-200 shadow-sm">
                   ยกเลิก
                 </button>
                 <button onClick={handleReturnStock} disabled={returnSaving}
-                  className="px-5 py-2 bg-amber-500 text-white rounded-xl hover:bg-amber-600 text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
-                  {returnSaving ? 'กำลังบันทึก...' : '↩ ยืนยันคืนสต็อก'}
+                  className="px-5 py-2 bg-gradient-to-r from-pink-500 to-orange-500 text-white rounded-xl hover:from-pink-600 hover:to-orange-600 text-sm font-extrabold disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-pink-200">
+                  {returnSaving ? 'กำลังคืนสต็อก...' : '↩ ยืนยันคืนสต็อกและลบใบเบิก'}
                 </button>
               </div>
             </div>
