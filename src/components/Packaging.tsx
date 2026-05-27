@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, ClipboardList, FileText, AlertCircle, Printer, History, RefreshCw } from 'lucide-react';
+import { Package, ClipboardList, FileText, AlertCircle, Printer, History, RefreshCw, Trash2, X } from 'lucide-react';
 
 type PackOrder = {
   id: string; order_no: string; order_date: string | null; order_time: string | null;
@@ -27,6 +27,8 @@ export default function Packaging({
   const [tab, setTab]           = useState<'prep' | 'summary' | 'history'>('prep');
   const [printHistory, setPrintHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [deleteHistoryTarget, setDeleteHistoryTarget] = useState<any | null>(null);
+  const [deletingHistory, setDeletingHistory] = useState(false);
 
   const [override, setOverride] = useState<Override>({});
   const [boxes, setBoxes]       = useState<{ id: string; name: string }[]>([]);
@@ -461,6 +463,25 @@ export default function Packaging({
       .limit(80);
     setPrintHistory(dedupePrintHistory(data || []));
     setLoadingHistory(false);
+  };
+
+  const handleDeletePrintHistory = async () => {
+    if (!deleteHistoryTarget?.id || deletingHistory) return;
+    setDeletingHistory(true);
+    try {
+      const { error } = await supabase
+        .from('pack_history')
+        .delete()
+        .eq('id', deleteHistoryTarget.id);
+      if (error) throw error;
+      setPrintHistory(prev => prev.filter(h => h.id !== deleteHistoryTarget.id));
+      setDeleteHistoryTarget(null);
+    } catch (err) {
+      console.error('[delete pack_history error]', err);
+      alert('ลบประวัติปริ้นไม่สำเร็จ กรุณาลองใหม่');
+    } finally {
+      setDeletingHistory(false);
+    }
   };
 
   const handleReprintFromHistory = (item: any) => {
@@ -1214,7 +1235,7 @@ export default function Packaging({
           <div className="flex items-center justify-between px-5 py-4 border-b">
             <div>
               <h3 className="font-semibold text-slate-800">ประวัติการปริ้นใบเตรียมสินค้า</h3>
-              <p className="text-xs text-slate-400 mt-0.5">กดปุ่มปริ้นซ้ำเพื่อพิมพ์อีกครั้ง</p>
+              <p className="text-xs text-slate-400 mt-0.5">กดปุ่มปริ้นซ้ำเพื่อพิมพ์อีกครั้ง หรือลบเฉพาะประวัติปริ้นที่ไม่ต้องการ</p>
             </div>
             <button onClick={loadPrintHistory} disabled={loadingHistory}
               className="flex items-center gap-2 px-3 py-1.5 text-xs border rounded-lg hover:bg-slate-50 transition disabled:opacity-50">
@@ -1236,7 +1257,7 @@ export default function Packaging({
                   <th className="p-3 text-center text-xs font-medium text-slate-500">จำนวนออเดอร์</th>
                   <th className="p-3 text-center text-xs font-medium text-slate-500">สถานะ</th>
                   <th className="p-3 text-center text-xs font-medium text-slate-500">รายการสินค้า</th>
-                  <th className="p-3 text-center text-xs font-medium text-slate-500">ปริ้นซ้ำ</th>
+                  <th className="p-3 text-center text-xs font-medium text-slate-500">จัดการ</th>
                 </tr>
               </thead>
               <tbody>
@@ -1279,11 +1300,19 @@ export default function Packaging({
                         </div>
                       </td>
                       <td className="p-3 text-center">
-                        <button
-                          onClick={() => handleReprintFromHistory(item)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-medium hover:bg-slate-700 transition mx-auto">
-                          <Printer size={12}/> ปริ้นซ้ำ
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => handleReprintFromHistory(item)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-medium hover:bg-slate-700 transition">
+                            <Printer size={12}/> ปริ้นซ้ำ
+                          </button>
+                          <button
+                            onClick={() => setDeleteHistoryTarget(item)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-semibold hover:bg-red-100 transition"
+                            title="ลบเฉพาะประวัติปริ้นนี้">
+                            <Trash2 size={12}/> ลบ
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1293,6 +1322,64 @@ export default function Packaging({
           )}
         </div>
       )}
+
+      {deleteHistoryTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl border border-slate-100">
+            <div className="relative bg-gradient-to-br from-red-50 via-white to-orange-50 px-6 pt-6 pb-4">
+              <button
+                onClick={() => !deletingHistory && setDeleteHistoryTarget(null)}
+                className="absolute right-4 top-4 rounded-full p-1.5 text-slate-400 hover:bg-white hover:text-slate-700 transition"
+                disabled={deletingHistory}>
+                <X size={18}/>
+              </button>
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-red-600">
+                <Trash2 size={28}/>
+              </div>
+              <h3 className="text-center text-xl font-bold text-slate-900">แน่ใจหรือไม่ที่จะลบ?</h3>
+              <p className="mt-2 text-center text-sm text-slate-500">
+                รายการนี้จะถูกลบออกจากประวัติปริ้นเท่านั้น<br/>
+                ไม่ลบออเดอร์จริง และไม่กระทบสต็อก
+              </p>
+            </div>
+            <div className="px-6 py-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 space-y-1">
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">วันที่ปริ้น</span>
+                  <span className="font-semibold text-slate-700 text-right">
+                    {new Date(deleteHistoryTarget.created_at).toLocaleString('th-TH', {
+                      day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit'
+                    })}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">ผู้รับผิดชอบ</span>
+                  <span className="font-semibold text-slate-700 text-right">{deleteHistoryTarget.responsible_person || '-'}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">จำนวนออเดอร์</span>
+                  <span className="font-semibold text-slate-700 text-right">{deleteHistoryTarget.order_count || 0} รายการ</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 border-t border-slate-100 bg-white px-6 py-4">
+              <button
+                onClick={() => setDeleteHistoryTarget(null)}
+                disabled={deletingHistory}
+                className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button
+                onClick={handleDeletePrintHistory}
+                disabled={deletingHistory}
+                className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 transition disabled:opacity-50">
+                {deletingHistory ? 'กำลังลบ...' : 'ยืนยันลบ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
