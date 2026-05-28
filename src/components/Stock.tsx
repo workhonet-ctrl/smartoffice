@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Plus, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, X, ShoppingBag, PackagePlus, Download } from 'lucide-react';
+import { Package, Plus, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, X, ShoppingBag, PackagePlus, Download, Trash2, Sparkles } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 type StockItem = {
@@ -48,6 +48,9 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [historyTxnFilter, setHistoryTxnFilter] = useState<'all'|'in'|'out'|'return'|'adjustment'>('all');
   const [historyDateFrom, setHistoryDateFrom] = useState('');
   const [historyDateTo, setHistoryDateTo] = useState('');
+  const [selectedTxnIds, setSelectedTxnIds] = useState<string[]>([]);
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; mode: 'selected' | 'all'; ids: string[] }>({ open: false, mode: 'selected', ids: [] });
+  const [deletingTxns, setDeletingTxns] = useState(false);
 
   // รับเข้าสต็อก form (simplified)
   const [rcvItemId, setRcvItemId] = useState('');
@@ -328,6 +331,49 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     return acc;
   }, { inQty: 0, outQty: 0, returnQty: 0, adjustQty: 0 });
 
+
+  const filteredTxnIds = filteredTxns.map(t => t.id);
+  const allFilteredSelected = filteredTxnIds.length > 0 && filteredTxnIds.every(id => selectedTxnIds.includes(id));
+
+  const toggleSelectAllFiltered = (checked: boolean) => {
+    if (checked) {
+      setSelectedTxnIds(Array.from(new Set([...selectedTxnIds, ...filteredTxnIds])));
+    } else {
+      setSelectedTxnIds(selectedTxnIds.filter(id => !filteredTxnIds.includes(id)));
+    }
+  };
+
+  const toggleTxnSelection = (id: string, checked: boolean) => {
+    setSelectedTxnIds(prev => checked ? Array.from(new Set([...prev, id])) : prev.filter(x => x !== id));
+  };
+
+  const openDeleteDialog = (mode: 'selected' | 'all') => {
+    const ids = mode === 'selected' ? selectedTxnIds : filteredTxnIds;
+    if (ids.length === 0) {
+      showToast(mode === 'selected' ? 'กรุณาเลือกรายการที่ต้องการลบ' : 'ไม่มีรายการสำหรับลบ', 'error');
+      return;
+    }
+    setDeleteDialog({ open: true, mode, ids });
+  };
+
+  const handleDeleteTransactions = async () => {
+    if (deleteDialog.ids.length === 0) return;
+    setDeletingTxns(true);
+    try {
+      const { error } = await supabase.from('stock_transactions').delete().in('id', deleteDialog.ids);
+      if (error) throw error;
+      showToast(`✓ ลบประวัติการเคลื่อนไหว ${deleteDialog.ids.length} รายการแล้ว`);
+      setSelectedTxnIds(prev => prev.filter(id => !deleteDialog.ids.includes(id)));
+      setDeleteDialog({ open: false, mode: 'selected', ids: [] });
+      await loadTxns();
+      await loadItems();
+    } catch (err: any) {
+      showToast('❌ ลบไม่สำเร็จ: ' + (err.message || 'unknown error'), 'error');
+    } finally {
+      setDeletingTxns(false);
+    }
+  };
+
   const handleExportHistory = () => {
     const rows = filteredTxns.map(t => ({
       'วันที่': new Date(t.created_at).toLocaleDateString('th-TH'),
@@ -586,14 +632,32 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                   className="px-3 py-1.5 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 flex items-center gap-1 text-xs font-bold">
                   <Download size={12}/> Export Excel
                 </button>
+                <button
+                  onClick={() => openDeleteDialog('selected')}
+                  className="px-3 py-1.5 bg-rose-500 text-white rounded-lg hover:bg-rose-600 flex items-center gap-1 text-xs font-bold">
+                  <Trash2 size={12}/> เลือกลบ
+                </button>
+                <button
+                  onClick={() => openDeleteDialog('all')}
+                  className="px-3 py-1.5 bg-fuchsia-500 text-white rounded-lg hover:bg-fuchsia-600 flex items-center gap-1 text-xs font-bold">
+                  <Trash2 size={12}/> ลบทั้งหมด
+                </button>
               </div>
             </div>
           </div>
 
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-            <table className="text-sm w-full" style={{minWidth:'900px'}}>
+            <table className="text-sm w-full" style={{minWidth:'980px'}}>
               <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
                 <tr>
+                  <th className="p-3 text-center w-12">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={e => toggleSelectAllFiltered(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-400 cursor-pointer"
+                    />
+                  </th>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-center whitespace-nowrap">ประเภท</th>
                   <th className="p-3 text-left whitespace-nowrap">รายการ</th>
@@ -603,9 +667,17 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {filteredTxns.length===0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">ไม่พบประวัติการเคลื่อนไหวตามตัวกรอง</td></tr>}
+                {filteredTxns.length===0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">ไม่พบประวัติการเคลื่อนไหวตามตัวกรอง</td></tr>}
                 {filteredTxns.map(t => (
-                  <tr key={t.id} className={`border-b hover:bg-slate-50 ${t.txn_type==='in'?'':'bg-red-50/30'}`}>
+                  <tr key={t.id} className={`border-b hover:bg-slate-50 ${selectedTxnIds.includes(t.id) ? 'bg-rose-50/70' : t.txn_type==='in' ? '' : 'bg-red-50/30'}`}>
+                    <td className="p-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedTxnIds.includes(t.id)}
+                        onChange={e => toggleTxnSelection(t.id, e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-400 cursor-pointer"
+                      />
+                    </td>
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
                       {new Date(t.created_at).toLocaleDateString('th-TH')}
                       <div className="text-slate-400">{new Date(t.created_at).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}</div>
@@ -872,6 +944,56 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                 className="flex-1 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 disabled:opacity-50 font-medium">
                 เพิ่มรายการ
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {deleteDialog.open && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-[110] flex items-center justify-center p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-[0_25px_80px_rgba(0,0,0,0.25)] border border-rose-100">
+            <div className="relative bg-gradient-to-br from-pink-500 via-fuchsia-500 to-orange-400 px-6 py-6 text-white">
+              <div className="absolute -top-6 -right-4 h-24 w-24 rounded-full bg-white/15" />
+              <div className="absolute -bottom-8 -left-6 h-24 w-24 rounded-full bg-white/10" />
+              <div className="relative flex items-start gap-4">
+                <div className="h-14 w-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center shadow-lg shrink-0">
+                  <Trash2 size={26} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Sparkles size={16} className="text-yellow-200" />
+                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-pink-100">Delete Confirm</p>
+                  </div>
+                  <h3 className="text-xl font-extrabold leading-tight">แน่ใจหรือไม่ที่จะลบรายการนี้?</h3>
+                  <p className="mt-2 text-sm text-pink-50/95">
+                    {deleteDialog.mode === 'selected'
+                      ? `คุณกำลังจะลบประวัติที่เลือก ${deleteDialog.ids.length} รายการ`
+                      : `คุณกำลังจะลบทั้งหมด ${deleteDialog.ids.length} รายการตามตัวกรองที่แสดงอยู่`}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-5 bg-gradient-to-b from-rose-50 to-orange-50">
+              <div className="rounded-2xl border border-rose-200 bg-white/90 px-4 py-4 text-sm text-slate-700 shadow-sm">
+                <p className="font-bold text-rose-600 mb-1">⚠️ คำเตือนสำคัญ</p>
+                <p>หากลบแล้ว <span className="font-bold text-rose-600">จะไม่สามารถกู้คืนกลับมาได้</span> กรุณาตรวจสอบอีกครั้งก่อนยืนยันนะคะ</p>
+              </div>
+
+              <div className="mt-5 flex gap-3">
+                <button
+                  onClick={() => setDeleteDialog({ open: false, mode: 'selected', ids: [] })}
+                  className="flex-1 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 transition">
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={handleDeleteTransactions}
+                  disabled={deletingTxns}
+                  className="flex-1 rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-fuchsia-500 px-4 py-3 text-sm font-bold text-white shadow-lg hover:scale-[1.02] transition disabled:opacity-60 disabled:hover:scale-100">
+                  {deletingTxns ? 'กำลังลบ...' : 'ยืนยันการลบ'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
