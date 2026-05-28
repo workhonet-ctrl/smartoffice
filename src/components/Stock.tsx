@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Plus, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, X, ShoppingBag, PackagePlus } from 'lucide-react';
+import { Package, Plus, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, X, ShoppingBag, PackagePlus, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 type StockItem = {
   id: string; name: string; unit: string; type: string;
@@ -41,6 +42,12 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
   const [toast, setToast]     = useState<{ msg: string; type: 'success'|'error' } | null>(null);
+
+  // ตัวกรองประวัติการเคลื่อนไหว
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyTxnFilter, setHistoryTxnFilter] = useState<'all'|'in'|'out'|'return'|'adjustment'>('all');
+  const [historyDateFrom, setHistoryDateFrom] = useState('');
+  const [historyDateTo, setHistoryDateTo] = useState('');
 
   // รับเข้าสต็อก form (simplified)
   const [rcvItemId, setRcvItemId] = useState('');
@@ -93,7 +100,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     setLoading(true);
     const { data } = await supabase.from('stock_transactions')
       .select('*, stock_items(name,unit)')
-      .order('created_at', { ascending: false }).limit(200);
+      .order('created_at', { ascending: false }).limit(1000);
     if (data) setTxns(data as Transaction[]);
     setLoading(false);
   };
@@ -269,6 +276,77 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     if (item.min_qty > 0 && item.current_qty <= item.min_qty*1.5) return <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">🟡 ใกล้หมด</span>;
     if (item.min_qty > 0) return <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">🟢 ปกติ</span>;
     return <span className="text-slate-300 text-xs">-</span>;
+  };
+
+
+  const getTxnCategory = (t: Transaction): 'in'|'out'|'return'|'adjustment' => {
+    if (t.ref_type === 'return') return 'return';
+    if (t.ref_type === 'adjustment') return 'adjustment';
+    return t.txn_type === 'in' ? 'in' : 'out';
+  };
+
+  const getTxnLabel = (t: Transaction) => {
+    const category = getTxnCategory(t);
+    if (category === 'return') return 'คืนสต็อก';
+    if (category === 'adjustment') return 'ปรับปรุง';
+    return t.txn_type === 'in' ? 'รับเข้า' : 'เบิกออก';
+  };
+
+  const txnTypeBadge = (t: Transaction) => {
+    const category = getTxnCategory(t);
+    if (category === 'return') {
+      return <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold"><ArrowDown size={10}/>คืนสต็อก</span>;
+    }
+    if (category === 'adjustment') {
+      return <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-bold">↕ ปรับปรุง</span>;
+    }
+    return t.txn_type === 'in'
+      ? <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold"><ArrowDown size={10}/>รับเข้า</span>
+      : <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-bold"><ArrowUp size={10}/>เบิกออก</span>;
+  };
+
+  const filteredTxns = txns.filter(t => {
+    const q = historySearch.trim().toLowerCase();
+    const itemName = ((t as any).stock_items?.name || '').toLowerCase();
+    const ref = `${t.ref_type || ''} ${t.ref_id || ''}`.toLowerCase();
+    const note = (t.note || '').toLowerCase();
+    const matchSearch = !q || itemName.includes(q) || ref.includes(q) || note.includes(q);
+    const matchType = historyTxnFilter === 'all' || getTxnCategory(t) === historyTxnFilter;
+    const txnDate = new Date(t.created_at).toISOString().split('T')[0];
+    const matchFrom = !historyDateFrom || txnDate >= historyDateFrom;
+    const matchTo = !historyDateTo || txnDate <= historyDateTo;
+    return matchSearch && matchType && matchFrom && matchTo;
+  });
+
+  const historyTotals = filteredTxns.reduce((acc, t) => {
+    const qty = Number(t.qty) || 0;
+    const category = getTxnCategory(t);
+    if (category === 'return') acc.returnQty += qty;
+    else if (category === 'adjustment') acc.adjustQty += qty;
+    else if (t.txn_type === 'in') acc.inQty += qty;
+    else acc.outQty += qty;
+    return acc;
+  }, { inQty: 0, outQty: 0, returnQty: 0, adjustQty: 0 });
+
+  const handleExportHistory = () => {
+    const rows = filteredTxns.map(t => ({
+      'วันที่': new Date(t.created_at).toLocaleDateString('th-TH'),
+      'เวลา': new Date(t.created_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+      'ประเภท': getTxnLabel(t),
+      'รายการ': (t as any).stock_items?.name || '-',
+      'จำนวน': `${t.txn_type === 'in' ? '+' : '-'}${Number(t.qty)}`,
+      'หน่วย': (t as any).stock_items?.unit || '',
+      'อ้างอิง': `${t.ref_type ? `${t.ref_type}: ` : ''}${t.ref_id || '-'}`,
+      'หมายเหตุ': t.note || '-',
+    }));
+    if (rows.length === 0) {
+      showToast('ไม่มีข้อมูลสำหรับ Export', 'error');
+      return;
+    }
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Stock Movement');
+    XLSX.writeFile(wb, `stock_movement_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (
@@ -452,48 +530,104 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
 
       {/* ── Tab: ประวัติ ── */}
       {tab === 'history' && (
-        <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-          <table className="text-sm w-full" style={{minWidth:'700px'}}>
-            <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
-              <tr>
-                <th className="p-3 text-left whitespace-nowrap">วันที่</th>
-                <th className="p-3 text-center whitespace-nowrap">ประเภท</th>
-                <th className="p-3 text-left whitespace-nowrap">รายการ</th>
-                <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
-                <th className="p-3 text-left whitespace-nowrap">อ้างอิง</th>
-                <th className="p-3 text-left whitespace-nowrap">หมายเหตุ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {txns.length===0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">ยังไม่มีการเคลื่อนไหว</td></tr>}
-              {txns.map(t => (
-                <tr key={t.id} className={`border-b hover:bg-slate-50 ${t.txn_type==='in'?'':'bg-red-50/30'}`}>
-                  <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
-                    {new Date(t.created_at).toLocaleDateString('th-TH')}
-                    <div className="text-slate-400">{new Date(t.created_at).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}</div>
-                  </td>
-                  <td className="p-3 text-center">
-                    {t.txn_type==='in'
-                      ? <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold"><ArrowDown size={10}/>รับเข้า</span>
-                      : <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-bold"><ArrowUp size={10}/>เบิกออก</span>
-                    }
-                  </td>
-                  <td className="p-3 font-medium whitespace-nowrap">{(t as any).stock_items?.name || '-'}</td>
-                  <td className="p-3 text-center font-bold">
-                    <span className={t.txn_type==='in'?'text-green-600':' text-red-500'}>
-                      {t.txn_type==='in'?'+':'-'}{Number(t.qty)}
-                    </span>
-                    <span className="text-xs text-slate-400 ml-1">{(t as any).stock_items?.unit}</span>
-                  </td>
-                  <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
-                    {t.ref_type && <span className="text-slate-400">{t.ref_type}: </span>}
-                    {t.ref_id || '-'}
-                  </td>
-                  <td className="p-3 text-xs text-slate-500">{t.note || '-'}</td>
+        <div className="flex flex-col flex-1 min-h-0 gap-3">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-3 shrink-0 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+              <div className="relative md:col-span-2">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                <input
+                  value={historySearch}
+                  onChange={e => setHistorySearch(e.target.value)}
+                  placeholder="ค้นหาสินค้า / กล่อง / อ้างอิง / หมายเหตุ..."
+                  className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              </div>
+              <select
+                value={historyTxnFilter}
+                onChange={e => setHistoryTxnFilter(e.target.value as any)}
+                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
+                <option value="all">ทุกประเภท</option>
+                <option value="in">รับเข้า</option>
+                <option value="out">เบิกออก</option>
+                <option value="return">คืนสต็อก</option>
+                <option value="adjustment">ปรับปรุง</option>
+              </select>
+              <input
+                type="date"
+                value={historyDateFrom}
+                onChange={e => setHistoryDateFrom(e.target.value)}
+                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              <input
+                type="date"
+                value={historyDateTo}
+                onChange={e => setHistoryDateTo(e.target.value)}
+                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+            </div>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap text-xs">
+                <span className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg font-semibold">แสดง {filteredTxns.length} / {txns.length} รายการ</span>
+                <span className="px-3 py-1.5 bg-green-50 text-green-700 rounded-lg font-bold">รับเข้า +{historyTotals.inQty.toLocaleString()}</span>
+                <span className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-bold">เบิกออก -{historyTotals.outQty.toLocaleString()}</span>
+                <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg font-bold">คืนสต็อก +{historyTotals.returnQty.toLocaleString()}</span>
+                <span className="px-3 py-1.5 bg-amber-50 text-amber-700 rounded-lg font-bold">ปรับปรุง {historyTotals.adjustQty.toLocaleString()}</span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setHistorySearch(''); setHistoryTxnFilter('all'); setHistoryDateFrom(''); setHistoryDateTo(''); }}
+                  className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center gap-1 text-xs font-medium">
+                  <X size={12}/> ล้างตัวกรอง
+                </button>
+                <button
+                  onClick={loadTxns}
+                  className="px-3 py-1.5 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 flex items-center gap-1 text-xs font-medium">
+                  <RefreshCw size={12} className={loading ? 'animate-spin' : ''}/> รีโหลด
+                </button>
+                <button
+                  onClick={handleExportHistory}
+                  className="px-3 py-1.5 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 flex items-center gap-1 text-xs font-bold">
+                  <Download size={12}/> Export Excel
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+            <table className="text-sm w-full" style={{minWidth:'900px'}}>
+              <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+                <tr>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                  <th className="p-3 text-center whitespace-nowrap">ประเภท</th>
+                  <th className="p-3 text-left whitespace-nowrap">รายการ</th>
+                  <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
+                  <th className="p-3 text-left whitespace-nowrap">อ้างอิง</th>
+                  <th className="p-3 text-left whitespace-nowrap">หมายเหตุ</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filteredTxns.length===0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">ไม่พบประวัติการเคลื่อนไหวตามตัวกรอง</td></tr>}
+                {filteredTxns.map(t => (
+                  <tr key={t.id} className={`border-b hover:bg-slate-50 ${t.txn_type==='in'?'':'bg-red-50/30'}`}>
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                      {new Date(t.created_at).toLocaleDateString('th-TH')}
+                      <div className="text-slate-400">{new Date(t.created_at).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}</div>
+                    </td>
+                    <td className="p-3 text-center">{txnTypeBadge(t)}</td>
+                    <td className="p-3 font-medium whitespace-nowrap">{(t as any).stock_items?.name || '-'}</td>
+                    <td className="p-3 text-center font-bold">
+                      <span className={t.txn_type==='in'?'text-green-600':' text-red-500'}>
+                        {t.txn_type==='in'?'+':'-'}{Number(t.qty)}
+                      </span>
+                      <span className="text-xs text-slate-400 ml-1">{(t as any).stock_items?.unit}</span>
+                    </td>
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                      {t.ref_type && <span className="text-slate-400">{t.ref_type}: </span>}
+                      {t.ref_id || '-'}
+                    </td>
+                    <td className="p-3 text-xs text-slate-500">{t.note || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
