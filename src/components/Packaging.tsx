@@ -25,6 +25,7 @@ export default function Packaging({
   const [orders, setOrders]     = useState<PackOrder[]>([]);
   const [loading, setLoading]   = useState(true);
   const [tab, setTab]           = useState<'prep' | 'summary' | 'history'>('prep');
+  const [showPackHelper, setShowPackHelper] = useState(false);
   const [printHistory, setPrintHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [deleteHistoryTarget, setDeleteHistoryTarget] = useState<any | null>(null);
@@ -1119,7 +1120,7 @@ export default function Packaging({
         <>
           {packagingHelperSummary.length > 0 && (
             <div className="shrink-0 mb-3 rounded-2xl border border-pink-200 bg-gradient-to-br from-pink-50 via-fuchsia-50 to-amber-50 p-4 shadow-sm">
-              <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div>
                   <h3 className="text-sm font-extrabold text-pink-700 flex items-center gap-2">
                     📦 สรุปช่วยแพ็ค
@@ -1128,64 +1129,82 @@ export default function Packaging({
                     </span>
                   </h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    รวมเฉพาะรายการแพ็คพิเศษที่เหมือนกันจริง เพื่อช่วยดูจำนวนกล่องเท่านั้น · ตารางหลักด้านล่างยังแยกตามออเดอร์เหมือนเดิม
+                    ใช้ดูช่วยเท่านั้น · ตารางหลักด้านล่างยังเป็นข้อมูลจริงสำหรับแพ็คและสร้างใบเบิก
                   </p>
                 </div>
-                <div className="text-xs font-bold text-fuchsia-700 bg-white/80 border border-fuchsia-100 rounded-xl px-3 py-1.5">
-                  {packagingHelperSummary.length} กลุ่มที่ซ้ำ
+                <div className="flex items-center gap-2">
+                  <div className="text-xs font-bold text-fuchsia-700 bg-white/80 border border-fuchsia-100 rounded-xl px-3 py-1.5">
+                    {packagingHelperSummary.length} กลุ่มที่ซ้ำ
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPackHelper(v => !v)}
+                    className="px-3 py-1.5 rounded-xl bg-pink-500 text-white text-xs font-extrabold hover:bg-pink-600 shadow-sm">
+                    {showPackHelper ? 'ย่อสรุป' : 'เปิดดูสรุป'}
+                  </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {packagingHelperSummary.map((row, idx) => (
-                  <div key={row.key} className="rounded-2xl bg-white/90 border border-pink-100 shadow-sm p-3">
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-pink-500 text-white text-xs font-extrabold flex items-center justify-center">
-                          {idx + 1}
-                        </span>
-                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${row.channelLabel === 'FLASH' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'}`}>
-                          {row.channelLabel}
-                        </span>
-                      </div>
-                      <span className="text-sm font-extrabold text-pink-700 bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
-                        {row.packCount} กล่อง
-                      </span>
-                    </div>
+              {!showPackHelper && (
+                <div className="mt-3 rounded-xl bg-white/80 border border-pink-100 px-3 py-2 text-xs text-slate-500">
+                  กด “เปิดดูสรุป” เมื่อต้องการดูรายการที่รวมไว้ ส่วนรายการแพ็คจริงอยู่ในตารางด้านล่าง
+                </div>
+              )}
 
-                    <div className="space-y-1.5">
-                      {row.promos.map((p, pi) => (
-                        <div key={`${row.key}-${pi}`} className="text-xs text-slate-700 flex items-start gap-1.5">
-                          <span className="mt-0.5 w-4 h-4 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center shrink-0">
-                            {pi + 1}
+              {showPackHelper && (
+                <div className="mt-3 max-h-[42vh] overflow-auto pr-1">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {packagingHelperSummary.map((row, idx) => (
+                      <div key={row.key} className="rounded-2xl bg-white/90 border border-pink-100 shadow-sm p-3">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-full bg-pink-500 text-white text-xs font-extrabold flex items-center justify-center">
+                              {idx + 1}
+                            </span>
+                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${row.channelLabel === 'FLASH' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'}`}>
+                              {row.channelLabel}
+                            </span>
+                          </div>
+                          <span className="text-sm font-extrabold text-pink-700 bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
+                            {row.packCount} กล่อง
                           </span>
-                          <div>
-                            <div className="font-bold text-slate-800">{p.title}</div>
-                            <div className="text-slate-500">{p.detail}</div>
-                            {p.totalText && <div className="text-emerald-600 font-bold">{p.totalText}</div>}
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {row.promos.map((p, pi) => (
+                            <div key={`${row.key}-${pi}`} className="text-xs text-slate-700 flex items-start gap-1.5">
+                              <span className="mt-0.5 w-4 h-4 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center shrink-0">
+                                {pi + 1}
+                              </span>
+                              <div>
+                                <div className="font-bold text-slate-800">{p.title}</div>
+                                <div className="text-slate-500">{p.detail}</div>
+                                {p.totalText && <div className="text-emerald-600 font-bold">{p.totalText}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                          <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-1.5">
+                            <div className="text-slate-400">กล่อง</div>
+                            <div className="font-bold text-slate-700">{row.boxName}</div>
+                          </div>
+                          <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-1.5">
+                            <div className="text-slate-400">บับเบิ้ล</div>
+                            <div className="font-bold text-slate-700">{row.bubbleName || '-'}</div>
                           </div>
                         </div>
-                      ))}
-                    </div>
 
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-1.5">
-                        <div className="text-slate-400">กล่อง</div>
-                        <div className="font-bold text-slate-700">{row.boxName}</div>
+                        <div className="mt-2 text-[11px] text-slate-400">
+                          รวมจาก {row.orderCount} ออเดอร์: {row.orderNos.slice(0, 5).join(', ')}
+                          {row.orderNos.length > 5 ? ` +${row.orderNos.length - 5}` : ''}
+                        </div>
                       </div>
-                      <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-1.5">
-                        <div className="text-slate-400">บับเบิ้ล</div>
-                        <div className="font-bold text-slate-700">{row.bubbleName || '-'}</div>
-                      </div>
-                    </div>
-
-                    <div className="mt-2 text-[11px] text-slate-400">
-                      รวมจาก {row.orderCount} ออเดอร์: {row.orderNos.slice(0, 5).join(', ')}
-                      {row.orderNos.length > 5 ? ` +${row.orderNos.length - 5}` : ''}
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
           )}
 
