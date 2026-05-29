@@ -12,16 +12,6 @@ type PackOrder = {
   promos: PromoDetail[];
 };
 type PromoDetail = { id: string; name: string; short_name: string | null; qty: number; box_name: string; box_id: string; bubble_name: string; bubble_id: string; };
-type MultiPackGroup = {
-  key: string;
-  orders: PackOrder[];
-  promos: PromoDetail[];
-  box_id: string;
-  bubble_id: string;
-  box_name: string;
-  bubble_name: string;
-  count: number;
-};
 type Override = Record<string, { box_id: string; bubble_id: string; box_search?: string; bubble_search?: string }>;
 
 
@@ -195,57 +185,6 @@ export default function Packaging({
     return q > 1 ? ` x${q}` : '';
   };
 
-  const normalizePackText = (value: any) => String(value ?? '')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase();
-
-  const multiOrderMergeKey = (o: PackOrder) => {
-    const boxId = override[o.id]?.box_id || '';
-    const bubbleId = override[o.id]?.bubble_id || '';
-    // สำคัญ: ใช้ token แบบ multiset/frequency — ถ้ามีรายการซ้ำในบิลเดียวกันจะมี token ซ้ำ
-    // ดังนั้น “3 กระป๋อง” 1 รายการ จะไม่ถูกรวมกับ “3 กระป๋อง + 3 กระป๋อง” 2 รายการ
-    const promoTokens = o.promos
-      .map(p => [
-        p.id || '',
-        normalizePackText(p.short_name || p.name),
-        normalizePackText(p.name),
-        promoRepeat(p),
-      ].join('~'))
-      .sort()
-      .join('||');
-    return [boxId, bubbleId, promoTokens].join('@@');
-  };
-
-  const buildMultiPackGroups = (subset: PackOrder[]): MultiPackGroup[] => {
-    const grouped = new Map<string, MultiPackGroup>();
-    subset.forEach(o => {
-      const key = multiOrderMergeKey(o);
-      const boxId = override[o.id]?.box_id || '';
-      const bubbleId = override[o.id]?.bubble_id || '';
-      const boxName = boxes.find(b => b.id === boxId)?.name || '';
-      const bubbleObj = bubbleId ? bubbles.find(b => b.id === bubbleId) : null;
-      const bubbleName = bubbleObj ? `ยาว ${bubbleObj.length_cm} cm` : '-';
-      const current = grouped.get(key);
-      if (current) {
-        current.orders.push(o);
-        current.count += 1;
-      } else {
-        grouped.set(key, {
-          key,
-          orders: [o],
-          promos: o.promos,
-          box_id: boxId,
-          bubble_id: bubbleId,
-          box_name: boxName,
-          bubble_name: bubbleName,
-          count: 1,
-        });
-      }
-    });
-    return Array.from(grouped.values());
-  };
-
 
   const escHtml = (value: any) => String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -316,15 +255,11 @@ export default function Packaging({
     const myordSingles  = singleOrders.filter(o => !isFlash(o));
     const flashMultis   = multiOrders.filter(o => isFlash(o));
     const myordMultis   = multiOrders.filter(o => !isFlash(o));
-    const flashMultiGroups = buildMultiPackGroups(flashMultis);
-    const myordMultiGroups = buildMultiPackGroups(myordMultis);
-    const multiGroups = buildMultiPackGroups(multiOrders);
     return {
       grouped: makeGrouped(singleOrders),          // รวม (ใช้เดิมสำหรับ requisition/print)
       flashGrouped: makeGrouped(flashSingles),     // FLASH เดี่ยว
       myordGrouped: makeGrouped(myordSingles),     // MyOrder เดี่ยว
       flashMultis, myordMultis,
-      flashMultiGroups, myordMultiGroups, multiGroups,
       multiOrders,
     };
   })();
@@ -342,17 +277,17 @@ export default function Packaging({
       bubble: g.bubble_name && !g.bubble_name.includes('0 cm') ? g.bubble_name : '-',
       type: 'single',
     })),
-    ...summaryGroups.multiGroups.map(g => ({
-      name: g.promos.map(p => {
+    ...summaryGroups.multiOrders.map(o => ({
+      name: o.promos.map(p => {
         const productName = p.short_name || p.name;
         const promoName = p.name && p.name !== productName ? ` ${p.name}` : '';
         const qtyText = p.qty > 1 ? ` x${p.qty}` : '';
         return `${productName}${promoName}${qtyText}`;
       }).join(', '),
-      short_name: g.promos.map(p => p.short_name || p.name).join(' + '),
-      product_name: g.promos.map(p => p.short_name || p.name).join(' + '),
+      short_name: o.promos.map(p => p.short_name || p.name).join(' + '),
+      product_name: o.promos.map(p => p.short_name || p.name).join(' + '),
       promo_name: 'แพ็คพิเศษ',
-      promos: g.promos.map(p => ({
+      promos: o.promos.map(p => ({
         id: p.id,
         short_name: p.short_name || p.name,
         product_name: p.short_name || p.name,
@@ -360,11 +295,12 @@ export default function Packaging({
         name: p.name || '',
         qty: p.qty || 1,
       })),
-      order_ids: g.orders.map(o => o.id),
-      order_nos: g.orders.map(o => o.order_no),
-      count: g.count,
-      box: g.box_name || '',
-      bubble: g.bubble_name || '-',
+      count: 1,
+      box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '',
+      bubble: (() => {
+        const b = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
+        return b ? `ยาว ${b.length_cm} cm` : '-';
+      })(),
       type: 'multi',
     })),
   ];
@@ -668,10 +604,10 @@ export default function Packaging({
     const myordOrd  = orders.filter(o => o.courier !== 'FLASH' && (o as any).route !== 'B');
     const fSingle   = makeGroupedRows2(flashOrd);
     const mSingle   = makeGroupedRows2(myordOrd);
-    const fMultis   = buildMultiPackGroups(flashOrd.filter(o => o.promos.length > 1));
-    const mMultis   = buildMultiPackGroups(myordOrd.filter(o => o.promos.length > 1));
+    const fMultis   = flashOrd.filter(o => o.promos.length > 1);
+    const mMultis   = myordOrd.filter(o => o.promos.length > 1);
 
-    const buildRows = (grouped: typeof fSingle, multis: MultiPackGroup[], startIdx: number) => {
+    const buildRows = (grouped: typeof fSingle, multis: typeof fMultis, startIdx: number) => {
       let html2 = ''; let idx = startIdx;
       for (const g of grouped) {
         html2 += `<tr>
@@ -684,17 +620,18 @@ export default function Packaging({
           <td><div class="note-box"></div></td>
         </tr>`;
       }
-      for (const g of multis) {
-        const bxName = g.box_name || '-';
-        const buName = g.bubble_name || '-';
-        const ph = g.promos.map((p2, pi) =>
+      for (const o of multis) {
+        const bxName = boxes.find(b => b.id === override[o.id]?.box_id)?.name || '-';
+        const buObj  = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
+        const buName = buObj ? `ยาว ${buObj.length_cm} cm` : '-';
+        const ph = o.promos.map((p2, pi) =>
           `<div><span style="background:#fef3c7;color:#92400e;border-radius:3px;padding:0 3px;font-size:10px">${pi+1}</span>
            <strong>${p2.short_name || p2.name}</strong>
            <span style="color:#64748b;font-size:11px"> ${p2.name}${promoRepeatText(p2)}</span></div>`).join('');
         html2 += `<tr style="background:#fffbeb">
           <td class="num">${idx++}</td>
-          <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ - รวม ${g.count} กล่อง</span></div></td>
-          <td style="text-align:center"><span class="badge">${g.count} กล่อง</span></td>
+          <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
+          <td style="text-align:center"><span class="badge">1 ออเดอร์</span></td>
           <td style="text-align:center">${bxName}</td>
           <td style="text-align:center;color:#0369a1">${buName !== '-' ? buName : '-'}</td>
           <td><div class="note-box"></div></td>
@@ -1062,11 +999,11 @@ export default function Packaging({
               </thead>
               <tbody>
                 {/* ── Section: FLASH ── */}
-                {(summaryGroups.flashGrouped.length > 0 || summaryGroups.flashMultiGroups.length > 0) && (
+                {(summaryGroups.flashGrouped.length > 0 || summaryGroups.flashMultis.length > 0) && (
                   <tr>
                     <td colSpan={6} className="px-3 py-2 bg-yellow-50 border-y border-yellow-200">
                       <span className="text-xs font-bold text-yellow-700 flex items-center gap-1.5">
-                        🟡 FLASH — {summaryGroups.flashGrouped.reduce((s,g)=>s+g.count,0) + summaryGroups.flashMultiGroups.reduce((s,g)=>s+g.count,0)} ออเดอร์
+                        🟡 FLASH — {summaryGroups.flashGrouped.reduce((s,g)=>s+g.count,0) + summaryGroups.flashMultis.length} ออเดอร์
                       </span>
                     </td>
                   </tr>
@@ -1087,17 +1024,17 @@ export default function Packaging({
                     <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.bubble_name}</td>
                   </tr>
                 ))}
-                {summaryGroups.flashMultiGroups.map((g, idx) => {
+                {summaryGroups.flashMultis.map((o, idx) => {
                   const rowIdx = summaryGroups.flashGrouped.length + idx;
-                  const selBox = g.box_id;
-                  const selBub = g.bubble_id;
+                  const selBox = override[o.id]?.box_id;
+                  const selBub = override[o.id]?.bubble_id;
                   return (
-                    <tr key={'fm-'+g.key} className="border-b align-top bg-amber-50 hover:bg-amber-100">
+                    <tr key={'fm-'+o.id} className="border-b align-top bg-amber-50 hover:bg-amber-100">
                       <td className="p-3 text-center font-bold text-amber-600 whitespace-nowrap">{rowIdx + 1}</td>
                       <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{packDate}</td>
                       <td className="p-3 min-w-[180px]">
                         <div className="space-y-1.5 mb-1">
-                          {g.promos.map((p, pi) => (
+                          {o.promos.map((p, pi) => (
                             <div key={pi} className="flex items-start gap-1.5">
                               <span className="w-4 h-4 rounded-full bg-amber-200 text-amber-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{pi+1}</span>
                               <div>
@@ -1107,20 +1044,20 @@ export default function Packaging({
                             </div>
                           ))}
                         </div>
-                        <span className="text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-0.5 rounded-full">⭐ แพ็คพิเศษ FLASH - รวม {g.count} กล่อง</span>
+                        <span className="text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-0.5 rounded-full">⭐ แพ็คพิเศษ FLASH</span>
                       </td>
                       <td className="p-3 text-center whitespace-nowrap">
-                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">{g.count} กล่อง</span>
+                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">1 ออเดอร์</span>
                       </td>
                       <td className="p-3 whitespace-nowrap">
-                        <select value={selBox || ''} onChange={e => g.orders.forEach(ord => setOverride(p => ({ ...p, [ord.id]: { ...p[ord.id], box_id: e.target.value } })))}
+                        <select value={selBox || ''} onChange={e => setOverride(p => ({ ...p, [o.id]: { ...p[o.id], box_id: e.target.value } }))}
                           className="border rounded px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-1 focus:ring-amber-300 bg-white">
                           <option value="">เลือกกล่อง...</option>
                           {boxes.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                         </select>
                       </td>
                       <td className="p-3 whitespace-nowrap">
-                        <select value={selBub || ''} onChange={e => g.orders.forEach(ord => setOverride(p => ({ ...p, [ord.id]: { ...p[ord.id], bubble_id: e.target.value } })))}
+                        <select value={selBub || ''} onChange={e => setOverride(p => ({ ...p, [o.id]: { ...p[o.id], bubble_id: e.target.value } }))}
                           className="border rounded px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-1 focus:ring-amber-300 bg-white">
                           <option value="">บั้บเบิ้ล...</option>
                           {bubbles.map(b => <option key={b.id} value={b.id}>ยาว {b.length_cm} cm</option>)}
@@ -1131,18 +1068,18 @@ export default function Packaging({
                 })}
 
                 {/* ── Section: MyOrder ── */}
-                {(summaryGroups.myordGrouped.length > 0 || summaryGroups.myordMultiGroups.length > 0) && (
+                {(summaryGroups.myordGrouped.length > 0 || summaryGroups.myordMultis.length > 0) && (
                   <tr>
                     <td colSpan={6} className="px-3 py-2 bg-blue-50 border-y border-blue-200">
                       <span className="text-xs font-bold text-blue-700 flex items-center gap-1.5">
-                        🔵 MyOrder — {summaryGroups.myordGrouped.reduce((s,g)=>s+g.count,0) + summaryGroups.myordMultiGroups.reduce((s,g)=>s+g.count,0)} ออเดอร์
+                        🔵 MyOrder — {summaryGroups.myordGrouped.reduce((s,g)=>s+g.count,0) + summaryGroups.myordMultis.length} ออเดอร์
                       </span>
                     </td>
                   </tr>
                 )}
                 {summaryGroups.myordGrouped.map((g, idx) => (
                   <tr key={'m-'+g.promoId} className={`border-b align-top hover:bg-blue-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
-                    <td className="p-3 text-center font-bold text-slate-500 whitespace-nowrap">{summaryGroups.flashGrouped.length + summaryGroups.flashMultiGroups.length + idx + 1}</td>
+                    <td className="p-3 text-center font-bold text-slate-500 whitespace-nowrap">{summaryGroups.flashGrouped.length + summaryGroups.flashMultis.length + idx + 1}</td>
                     <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{packDate}</td>
                     <td className="p-3 min-w-[160px]">
                       {g.short_name && <div className="font-semibold text-slate-800 whitespace-nowrap">{g.short_name}</div>}
@@ -1156,17 +1093,17 @@ export default function Packaging({
                     <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.bubble_name}</td>
                   </tr>
                 ))}
-                {summaryGroups.myordMultiGroups.map((g, idx) => {
-                  const rowIdx = summaryGroups.flashGrouped.length + summaryGroups.flashMultiGroups.length + summaryGroups.myordGrouped.length + idx;
-                  const selBox = g.box_id;
-                  const selBub = g.bubble_id;
+                {summaryGroups.myordMultis.map((o, idx) => {
+                  const rowIdx = summaryGroups.flashGrouped.length + summaryGroups.flashMultis.length + summaryGroups.myordGrouped.length + idx;
+                  const selBox = override[o.id]?.box_id;
+                  const selBub = override[o.id]?.bubble_id;
                   return (
-                    <tr key={'mm-'+g.key} className="border-b align-top bg-amber-50 hover:bg-amber-100">
+                    <tr key={'mm-'+o.id} className="border-b align-top bg-amber-50 hover:bg-amber-100">
                       <td className="p-3 text-center font-bold text-amber-600 whitespace-nowrap">{rowIdx + 1}</td>
                       <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{packDate}</td>
                       <td className="p-3 min-w-[180px]">
                         <div className="space-y-1.5 mb-1">
-                          {g.promos.map((p, pi) => (
+                          {o.promos.map((p, pi) => (
                             <div key={pi} className="flex items-start gap-1.5">
                               <span className="w-4 h-4 rounded-full bg-amber-200 text-amber-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{pi+1}</span>
                               <div>
@@ -1176,20 +1113,20 @@ export default function Packaging({
                             </div>
                           ))}
                         </div>
-                        <span className="text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-0.5 rounded-full">⭐ แพ็คพิเศษ MyOrder - รวม {g.count} กล่อง</span>
+                        <span className="text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-0.5 rounded-full">⭐ แพ็คพิเศษ MyOrder</span>
                       </td>
                       <td className="p-3 text-center whitespace-nowrap">
-                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">{g.count} กล่อง</span>
+                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">1 ออเดอร์</span>
                       </td>
                       <td className="p-3 whitespace-nowrap">
-                        <select value={selBox || ''} onChange={e => g.orders.forEach(ord => setOverride(p => ({ ...p, [ord.id]: { ...p[ord.id], box_id: e.target.value } })))}
+                        <select value={selBox || ''} onChange={e => setOverride(p => ({ ...p, [o.id]: { ...p[o.id], box_id: e.target.value } }))}
                           className="border rounded px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-1 focus:ring-amber-300 bg-white">
                           <option value="">เลือกกล่อง...</option>
                           {boxes.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                         </select>
                       </td>
                       <td className="p-3 whitespace-nowrap">
-                        <select value={selBub || ''} onChange={e => g.orders.forEach(ord => setOverride(p => ({ ...p, [ord.id]: { ...p[ord.id], bubble_id: e.target.value } })))}
+                        <select value={selBub || ''} onChange={e => setOverride(p => ({ ...p, [o.id]: { ...p[o.id], bubble_id: e.target.value } }))}
                           className="border rounded px-2 py-1.5 text-xs w-36 focus:outline-none focus:ring-1 focus:ring-amber-300 bg-white">
                           <option value="">บั้บเบิ้ล...</option>
                           {bubbles.map(b => <option key={b.id} value={b.id}>ยาว {b.length_cm} cm</option>)}
