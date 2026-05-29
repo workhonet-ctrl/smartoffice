@@ -95,6 +95,9 @@ export default function PurchaseOrder() {
   const [editSup, setEditSup]   = useState<Supplier | null>(null);
   const [supSearch, setSupSearch] = useState('');
   const [showSupListModal, setShowSupListModal] = useState(false);
+  const [poStatusFilter, setPoStatusFilter] = useState<'all'|'pending_approval'|'approved'|'received'|'rejected'>('all');
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000);
@@ -269,38 +272,40 @@ export default function PurchaseOrder() {
     } finally { setSaving(false); }
   };
 
-  const handleApprove = async () => {
+  const validatePOForm = () => {
     const validItems = poItems.filter(it => it.name.trim() && it.qty > 0);
-    if (!validItems.length) { showToast('กรุณาเพิ่มรายการสินค้า', 'error'); return; }
+    if (!validItems.length) { showToast('กรุณาเพิ่มรายการสินค้า', 'error'); return null; }
+    if (!supplierId && !supplierName.trim()) { showToast('กรุณาเลือกผู้ขายก่อนส่งอนุมัติ', 'error'); return null; }
+    return validItems;
+  };
+
+  const openSubmitApproval = () => {
+    const validItems = validatePOForm();
+    if (!validItems) return;
+    setShowSubmitConfirm(true);
+  };
+
+  const handleSubmitApproval = async () => {
+    const validItems = validatePOForm();
+    if (!validItems) return;
     setSaving(true);
     try {
-      const { data: po, error } = await supabase.from('purchase_orders').insert([{
+      const { error } = await supabase.from('purchase_orders').insert([{
         po_no: poNo, po_date: poDate,
         supplier_id: supplierId || null,
         supplier_name: supplierName || null,
         items: validItems, total_thb: total,
-        status: 'approved', note: note || null,
+        status: 'pending_approval', note: note || null,
       }]).select().single();
       if (error) throw error;
 
-      // รับเข้าสต็อกอัตโนมัติ
-      for (const item of validItems) {
-        if (item.stock_item_id) {
-          await supabase.from('stock_transactions').insert([{
-            stock_item_id: item.stock_item_id,
-            txn_type: 'in', qty: item.qty,
-            ref_type: 'purchase', ref_id: po.po_no,
-            note: `PO ${po.po_no} - ${item.name}`,
-          }]);
-        }
-      }
+      setShowSubmitConfirm(false);
+      setShowSubmitSuccess(true);
 
-      showToast(`✓ อนุมัติ ${poNo} และรับเข้าสต็อกแล้ว`);
       // reset form
       setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
       setSupplierId(''); setSupplierName(''); setNote('');
       await Promise.all([initPoNo(), loadData()]);
-      setTab('list');
     } catch (err: any) {
       showToast('❌ ' + (err.message||'เกิดข้อผิดพลาด'), 'error');
     } finally { setSaving(false); }
@@ -341,9 +346,37 @@ export default function PurchaseOrder() {
     loadData();
   };
 
-  const statusBadge = (s: string) => s === 'approved'
-    ? <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">✓ อนุมัติแล้ว</span>
-    : <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">ร่าง</span>;
+  const statusTabs = [
+    { key: 'all' as const, label: 'ทั้งหมด' },
+    { key: 'pending_approval' as const, label: 'รออนุมัติ' },
+    { key: 'approved' as const, label: 'อนุมัติแล้ว' },
+    { key: 'received' as const, label: 'รับเข้าแล้ว' },
+    { key: 'rejected' as const, label: 'ไม่อนุมัติ' },
+  ];
+
+  const filteredPOList = poStatusFilter === 'all'
+    ? poList
+    : poList.filter(po => po.status === poStatusFilter);
+
+  const statusCount = (status: typeof poStatusFilter) =>
+    status === 'all' ? poList.length : poList.filter(po => po.status === status).length;
+
+  const statusBadge = (s: string) => {
+    if (s === 'pending_approval') {
+      return <span className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full text-xs font-bold">⏳ รออนุมัติ</span>;
+    }
+    if (s === 'approved') {
+      return <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">✓ อนุมัติแล้ว</span>;
+    }
+    if (s === 'received') {
+      return <span className="px-2 py-0.5 bg-cyan-100 text-cyan-700 rounded-full text-xs font-bold">📦 รับเข้าแล้ว</span>;
+    }
+    if (s === 'rejected') {
+      return <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-xs font-bold">ไม่อนุมัติ</span>;
+    }
+    return <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">ร่าง</span>;
+  };
+
 
   return (
     <div className="flex flex-col h-screen p-6 pb-2">
@@ -536,13 +569,9 @@ export default function PurchaseOrder() {
               </>
             ) : (
               <>
-                <button onClick={handleDraft} disabled={saving}
-                  className="px-5 py-2.5 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 font-medium flex items-center gap-2 disabled:opacity-50">
-                  <FileText size={16}/> บันทึกร่าง
-                </button>
-                <button onClick={handleApprove} disabled={saving}
-                  className="px-6 py-2.5 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 font-semibold flex items-center gap-2 disabled:opacity-50 shadow">
-                  <CheckCircle size={18}/> {saving ? 'กำลังบันทึก...' : 'อนุมัติ → รับเข้าสต็อก'}
+                <button onClick={openSubmitApproval} disabled={saving}
+                  className="px-6 py-2.5 bg-gradient-to-r from-fuchsia-500 to-indigo-500 text-white rounded-xl hover:from-fuchsia-600 hover:to-indigo-600 font-semibold flex items-center gap-2 disabled:opacity-50 shadow">
+                  <CheckCircle size={18}/> {saving ? 'กำลังส่ง...' : 'ส่งอนุมัติ'}
                 </button>
               </>
             )}
@@ -553,6 +582,25 @@ export default function PurchaseOrder() {
       {/* ── Tab: รายการ PO ── */}
       {tab === 'list' && (
         <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+          <div className="sticky top-0 z-20 bg-white border-b px-4 py-3">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              {statusTabs.map(t => (
+                <button key={t.key} onClick={() => setPoStatusFilter(t.key)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                    poStatusFilter === t.key
+                      ? 'bg-indigo-500 text-white shadow'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}>
+                  {t.label}
+                  <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${
+                    poStatusFilter === t.key ? 'bg-white/20 text-white' : 'bg-white text-slate-500'
+                  }`}>
+                    {statusCount(t.key)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
           <table className="text-sm w-full" style={{minWidth:'750px'}}>
             <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
               <tr>
@@ -566,8 +614,8 @@ export default function PurchaseOrder() {
               </tr>
             </thead>
             <tbody>
-              {poList.length===0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีใบสั่งซื้อ</td></tr>}
-              {poList.map(po => (
+              {filteredPOList.length===0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีใบสั่งซื้อในสถานะนี้</td></tr>}
+              {filteredPOList.map(po => (
                 <tr key={po.id} className="border-b hover:bg-slate-50">
                   <td className="p-3 font-mono text-xs text-indigo-700 whitespace-nowrap">{po.po_no}</td>
                   <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
@@ -592,11 +640,10 @@ export default function PurchaseOrder() {
                         className="flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs hover:bg-amber-200 font-medium">
                         <Pencil size={11}/> แก้ไข
                       </button>
-                      {po.status === 'draft' && (
-                        <button onClick={() => handleApproveDraft(po)}
-                          className="px-3 py-1 bg-green-500 text-white rounded-lg text-xs hover:bg-green-600 font-medium">
-                          อนุมัติ
-                        </button>
+                      {po.status === 'pending_approval' && (
+                        <span className="px-3 py-1 bg-orange-50 text-orange-600 rounded-lg text-xs font-bold">
+                          รออนุมัติ
+                        </span>
                       )}
                       <button onClick={() => handleDeletePO(po)}
                         className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs hover:bg-red-200 font-medium">
@@ -608,6 +655,63 @@ export default function PurchaseOrder() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Popup: ส่งอนุมัติ */}
+      {showSubmitConfirm && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border-2 border-pink-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-pink-50 via-fuchsia-50 to-indigo-50 px-6 py-5 border-b border-pink-100">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-pink-400 to-indigo-500 text-white flex items-center justify-center text-2xl shadow mb-3">
+                💌
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-800">ส่งใบสั่งซื้อเพื่อรออนุมัติ</h3>
+              <p className="text-sm text-slate-500 mt-1 leading-6">
+                ตรวจสอบข้อมูลเรียบร้อยแล้วใช่ไหม? หากกดยืนยัน ใบสั่งซื้อนี้จะถูกส่งไปที่แท็บ <b className="text-orange-600">รออนุมัติ</b>
+              </p>
+            </div>
+            <div className="px-6 py-4 bg-white">
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-sm">
+                <div className="flex justify-between gap-3"><span className="text-slate-400">เลขที่เอกสาร</span><b className="font-mono text-indigo-700">{poNo}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ผู้ขาย</span><b>{supplierName || '-'}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ยอดรวม</span><b>฿{total.toLocaleString()}</b></div>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setShowSubmitConfirm(false)} disabled={saving}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button onClick={handleSubmitApproval} disabled={saving}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-indigo-500 text-white hover:from-pink-600 hover:to-indigo-600 font-bold shadow disabled:opacity-50">
+                {saving ? 'กำลังส่ง...' : 'ยืนยันส่งอนุมัติ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup: ส่งอนุมัติสำเร็จ */}
+      {showSubmitSuccess && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl border-2 border-emerald-100 overflow-hidden text-center">
+            <div className="bg-gradient-to-br from-emerald-50 via-cyan-50 to-pink-50 px-6 py-7">
+              <div className="text-5xl mb-3">🎉</div>
+              <h3 className="text-xl font-extrabold text-slate-800">ส่งอนุมัติเรียบร้อยแล้ว</h3>
+              <p className="text-sm text-slate-500 mt-2">ใบสั่งซื้อถูกส่งไปที่แท็บ “รออนุมัติ” แล้ว</p>
+            </div>
+            <div className="px-6 pb-6 flex gap-2">
+              <button onClick={() => setShowSubmitSuccess(false)}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold">
+                ปิด
+              </button>
+              <button onClick={() => { setShowSubmitSuccess(false); setTab('list'); setPoStatusFilter('pending_approval'); }}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:from-emerald-600 hover:to-cyan-600 font-bold shadow">
+                ไปที่รออนุมัติ
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
