@@ -98,6 +98,10 @@ export default function PurchaseOrder() {
   const [poStatusFilter, setPoStatusFilter] = useState<'all'|'pending_approval'|'approved'|'received'|'rejected'>('all');
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
+  const [approveTarget, setApproveTarget] = useState<PO | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<PO | null>(null);
+  const [detailTarget, setDetailTarget] = useState<PO | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000);
@@ -330,20 +334,56 @@ export default function PurchaseOrder() {
     } finally { setSaving(false); }
   };
 
-  // Approve draft PO
-  const handleApproveDraft = async (po: PO) => {
-    for (const item of po.items) {
-      if (item.stock_item_id) {
-        await supabase.from('stock_transactions').insert([{
-          stock_item_id: item.stock_item_id, txn_type: 'in', qty: item.qty,
-          ref_type: 'purchase', ref_id: po.po_no,
-          note: `PO ${po.po_no} - ${item.name}`,
-        }]);
-      }
+  const handleApprovePendingPO = async () => {
+    if (!approveTarget || saving) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('purchase_orders')
+        .update({ status: 'approved' })
+        .eq('id', approveTarget.id);
+      if (error) throw error;
+
+      showToast(`✓ อนุมัติ ${approveTarget.po_no} แล้ว`);
+      setApproveTarget(null);
+      setPoStatusFilter('approved');
+      await loadData();
+    } catch (err: any) {
+      showToast('❌ อนุมัติไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setSaving(false);
     }
-    await supabase.from('purchase_orders').update({ status: 'approved' }).eq('id', po.id);
-    showToast('✓ อนุมัติและรับเข้าสต็อกแล้ว');
-    loadData();
+  };
+
+  const handleRejectPO = async () => {
+    if (!rejectTarget || saving) return;
+    if (!rejectReason.trim()) {
+      showToast('กรุณาระบุเหตุผลที่ไม่อนุมัติ', 'error');
+      return;
+    }
+    setSaving(true);
+    try {
+      const nextNote = [
+        rejectTarget.note || '',
+        `ไม่อนุมัติ: ${rejectReason.trim()}`,
+      ].filter(Boolean).join('\n');
+
+      const { error } = await supabase
+        .from('purchase_orders')
+        .update({ status: 'rejected', note: nextNote })
+        .eq('id', rejectTarget.id);
+      if (error) throw error;
+
+      showToast(`✓ ไม่อนุมัติ ${rejectTarget.po_no} แล้ว`);
+      setRejectTarget(null);
+      setRejectReason('');
+      setPoStatusFilter('rejected');
+      await loadData();
+    } catch (err: any) {
+      showToast('❌ ไม่อนุมัติไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const statusTabs = [
@@ -640,10 +680,21 @@ export default function PurchaseOrder() {
                         className="flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs hover:bg-amber-200 font-medium">
                         <Pencil size={11}/> แก้ไข
                       </button>
+                      <button onClick={() => setDetailTarget(po)}
+                        className="flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs hover:bg-slate-200 font-medium">
+                        <FileText size={11}/> ดูรายละเอียด
+                      </button>
                       {po.status === 'pending_approval' && (
-                        <span className="px-3 py-1 bg-orange-50 text-orange-600 rounded-lg text-xs font-bold">
-                          รออนุมัติ
-                        </span>
+                        <>
+                          <button onClick={() => setApproveTarget(po)}
+                            className="px-3 py-1 bg-green-500 text-white rounded-lg text-xs hover:bg-green-600 font-bold">
+                            อนุมัติ
+                          </button>
+                          <button onClick={() => { setRejectTarget(po); setRejectReason(''); }}
+                            className="px-3 py-1 bg-rose-100 text-rose-600 rounded-lg text-xs hover:bg-rose-200 font-bold">
+                            ไม่อนุมัติ
+                          </button>
+                        </>
                       )}
                       <button onClick={() => handleDeletePO(po)}
                         className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs hover:bg-red-200 font-medium">
@@ -709,6 +760,152 @@ export default function PurchaseOrder() {
               <button onClick={() => { setShowSubmitSuccess(false); setTab('list'); setPoStatusFilter('pending_approval'); }}
                 className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:from-emerald-600 hover:to-cyan-600 font-bold shadow">
                 ไปที่รออนุมัติ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup: ดูรายละเอียด PO */}
+      {detailTarget && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl border-2 border-indigo-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-indigo-50 via-cyan-50 to-pink-50 px-6 py-5 border-b border-indigo-100">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-3xl mb-2">📄</div>
+                  <h3 className="text-xl font-extrabold text-slate-800">รายละเอียดใบสั่งซื้อ</h3>
+                  <p className="text-sm text-slate-500 mt-1">
+                    {detailTarget.po_no} · {statusBadge(detailTarget.status)}
+                  </p>
+                </div>
+                <button onClick={() => setDetailTarget(null)} className="text-slate-400 hover:text-slate-600">
+                  <X size={22}/>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 max-h-[65vh] overflow-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="text-xs text-slate-400">ผู้ขาย</div>
+                  <div className="font-bold text-slate-800">{detailTarget.supplier_name || '-'}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="text-xs text-slate-400">วันที่</div>
+                  <div className="font-bold text-slate-800">{new Date(detailTarget.po_date).toLocaleDateString('th-TH')}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="text-xs text-slate-400">ยอดรวม</div>
+                  <div className="font-bold text-indigo-700">฿{Number(detailTarget.total_thb).toLocaleString()}</div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-100 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-800 text-white text-xs">
+                    <tr>
+                      <th className="px-3 py-2 text-left">รายการ</th>
+                      <th className="px-3 py-2 text-center">จำนวน</th>
+                      <th className="px-3 py-2 text-center">หน่วย</th>
+                      <th className="px-3 py-2 text-right">ราคา/หน่วย</th>
+                      <th className="px-3 py-2 text-right">รวม</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detailTarget.items.map((it, i) => (
+                      <tr key={i} className="border-b last:border-0">
+                        <td className="px-3 py-2 font-medium text-slate-800">{it.name}</td>
+                        <td className="px-3 py-2 text-center">{it.qty}</td>
+                        <td className="px-3 py-2 text-center">{it.unit}</td>
+                        <td className="px-3 py-2 text-right">฿{Number(it.price).toLocaleString()}</td>
+                        <td className="px-3 py-2 text-right font-bold">฿{Number(it.qty * it.price).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {detailTarget.note && (
+                <div className="mt-4 rounded-2xl bg-amber-50 border border-amber-100 p-3 text-sm text-amber-800 whitespace-pre-wrap">
+                  <div className="font-bold mb-1">หมายเหตุ</div>
+                  {detailTarget.note}
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 pb-6 flex justify-end">
+              <button onClick={() => setDetailTarget(null)}
+                className="px-5 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold">
+                ปิด
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup: อนุมัติ PO */}
+      {approveTarget && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border-2 border-emerald-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-emerald-50 via-cyan-50 to-lime-50 px-6 py-6 border-b border-emerald-100">
+              <div className="text-5xl mb-3">✅</div>
+              <h3 className="text-xl font-extrabold text-slate-800">อนุมัติใบสั่งซื้อนี้ใช่ไหม</h3>
+              <p className="text-sm text-slate-500 mt-2 leading-6">
+                เมื่ออนุมัติแล้ว ใบสั่งซื้อนี้จะย้ายไปที่แท็บ <b className="text-emerald-600">อนุมัติแล้ว</b><br/>
+                และจะยัง <b className="text-rose-500">ไม่รับเข้าสต็อก</b> จนกว่าจะทำขั้นตอนรับสินค้าในรอบถัดไป
+              </p>
+            </div>
+            <div className="px-6 py-4">
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-sm">
+                <div className="flex justify-between gap-3"><span className="text-slate-400">เลขที่เอกสาร</span><b className="font-mono text-indigo-700">{approveTarget.po_no}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ผู้ขาย</span><b>{approveTarget.supplier_name || '-'}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ยอดรวม</span><b>฿{Number(approveTarget.total_thb).toLocaleString()}</b></div>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setApproveTarget(null)} disabled={saving}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button onClick={handleApprovePendingPO} disabled={saving}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:from-emerald-600 hover:to-cyan-600 font-bold shadow disabled:opacity-50">
+                {saving ? 'กำลังอนุมัติ...' : 'อนุมัติ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup: ไม่อนุมัติ PO */}
+      {rejectTarget && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border-2 border-rose-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-rose-50 via-pink-50 to-amber-50 px-6 py-6 border-b border-rose-100">
+              <div className="text-5xl mb-3">💬</div>
+              <h3 className="text-xl font-extrabold text-slate-800">ไม่อนุมัติใบสั่งซื้อนี้ใช่ไหม</h3>
+              <p className="text-sm text-slate-500 mt-2 leading-6">
+                กรุณาระบุเหตุผล เพื่อให้ผู้สร้างแก้ไขได้ถูกต้อง รายการจะย้ายไปแท็บ <b className="text-rose-600">ไม่อนุมัติ</b>
+              </p>
+            </div>
+            <div className="px-6 py-4">
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-sm mb-3">
+                <div className="flex justify-between gap-3"><span className="text-slate-400">เลขที่เอกสาร</span><b className="font-mono text-indigo-700">{rejectTarget.po_no}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ผู้ขาย</span><b>{rejectTarget.supplier_name || '-'}</b></div>
+              </div>
+              <label className="text-xs font-bold text-slate-500 block mb-1.5">เหตุผลที่ไม่อนุมัติ</label>
+              <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                placeholder="เช่น ราคาไม่ตรง / จำนวนไม่ถูก / ขอแก้ไขรายการ..."
+                className="w-full min-h-[110px] rounded-2xl border border-rose-100 bg-rose-50/40 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-200"/>
+            </div>
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => { setRejectTarget(null); setRejectReason(''); }} disabled={saving}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button onClick={handleRejectPO} disabled={saving}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:from-rose-600 hover:to-pink-600 font-bold shadow disabled:opacity-50">
+                {saving ? 'กำลังบันทึก...' : 'ยืนยันไม่อนุมัติ'}
               </button>
             </div>
           </div>
