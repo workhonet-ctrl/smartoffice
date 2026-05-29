@@ -492,22 +492,101 @@ export default function Packaging({
     const resp = item.responsible_person || '-';
     const orderCount = item.order_count || 0;
 
-    // สร้าง HTML แบบเดียวกับ handlePrint (สรุปตามโปรโมชัน + แยก Flash/MyOrder ถ้ามี route)
-    // summary_snapshot ไม่มี route → แสดงเป็น section เดียว
+    // ใช้ logic รวมแบบเดียวกับปริ้นครั้งแรกกับ "ปริ้นซ้ำ" ด้วย
+    // ไม่แตะข้อมูลจริง / ไม่แก้ snapshot ในฐานข้อมูล แค่รวมตอนสร้าง HTML สำหรับปริ้น
+    const cleanKeyText = (value: any) => String(value ?? '')
+      .replace(/\s+/g, ' ')
+      .replace(/[|]+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+    type ReprintMultiGroup = {
+      key: string;
+      sourceNums: number[];
+      promos: { title: string; detail: string; totalText: string; key: string }[];
+      packCount: number;
+      boxName: string;
+      bubbleName: string;
+    };
+
+    const rowsHtml: string[] = [];
+    const multiGroups: Record<string, ReprintMultiGroup> = {};
     let idx = 1;
-    const tableRows = snap.map((s: any) => {
-      const isMultiRow = s.type === 'multi';
-      const nameHtml = `${renderSnapshotProductPromoHtml(s)}
-        ${isMultiRow ? '<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div>' : ''}`;
-      return `<tr${isMultiRow ? ' style="background:#fffbeb"' : ''}>
-        <td class="num">${idx++}</td>
-        <td>${nameHtml}</td>
-        <td style="text-align:center"><span class="badge">${snapshotPackCount(s)} ชุด</span></td>
-        <td style="text-align:center">${escHtml(s.box || '-')}</td>
-        <td style="text-align:center;color:#0369a1">${(s.bubble && s.bubble !== '-') ? escHtml(s.bubble) : '-'}</td>
+
+    for (const s of snap) {
+      const isMultiRow = s?.type === 'multi';
+      const sourceNum = idx++;
+
+      if (!isMultiRow) {
+        const nameHtml = renderSnapshotProductPromoHtml(s);
+        rowsHtml.push(`<tr>
+          <td class="num">${sourceNum}</td>
+          <td>${nameHtml}</td>
+          <td style="text-align:center"><span class="badge">${snapshotPackCount(s)} กล่อง</span></td>
+          <td style="text-align:center">${escHtml(s.box || '-')}</td>
+          <td style="text-align:center;color:#0369a1">${(s.bubble && s.bubble !== '-') ? escHtml(s.bubble) : '-'}</td>
+          <td><div class="note-box"></div></td>
+        </tr>`);
+        continue;
+      }
+
+      const normalizedPromos = Array.isArray(s.promos) && s.promos.length > 0
+        ? s.promos.map((p: any) => {
+            const title = p.short_name || p.product_name || p.name || '';
+            const qty = Number(p.qty || 1);
+            const baseName = p.promo_name || p.name || '';
+            const detail = `${baseName}${qty > 1 ? ` x${qty}` : ''}`;
+            const totalText = '';
+            const key = [cleanKeyText(title), cleanKeyText(detail), cleanKeyText(totalText)].join('::');
+            return { title, detail, totalText, key };
+          }).sort((a: any, b: any) => a.key.localeCompare(b.key, 'th'))
+        : [{
+            title: getSnapshotProductName(s) || s.name || '',
+            detail: getSnapshotPromoName(s) || s.promo_name || '',
+            totalText: '',
+            key: cleanKeyText(`${getSnapshotProductName(s) || s.name || ''}::${getSnapshotPromoName(s) || s.promo_name || ''}`),
+          }];
+
+      const boxName = s.box || '-';
+      const bubbleName = s.bubble || '-';
+      const groupKey = [
+        cleanKeyText(boxName),
+        cleanKeyText(bubbleName),
+        ...normalizedPromos.map((p: any) => p.key),
+      ].join('||');
+
+      if (!multiGroups[groupKey]) {
+        multiGroups[groupKey] = {
+          key: groupKey,
+          sourceNums: [],
+          promos: normalizedPromos,
+          packCount: 0,
+          boxName,
+          bubbleName,
+        };
+      }
+      multiGroups[groupKey].sourceNums.push(sourceNum);
+      multiGroups[groupKey].packCount += snapshotPackCount(s);
+    }
+
+    for (const group of Object.values(multiGroups)) {
+      const ph = group.promos.map((p, pi) =>
+        `<div><span style="background:#fef3c7;color:#92400e;border-radius:3px;padding:0 3px;font-size:10px">${pi+1}</span>
+         <strong>${escHtml(p.title)}</strong>
+         <span style="color:#64748b;font-size:11px"> ${escHtml(p.detail)}</span>
+         ${p.totalText ? `<div style="color:#059669;font-size:11px;font-weight:700;margin-left:18px">${escHtml(p.totalText)}</div>` : ''}</div>`).join('');
+
+      rowsHtml.push(`<tr style="background:#fffbeb">
+        <td class="num">${group.sourceNums.join(',')}</td>
+        <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
+        <td style="text-align:center"><span class="badge">${group.packCount} กล่อง</span></td>
+        <td style="text-align:center">${escHtml(group.boxName || '-')}</td>
+        <td style="text-align:center;color:#0369a1">${(group.bubbleName && group.bubbleName !== '-') ? escHtml(group.bubbleName) : '-'}</td>
         <td><div class="note-box"></div></td>
-      </tr>`;
-    }).join('');
+      </tr>`);
+    }
+
+    const tableRows = rowsHtml.join('');
 
     const html = `<!DOCTYPE html>
 <html><head>
