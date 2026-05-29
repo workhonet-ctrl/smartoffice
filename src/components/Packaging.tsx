@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, ClipboardList, FileText, AlertCircle, Printer, History, RefreshCw } from 'lucide-react';
+import { Package, ClipboardList, FileText, AlertCircle, Printer, History, RefreshCw, Trash2, X } from 'lucide-react';
 
 type PackOrder = {
   id: string; order_no: string; order_date: string | null; order_time: string | null;
@@ -27,6 +27,8 @@ export default function Packaging({
   const [tab, setTab]           = useState<'prep' | 'summary' | 'history'>('prep');
   const [printHistory, setPrintHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [deleteHistoryTarget, setDeleteHistoryTarget] = useState<any | null>(null);
+  const [deletingHistory, setDeletingHistory] = useState(false);
 
   const [override, setOverride] = useState<Override>({});
   const [boxes, setBoxes]       = useState<{ id: string; name: string }[]>([]);
@@ -172,17 +174,45 @@ export default function Packaging({
     } finally { setLoading(false); }
   };
 
-  const isMulti  = (o: PackOrder) => o.promos.length > 1;
+  const isMulti  = (o: PackOrder) => o.promos.length > 1 || o.promos.some(p => promoRepeat(p) > 1);
   const isFlash  = (o: PackOrder) => o.courier === 'FLASH' || o.route === 'B';
   const chanBadge = (o: PackOrder) => (o.courier === 'FLASH' || o.route === 'B')
     ? <span className="ml-1 px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-[9px] font-bold">FLASH</span>
     : <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[9px] font-bold">MyOrder</span>;
 
   const promoRepeat = (p: { qty?: number | null }) => Math.max(1, Number(p?.qty) || 1);
-  const orderPackCount = (o: PackOrder) => o.promos.reduce((sum, p) => sum + promoRepeat(p), 0);
+
+  // จำนวนแพ็ค = จำนวนออเดอร์/กล่องที่ต้องแพ็ค ไม่ใช่จำนวนชุดโปรในออเดอร์
+  // เช่น โปร 2 กระป๋อง x2 = แพ็ค 1 กล่อง แต่หยิบสินค้า 4 กระป๋อง
+  const orderPackCount = (_o: PackOrder) => 1;
+
   const promoRepeatText = (p: { qty?: number | null }) => {
     const q = promoRepeat(p);
     return q > 1 ? ` x${q}` : '';
+  };
+
+  const getPromoUnitInfo = (promoName?: string | null) => {
+    const text = String(promoName || '');
+    const match = text.match(/(\d+(?:\.\d+)?)\s*(กระป๋อง|ชิ้น|แพค|แพ็ค|ซอง|กล่อง|ขวด|ก้อน|ถุง)/);
+    if (!match) return null;
+    return { amount: Number(match[1]), unit: match[2] };
+  };
+
+  const promoTotalUnitText = (p: { name?: string | null; qty?: number | null }) => {
+    const repeat = promoRepeat(p);
+    const unitInfo = getPromoUnitInfo(p.name);
+    if (!unitInfo || repeat <= 1) return '';
+    const total = unitInfo.amount * repeat;
+    const totalText = Number.isInteger(total) ? String(total) : String(total);
+    return `รวม ${totalText} ${unitInfo.unit}/กล่อง`;
+  };
+
+  const snapshotPackCount = (s: any) => {
+    // ประวัติเก่าบางรายการเคยเก็บ count เป็นจำนวนชุดโปร เช่น 2 กระป๋อง x2
+    // แต่ในใบเตรียมสินค้า count ต้องหมายถึงจำนวนแพ็ค/จำนวนกล่อง
+    if (Number(s?.pack_count) > 0) return Number(s.pack_count);
+    if (s?.type === 'multi' || (Array.isArray(s?.promos) && s.promos.length > 0)) return 1;
+    return Math.max(1, Number(s?.count) || 1);
   };
 
 
@@ -213,10 +243,15 @@ export default function Packaging({
         const promoLine = promoName && promoName !== productName
           ? `<div style="font-size:11px;color:#64748b;margin-top:1px">${escHtml(promoName)}${qtyText}</div>`
           : (qty > 1 ? `<div style="font-size:11px;color:#64748b;margin-top:1px">${qtyText.trim()}</div>` : '');
+        const totalUnitText = promoTotalUnitText({ name: promoName, qty });
+        const totalLine = totalUnitText
+          ? `<div style="font-size:11px;color:#059669;font-weight:700;margin-top:1px">${escHtml(totalUnitText)}</div>`
+          : '';
         return `<div style="margin-bottom:${pi === s.promos.length - 1 ? '0' : '4px'}">
           ${s.promos.length > 1 ? `<span style="background:#e0f2fe;color:#0369a1;border-radius:3px;padding:0 4px;font-size:10px;margin-right:3px">${pi + 1}</span>` : ''}
           <span style="font-weight:700">${escHtml(productName || promoName || '-')}</span>
           ${promoLine}
+          ${totalLine}
         </div>`;
       }).join('');
     }
@@ -245,9 +280,8 @@ export default function Packaging({
       const grouped: Record<string, { promoId: string; short_name: string; promo_name: string; box_name: string; bubble_name: string; count: number }> = {};
       for (const o of subset) {
         const p = o.promos[0]; if (!p) continue;
-        const repeat = promoRepeat(p);
-        if (grouped[p.id]) grouped[p.id].count += repeat;
-        else grouped[p.id] = { promoId: p.id, short_name: p.short_name||'', promo_name: p.name, box_name: p.box_name, bubble_name: p.bubble_name, count: repeat };
+        if (grouped[p.id]) grouped[p.id].count += 1;
+        else grouped[p.id] = { promoId: p.id, short_name: p.short_name||'', promo_name: p.name, box_name: p.box_name, bubble_name: p.bubble_name, count: 1 };
       }
       return Object.values(grouped);
     };
@@ -265,6 +299,79 @@ export default function Packaging({
   })();
 
 
+  // ── Helper summary only: รวมแถวแพ็คพิเศษที่เหมือนกันเพื่อช่วยดู ไม่กระทบตารางหลัก/ใบเบิก/สต็อก ──
+  const packagingHelperSummary = (() => {
+    type HelperRow = {
+      key: string;
+      channelLabel: string;
+      promos: { title: string; detail: string; totalText: string }[];
+      packCount: number;
+      orderCount: number;
+      boxName: string;
+      bubbleName: string;
+      orderNos: string[];
+    };
+
+    const cleanText = (v: string | null | undefined) =>
+      String(v || '')
+        .replace(/\s+/g, ' ')
+        .replace(/[|]+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+    const rows: Record<string, HelperRow> = {};
+
+    for (const o of summaryGroups.multiOrders) {
+      const boxName = boxes.find(b => b.id === override[o.id]?.box_id)?.name || '';
+      const bubbleObj = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
+      const bubbleName = bubbleObj ? `ยาว ${bubbleObj.length_cm} cm` : '-';
+      const channelLabel = isFlash(o) ? 'FLASH' : 'MyOrder';
+
+      // สำคัญ: sort เพื่อไม่สนลำดับ แต่ไม่รวม duplicate ออก
+      // เช่น A+B+C กับ C+A+B รวมได้ แต่ A กับ A+A จะไม่รวม เพราะจำนวน key ไม่เท่ากัน
+      const normalizedItems = o.promos
+        .map(p => {
+          const title = p.short_name || p.name || '';
+          const detail = `${p.name || ''}${promoRepeatText(p)}`;
+          const totalText = promoTotalUnitText(p);
+          return {
+            title,
+            detail,
+            totalText,
+            key: `${cleanText(title)}::${cleanText(detail)}::${cleanText(totalText)}`,
+          };
+        })
+        .sort((a, b) => a.key.localeCompare(b.key, 'th'));
+
+      const key = [
+        channelLabel,
+        cleanText(boxName),
+        cleanText(bubbleName),
+        ...normalizedItems.map(item => item.key),
+      ].join('||');
+
+      if (!rows[key]) {
+        rows[key] = {
+          key,
+          channelLabel,
+          promos: normalizedItems.map(({ title, detail, totalText }) => ({ title, detail, totalText })),
+          packCount: 0,
+          orderCount: 0,
+          boxName: boxName || 'เลือกกล่องเอง',
+          bubbleName,
+          orderNos: [],
+        };
+      }
+
+      rows[key].packCount += orderPackCount(o);
+      rows[key].orderCount += 1;
+      if (o.order_no) rows[key].orderNos.push(o.order_no);
+    }
+
+    return Object.values(rows).filter(row => row.orderCount > 1);
+  })();
+
+
   const buildRichSummarySnapshot = () => [
     ...summaryGroups.grouped.map(g => ({
       promo_id: g.promoId,
@@ -273,6 +380,7 @@ export default function Packaging({
       product_name: g.short_name || g.promo_name,
       promo_name: g.promo_name || '',
       count: g.count,
+      pack_count: g.count,
       box: g.box_name,
       bubble: g.bubble_name && !g.bubble_name.includes('0 cm') ? g.bubble_name : '-',
       type: 'single',
@@ -295,7 +403,8 @@ export default function Packaging({
         name: p.name || '',
         qty: p.qty || 1,
       })),
-      count: 1,
+      count: orderPackCount(o),
+      pack_count: orderPackCount(o),
       box: boxes.find(b => b.id === override[o.id]?.box_id)?.name || '',
       bubble: (() => {
         const b = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
@@ -429,6 +538,25 @@ export default function Packaging({
     setLoadingHistory(false);
   };
 
+  const handleDeletePrintHistory = async () => {
+    if (!deleteHistoryTarget?.id || deletingHistory) return;
+    setDeletingHistory(true);
+    try {
+      const { error } = await supabase
+        .from('pack_history')
+        .delete()
+        .eq('id', deleteHistoryTarget.id);
+      if (error) throw error;
+      setPrintHistory(prev => prev.filter(h => h.id !== deleteHistoryTarget.id));
+      setDeleteHistoryTarget(null);
+    } catch (err) {
+      console.error('[delete pack_history error]', err);
+      alert('ลบประวัติปริ้นไม่สำเร็จ กรุณาลองใหม่');
+    } finally {
+      setDeletingHistory(false);
+    }
+  };
+
   const handleReprintFromHistory = (item: any) => {
     const snap = (item.summary_snapshot || []) as any[];
     const packDate = item.pack_date
@@ -447,7 +575,7 @@ export default function Packaging({
       return `<tr${isMultiRow ? ' style="background:#fffbeb"' : ''}>
         <td class="num">${idx++}</td>
         <td>${nameHtml}</td>
-        <td style="text-align:center"><span class="badge">${s.count} ชุด</span></td>
+        <td style="text-align:center"><span class="badge">${snapshotPackCount(s)} ชุด</span></td>
         <td style="text-align:center">${escHtml(s.box || '-')}</td>
         <td style="text-align:center;color:#0369a1">${(s.bubble && s.bubble !== '-') ? escHtml(s.bubble) : '-'}</td>
         <td><div class="note-box"></div></td>
@@ -480,7 +608,7 @@ export default function Packaging({
     <thead><tr>
       <th style="width:28px">#</th>
       <th>รายการสินค้า / โปรโมชั่น</th>
-      <th style="text-align:center;width:100px">จำนวน (ชุด)</th>
+      <th style="text-align:center;width:100px">จำนวนแพ็ค</th>
       <th style="text-align:center;width:120px">กล่อง</th>
       <th style="text-align:center;width:90px">บับเบิ้ล</th>
       <th style="width:120px">หมายเหตุ</th>
@@ -507,6 +635,7 @@ export default function Packaging({
               ${r.promos.length > 1 ? '<span style="background:#e0f2fe;color:#0369a1;border-radius:3px;padding:0 4px;font-size:10px;margin-right:3px">' + (pi+1) + '</span>' : ''}
               <span style="font-weight:600;color:#1e293b">${p.short_name || p.name}</span>
               <span style="color:#64748b;font-size:11px"> / ${p.name}${Number(p.qty) > 1 ? ` x${Number(p.qty)}` : ``}</span>
+              ${promoTotalUnitText(p) ? `<div style="color:#059669;font-size:11px;font-weight:700;margin-left:18px">${promoTotalUnitText(p)}</div>` : ''}
             </div>`).join('')
         : `<span style="color:#1e293b">${r.product}</span>`;
       const channelBadge = r.isFlash
@@ -590,12 +719,11 @@ export default function Packaging({
 
     const makeGroupedRows2 = (subset: PackOrder[]) => {
       const grouped: Record<string, { short_name: string; promo_name: string; box: string; bubble: string; count: number }> = {};
-      for (const o of subset.filter(o2 => o2.promos.length === 1)) {
+      for (const o of subset.filter(o2 => !isMulti(o2))) {
         const p = o.promos[0]; if (!p) continue;
         const bub = p.bubble_name && !p.bubble_name.includes('0 cm') ? p.bubble_name : '-';
-        const repeat = promoRepeat(p);
-        if (grouped[p.id]) grouped[p.id].count += repeat;
-        else grouped[p.id] = { short_name: p.short_name||'', promo_name: p.name, box: p.box_name||'-', bubble: bub, count: repeat };
+        if (grouped[p.id]) grouped[p.id].count += 1;
+        else grouped[p.id] = { short_name: p.short_name||'', promo_name: p.name, box: p.box_name||'-', bubble: bub, count: 1 };
       }
       return Object.values(grouped);
     };
@@ -604,8 +732,8 @@ export default function Packaging({
     const myordOrd  = orders.filter(o => o.courier !== 'FLASH' && (o as any).route !== 'B');
     const fSingle   = makeGroupedRows2(flashOrd);
     const mSingle   = makeGroupedRows2(myordOrd);
-    const fMultis   = flashOrd.filter(o => o.promos.length > 1);
-    const mMultis   = myordOrd.filter(o => o.promos.length > 1);
+    const fMultis   = flashOrd.filter(isMulti);
+    const mMultis   = myordOrd.filter(isMulti);
 
     const buildRows = (grouped: typeof fSingle, multis: typeof fMultis, startIdx: number) => {
       let html2 = ''; let idx = startIdx;
@@ -614,7 +742,7 @@ export default function Packaging({
           <td class="num">${idx++}</td>
           <td><div style="font-weight:700">${g.short_name || g.promo_name}</div>
               <div style="font-size:11px;color:#64748b">${g.promo_name}</div></td>
-          <td style="text-align:center"><span class="badge">${g.count} ชุด</span></td>
+          <td style="text-align:center"><span class="badge">${g.count} กล่อง</span></td>
           <td style="text-align:center">${g.box}</td>
           <td style="text-align:center;color:#0369a1">${g.bubble !== '-' ? g.bubble : '-'}</td>
           <td><div class="note-box"></div></td>
@@ -627,11 +755,12 @@ export default function Packaging({
         const ph = o.promos.map((p2, pi) =>
           `<div><span style="background:#fef3c7;color:#92400e;border-radius:3px;padding:0 3px;font-size:10px">${pi+1}</span>
            <strong>${p2.short_name || p2.name}</strong>
-           <span style="color:#64748b;font-size:11px"> ${p2.name}${promoRepeatText(p2)}</span></div>`).join('');
+           <span style="color:#64748b;font-size:11px"> ${p2.name}${promoRepeatText(p2)}</span>
+           ${promoTotalUnitText(p2) ? `<div style="color:#059669;font-size:11px;font-weight:700;margin-left:18px">${promoTotalUnitText(p2)}</div>` : ''}</div>`).join('');
         html2 += `<tr style="background:#fffbeb">
           <td class="num">${idx++}</td>
           <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
-          <td style="text-align:center"><span class="badge">1 ออเดอร์</span></td>
+          <td style="text-align:center"><span class="badge">${orderPackCount(o)} กล่อง</span></td>
           <td style="text-align:center">${bxName}</td>
           <td style="text-align:center;color:#0369a1">${buName !== '-' ? buName : '-'}</td>
           <td><div class="note-box"></div></td>
@@ -679,7 +808,7 @@ export default function Packaging({
     <thead><tr>
       <th style="width:28px">#</th>
       <th>รายการสินค้า / โปรโมชั่น</th>
-      <th style="text-align:center;width:100px">จำนวน (ชุด)</th>
+      <th style="text-align:center;width:100px">จำนวนแพ็ค</th>
       <th style="text-align:center;width:120px">กล่อง</th>
       <th style="text-align:center;width:90px">บับเบิ้ล</th>
       <th style="width:120px">หมายเหตุ</th>
@@ -870,7 +999,7 @@ export default function Packaging({
                 <th className="p-3 text-left whitespace-nowrap">รายชื่อ</th>
                 <th className="p-3 text-left whitespace-nowrap">เบอร์โทร</th>
                 <th className="p-3 text-left whitespace-nowrap">ชื่อสินค้า / โปรโมชั่น</th>
-                <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
+                <th className="p-3 text-center whitespace-nowrap">จำนวนแพ็ค</th>
                 <th className="p-3 text-left whitespace-nowrap">กล่อง</th>
                 <th className="p-3 text-left whitespace-nowrap">บั้บเบิ้ล</th>
               </tr>
@@ -913,6 +1042,7 @@ export default function Packaging({
                               <div>
                                 {p.short_name && <div className="font-medium text-slate-800 text-sm">{p.short_name}</div>}
                                 <div className="text-xs text-slate-500">{p.name}{promoRepeatText(p)}</div>
+                                {promoTotalUnitText(p) && <div className="text-[11px] text-emerald-600 font-semibold">{promoTotalUnitText(p)}</div>}
                               </div>
                             </div>
                           ))}
@@ -921,12 +1051,14 @@ export default function Packaging({
                         <div>
                           {o.promos[0]?.short_name && <div className="font-medium text-slate-800">{o.promos[0].short_name}</div>}
                           <div className="text-xs text-slate-500">{o.promos[0] ? `${o.promos[0].name}${promoRepeatText(o.promos[0])}` : (o.raw_prod || '-')}</div>
+                          {o.promos[0] && promoTotalUnitText(o.promos[0]) && <div className="text-[11px] text-emerald-600 font-semibold">{promoTotalUnitText(o.promos[0])}</div>}
                         </div>
                       )}
                     </td>
                     <td className="p-3 text-center whitespace-nowrap">
                       <div className="font-bold text-slate-700 text-sm">{orderPackCount(o)}</div>
-                      {multi && <div className="text-[10px] text-slate-400">{o.promos.length} รายการ</div>}
+                      <div className="text-[10px] text-slate-400">กล่อง</div>
+                      {multi && <div className="text-[10px] text-orange-500">{o.promos.length > 1 ? `${o.promos.length} รายการ` : 'เลือกกล่องเอง'}</div>}
                     </td>
                     <td className="p-3 whitespace-nowrap">
                       {multi ? (
@@ -985,6 +1117,78 @@ export default function Packaging({
       {/* ── Tab: ใบสรุป ── */}
       {tab === 'summary' && (
         <>
+          {packagingHelperSummary.length > 0 && (
+            <div className="shrink-0 mb-3 rounded-2xl border border-pink-200 bg-gradient-to-br from-pink-50 via-fuchsia-50 to-amber-50 p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+                <div>
+                  <h3 className="text-sm font-extrabold text-pink-700 flex items-center gap-2">
+                    📦 สรุปช่วยแพ็ค
+                    <span className="text-[11px] font-bold text-pink-500 bg-white/80 border border-pink-100 rounded-full px-2 py-0.5">
+                      ไม่กระทบตารางหลัก
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    รวมเฉพาะรายการแพ็คพิเศษที่เหมือนกันจริง เพื่อช่วยดูจำนวนกล่องเท่านั้น · ตารางหลักด้านล่างยังแยกตามออเดอร์เหมือนเดิม
+                  </p>
+                </div>
+                <div className="text-xs font-bold text-fuchsia-700 bg-white/80 border border-fuchsia-100 rounded-xl px-3 py-1.5">
+                  {packagingHelperSummary.length} กลุ่มที่ซ้ำ
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {packagingHelperSummary.map((row, idx) => (
+                  <div key={row.key} className="rounded-2xl bg-white/90 border border-pink-100 shadow-sm p-3">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-pink-500 text-white text-xs font-extrabold flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${row.channelLabel === 'FLASH' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {row.channelLabel}
+                        </span>
+                      </div>
+                      <span className="text-sm font-extrabold text-pink-700 bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
+                        {row.packCount} กล่อง
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {row.promos.map((p, pi) => (
+                        <div key={`${row.key}-${pi}`} className="text-xs text-slate-700 flex items-start gap-1.5">
+                          <span className="mt-0.5 w-4 h-4 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold flex items-center justify-center shrink-0">
+                            {pi + 1}
+                          </span>
+                          <div>
+                            <div className="font-bold text-slate-800">{p.title}</div>
+                            <div className="text-slate-500">{p.detail}</div>
+                            {p.totalText && <div className="text-emerald-600 font-bold">{p.totalText}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-1.5">
+                        <div className="text-slate-400">กล่อง</div>
+                        <div className="font-bold text-slate-700">{row.boxName}</div>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 border border-slate-100 px-2 py-1.5">
+                        <div className="text-slate-400">บับเบิ้ล</div>
+                        <div className="font-bold text-slate-700">{row.bubbleName || '-'}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 text-[11px] text-slate-400">
+                      รวมจาก {row.orderCount} ออเดอร์: {row.orderNos.slice(0, 5).join(', ')}
+                      {row.orderNos.length > 5 ? ` +${row.orderNos.length - 5}` : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
             <table className="text-sm w-full" style={{minWidth:'900px'}}>
               <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
@@ -992,7 +1196,7 @@ export default function Packaging({
                   <th className="p-3 text-center w-10 whitespace-nowrap">#</th>
                   <th className="p-3 text-left whitespace-nowrap">วันที่แพ็ค</th>
                   <th className="p-3 text-left whitespace-nowrap">รายการสินค้า</th>
-                  <th className="p-3 text-center whitespace-nowrap">จำนวน (ชุด)</th>
+                  <th className="p-3 text-center whitespace-nowrap">จำนวนแพ็ค</th>
                   <th className="p-3 text-left whitespace-nowrap">กล่อง</th>
                   <th className="p-3 text-left whitespace-nowrap">บั้บเบิ้ล</th>
                 </tr>
@@ -1015,10 +1219,10 @@ export default function Packaging({
                     <td className="p-3 min-w-[160px]">
                       {g.short_name && <div className="font-semibold text-slate-800 whitespace-nowrap">{g.short_name}</div>}
                       <div className="text-xs text-slate-500 whitespace-nowrap">{g.promo_name}</div>
-                      <div className="text-xs text-cyan-600 font-bold mt-0.5">จำนวน {g.count} ชุด</div>
+                      <div className="text-xs text-cyan-600 font-bold mt-0.5">จำนวนแพ็ค {g.count} กล่อง</div>
                     </td>
                     <td className="p-3 text-center whitespace-nowrap">
-                      <span className="px-3 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-sm font-bold">{g.count} ชุด</span>
+                      <span className="px-3 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-sm font-bold">{g.count} กล่อง</span>
                     </td>
                     <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.box_name}</td>
                     <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.bubble_name}</td>
@@ -1039,7 +1243,7 @@ export default function Packaging({
                               <span className="w-4 h-4 rounded-full bg-amber-200 text-amber-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{pi+1}</span>
                               <div>
                                 {p.short_name && <div className="font-semibold text-slate-800 text-sm whitespace-nowrap">{p.short_name}</div>}
-                                <div className="text-xs text-slate-500 whitespace-nowrap">{p.name}</div>
+                                <div className="text-xs text-slate-500 whitespace-nowrap">{p.name}{promoRepeatText(p)}</div>
                               </div>
                             </div>
                           ))}
@@ -1047,7 +1251,7 @@ export default function Packaging({
                         <span className="text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-0.5 rounded-full">⭐ แพ็คพิเศษ FLASH</span>
                       </td>
                       <td className="p-3 text-center whitespace-nowrap">
-                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">1 ออเดอร์</span>
+                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">{orderPackCount(o)} กล่อง</span>
                       </td>
                       <td className="p-3 whitespace-nowrap">
                         <select value={selBox || ''} onChange={e => setOverride(p => ({ ...p, [o.id]: { ...p[o.id], box_id: e.target.value } }))}
@@ -1084,10 +1288,10 @@ export default function Packaging({
                     <td className="p-3 min-w-[160px]">
                       {g.short_name && <div className="font-semibold text-slate-800 whitespace-nowrap">{g.short_name}</div>}
                       <div className="text-xs text-slate-500 whitespace-nowrap">{g.promo_name}</div>
-                      <div className="text-xs text-cyan-600 font-bold mt-0.5">จำนวน {g.count} ชุด</div>
+                      <div className="text-xs text-cyan-600 font-bold mt-0.5">จำนวนแพ็ค {g.count} กล่อง</div>
                     </td>
                     <td className="p-3 text-center whitespace-nowrap">
-                      <span className="px-3 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-sm font-bold">{g.count} ชุด</span>
+                      <span className="px-3 py-0.5 bg-cyan-100 text-cyan-800 rounded-full text-sm font-bold">{g.count} กล่อง</span>
                     </td>
                     <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.box_name}</td>
                     <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{g.bubble_name}</td>
@@ -1108,7 +1312,7 @@ export default function Packaging({
                               <span className="w-4 h-4 rounded-full bg-amber-200 text-amber-700 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">{pi+1}</span>
                               <div>
                                 {p.short_name && <div className="font-semibold text-slate-800 text-sm whitespace-nowrap">{p.short_name}</div>}
-                                <div className="text-xs text-slate-500 whitespace-nowrap">{p.name}</div>
+                                <div className="text-xs text-slate-500 whitespace-nowrap">{p.name}{promoRepeatText(p)}</div>
                               </div>
                             </div>
                           ))}
@@ -1116,7 +1320,7 @@ export default function Packaging({
                         <span className="text-xs text-amber-600 font-semibold bg-amber-100 px-2 py-0.5 rounded-full">⭐ แพ็คพิเศษ MyOrder</span>
                       </td>
                       <td className="p-3 text-center whitespace-nowrap">
-                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">1 ออเดอร์</span>
+                        <span className="px-3 py-0.5 bg-amber-100 text-amber-800 rounded-full text-sm font-bold">{orderPackCount(o)} กล่อง</span>
                       </td>
                       <td className="p-3 whitespace-nowrap">
                         <select value={selBox || ''} onChange={e => setOverride(p => ({ ...p, [o.id]: { ...p[o.id], box_id: e.target.value } }))}
@@ -1176,7 +1380,7 @@ export default function Packaging({
           <div className="flex items-center justify-between px-5 py-4 border-b">
             <div>
               <h3 className="font-semibold text-slate-800">ประวัติการปริ้นใบเตรียมสินค้า</h3>
-              <p className="text-xs text-slate-400 mt-0.5">กดปุ่มปริ้นซ้ำเพื่อพิมพ์อีกครั้ง</p>
+              <p className="text-xs text-slate-400 mt-0.5">กดปุ่มปริ้นซ้ำเพื่อพิมพ์อีกครั้ง หรือลบเฉพาะประวัติปริ้นที่ไม่ต้องการ</p>
             </div>
             <button onClick={loadPrintHistory} disabled={loadingHistory}
               className="flex items-center gap-2 px-3 py-1.5 text-xs border rounded-lg hover:bg-slate-50 transition disabled:opacity-50">
@@ -1198,7 +1402,7 @@ export default function Packaging({
                   <th className="p-3 text-center text-xs font-medium text-slate-500">จำนวนออเดอร์</th>
                   <th className="p-3 text-center text-xs font-medium text-slate-500">สถานะ</th>
                   <th className="p-3 text-center text-xs font-medium text-slate-500">รายการสินค้า</th>
-                  <th className="p-3 text-center text-xs font-medium text-slate-500">ปริ้นซ้ำ</th>
+                  <th className="p-3 text-center text-xs font-medium text-slate-500">จัดการ</th>
                 </tr>
               </thead>
               <tbody>
@@ -1229,7 +1433,7 @@ export default function Packaging({
                             return (
                               <div key={i} className="text-xs text-slate-600">
                                 <div>
-                                  {productName} — <span className="font-medium">{s.count} ชุด</span>
+                                  {productName} — <span className="font-medium">{snapshotPackCount(s)} ชุด</span>
                                 </div>
                                 {promoName && promoName !== productName && (
                                   <div className="text-[10px] text-slate-400 ml-2">{promoName}</div>
@@ -1241,11 +1445,19 @@ export default function Packaging({
                         </div>
                       </td>
                       <td className="p-3 text-center">
-                        <button
-                          onClick={() => handleReprintFromHistory(item)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-medium hover:bg-slate-700 transition mx-auto">
-                          <Printer size={12}/> ปริ้นซ้ำ
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => handleReprintFromHistory(item)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-medium hover:bg-slate-700 transition">
+                            <Printer size={12}/> ปริ้นซ้ำ
+                          </button>
+                          <button
+                            onClick={() => setDeleteHistoryTarget(item)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-semibold hover:bg-red-100 transition"
+                            title="ลบเฉพาะประวัติปริ้นนี้">
+                            <Trash2 size={12}/> ลบ
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1255,6 +1467,64 @@ export default function Packaging({
           )}
         </div>
       )}
+
+      {deleteHistoryTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl border border-slate-100">
+            <div className="relative bg-gradient-to-br from-red-50 via-white to-orange-50 px-6 pt-6 pb-4">
+              <button
+                onClick={() => !deletingHistory && setDeleteHistoryTarget(null)}
+                className="absolute right-4 top-4 rounded-full p-1.5 text-slate-400 hover:bg-white hover:text-slate-700 transition"
+                disabled={deletingHistory}>
+                <X size={18}/>
+              </button>
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-red-600">
+                <Trash2 size={28}/>
+              </div>
+              <h3 className="text-center text-xl font-bold text-slate-900">แน่ใจหรือไม่ที่จะลบ?</h3>
+              <p className="mt-2 text-center text-sm text-slate-500">
+                รายการนี้จะถูกลบออกจากประวัติปริ้นเท่านั้น<br/>
+                ไม่ลบออเดอร์จริง และไม่กระทบสต็อก
+              </p>
+            </div>
+            <div className="px-6 py-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 space-y-1">
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">วันที่ปริ้น</span>
+                  <span className="font-semibold text-slate-700 text-right">
+                    {new Date(deleteHistoryTarget.created_at).toLocaleString('th-TH', {
+                      day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit'
+                    })}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">ผู้รับผิดชอบ</span>
+                  <span className="font-semibold text-slate-700 text-right">{deleteHistoryTarget.responsible_person || '-'}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">จำนวนออเดอร์</span>
+                  <span className="font-semibold text-slate-700 text-right">{deleteHistoryTarget.order_count || 0} รายการ</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 border-t border-slate-100 bg-white px-6 py-4">
+              <button
+                onClick={() => setDeleteHistoryTarget(null)}
+                disabled={deletingHistory}
+                className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button
+                onClick={handleDeletePrintHistory}
+                disabled={deletingHistory}
+                className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 transition disabled:opacity-50">
+                {deletingHistory ? 'กำลังลบ...' : 'ยืนยันลบ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
