@@ -667,29 +667,81 @@ export default function Packaging({
       for (const g of grouped) {
         html2 += `<tr>
           <td class="num">${idx++}</td>
-          <td><div style="font-weight:700">${g.short_name || g.promo_name}</div>
-              <div style="font-size:11px;color:#64748b">${g.promo_name}</div></td>
+          <td><div style="font-weight:700">${escHtml(g.short_name || g.promo_name)}</div>
+              <div style="font-size:11px;color:#64748b">${escHtml(g.promo_name)}</div></td>
           <td style="text-align:center"><span class="badge">${g.count} กล่อง</span></td>
-          <td style="text-align:center">${g.box}</td>
-          <td style="text-align:center;color:#0369a1">${g.bubble !== '-' ? g.bubble : '-'}</td>
+          <td style="text-align:center">${escHtml(g.box)}</td>
+          <td style="text-align:center;color:#0369a1">${g.bubble !== '-' ? escHtml(g.bubble) : '-'}</td>
           <td><div class="note-box"></div></td>
         </tr>`;
       }
+
+      // รวมเฉพาะตอนปริ้น: แพ็คพิเศษที่เหมือนกันจริงจะรวมเป็นแถวเดียว
+      // โดยยังคงเลข # เดิมของแถวที่ถูกรวมไว้ เช่น 30,43,44
+      const cleanKeyText = (value: any) => String(value ?? '')
+        .replace(/\s+/g, ' ')
+        .replace(/[|]+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+      type PrintMultiGroup = {
+        key: string;
+        sourceNums: number[];
+        promos: { title: string; detail: string; totalText: string; key: string }[];
+        packCount: number;
+        boxName: string;
+        bubbleName: string;
+      };
+
+      const multiGroups: Record<string, PrintMultiGroup> = {};
       for (const o of multis) {
+        const sourceNum = idx++;
         const bxName = boxes.find(b => b.id === override[o.id]?.box_id)?.name || '-';
         const buObj  = override[o.id]?.bubble_id ? bubbles.find(b => b.id === override[o.id].bubble_id) : null;
         const buName = buObj ? `ยาว ${buObj.length_cm} cm` : '-';
-        const ph = o.promos.map((p2, pi) =>
+
+        // sort เพื่อไม่สนลำดับ แต่ไม่ลบรายการซ้ำออก
+        // เช่น A+B+C กับ C+A+B รวมได้ แต่ A กับ A+A ไม่รวม
+        const normalizedPromos = o.promos.map((p2) => {
+          const title = p2.short_name || p2.name || '';
+          const detail = `${p2.name || ''}${promoRepeatText(p2)}`;
+          const totalText = promoTotalUnitText(p2) || '';
+          const key = [cleanKeyText(title), cleanKeyText(detail), cleanKeyText(totalText)].join('::');
+          return { title, detail, totalText, key };
+        }).sort((a, b) => a.key.localeCompare(b.key, 'th'));
+
+        const groupKey = [
+          cleanKeyText(bxName),
+          cleanKeyText(buName),
+          ...normalizedPromos.map(p => p.key),
+        ].join('||');
+
+        if (!multiGroups[groupKey]) {
+          multiGroups[groupKey] = {
+            key: groupKey,
+            sourceNums: [],
+            promos: normalizedPromos,
+            packCount: 0,
+            boxName: bxName,
+            bubbleName: buName,
+          };
+        }
+        multiGroups[groupKey].sourceNums.push(sourceNum);
+        multiGroups[groupKey].packCount += orderPackCount(o);
+      }
+
+      for (const group of Object.values(multiGroups)) {
+        const ph = group.promos.map((p2, pi) =>
           `<div><span style="background:#fef3c7;color:#92400e;border-radius:3px;padding:0 3px;font-size:10px">${pi+1}</span>
-           <strong>${p2.short_name || p2.name}</strong>
-           <span style="color:#64748b;font-size:11px"> ${p2.name}${promoRepeatText(p2)}</span>
-           ${promoTotalUnitText(p2) ? `<div style="color:#059669;font-size:11px;font-weight:700;margin-left:18px">${promoTotalUnitText(p2)}</div>` : ''}</div>`).join('');
+           <strong>${escHtml(p2.title)}</strong>
+           <span style="color:#64748b;font-size:11px"> ${escHtml(p2.detail)}</span>
+           ${p2.totalText ? `<div style="color:#059669;font-size:11px;font-weight:700;margin-left:18px">${escHtml(p2.totalText)}</div>` : ''}</div>`).join('');
         html2 += `<tr style="background:#fffbeb">
-          <td class="num">${idx++}</td>
+          <td class="num">${group.sourceNums.join(',')}</td>
           <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
-          <td style="text-align:center"><span class="badge">${orderPackCount(o)} กล่อง</span></td>
-          <td style="text-align:center">${bxName}</td>
-          <td style="text-align:center;color:#0369a1">${buName !== '-' ? buName : '-'}</td>
+          <td style="text-align:center"><span class="badge">${group.packCount} กล่อง</span></td>
+          <td style="text-align:center">${escHtml(group.boxName)}</td>
+          <td style="text-align:center;color:#0369a1">${group.bubbleName !== '-' ? escHtml(group.bubbleName) : '-'}</td>
           <td><div class="note-box"></div></td>
         </tr>`;
       }
