@@ -493,7 +493,8 @@ export default function Packaging({
     const orderCount = item.order_count || 0;
 
     // ใช้ logic รวมแบบเดียวกับปริ้นครั้งแรกกับ "ปริ้นซ้ำ" ด้วย
-    // ไม่แตะข้อมูลจริง / ไม่แก้ snapshot ในฐานข้อมูล แค่รวมตอนสร้าง HTML สำหรับปริ้น
+    // และเรียงรายการตามชื่อสินค้า/โปร เพื่อให้สินค้าแบบเดียวกันอยู่ใกล้กัน
+    // ไม่แตะข้อมูลจริง / ไม่แก้ snapshot ในฐานข้อมูล แค่รวม+เรียงตอนสร้าง HTML สำหรับปริ้น
     const cleanKeyText = (value: any) => String(value ?? '')
       .replace(/\s+/g, ' ')
       .replace(/[|]+/g, ' ')
@@ -507,9 +508,12 @@ export default function Packaging({
       packCount: number;
       boxName: string;
       bubbleName: string;
+      sortKey: string;
     };
 
-    const rowsHtml: string[] = [];
+    type PrintRenderRow = { sortKey: string; html: string };
+
+    const printRows: PrintRenderRow[] = [];
     const multiGroups: Record<string, ReprintMultiGroup> = {};
     let idx = 1;
 
@@ -519,14 +523,27 @@ export default function Packaging({
 
       if (!isMultiRow) {
         const nameHtml = renderSnapshotProductPromoHtml(s);
-        rowsHtml.push(`<tr>
-          <td class="num">${sourceNum}</td>
-          <td>${nameHtml}</td>
-          <td style="text-align:center"><span class="badge">${snapshotPackCount(s)} กล่อง</span></td>
-          <td style="text-align:center">${escHtml(s.box || '-')}</td>
-          <td style="text-align:center;color:#0369a1">${(s.bubble && s.bubble !== '-') ? escHtml(s.bubble) : '-'}</td>
-          <td><div class="note-box"></div></td>
-        </tr>`);
+        const productName = getSnapshotProductName(s) || s.name || '';
+        const promoName = getSnapshotPromoName(s) || s.promo_name || '';
+        const sortKey = [
+          'single',
+          cleanKeyText(productName),
+          cleanKeyText(promoName),
+          cleanKeyText(s.box || ''),
+          cleanKeyText(s.bubble || ''),
+        ].join('||');
+
+        printRows.push({
+          sortKey,
+          html: `<tr>
+            <td class="num">${sourceNum}</td>
+            <td>${nameHtml}</td>
+            <td style="text-align:center"><span class="badge">${snapshotPackCount(s)} กล่อง</span></td>
+            <td style="text-align:center">${escHtml(s.box || '-')}</td>
+            <td style="text-align:center;color:#0369a1">${(s.bubble && s.bubble !== '-') ? escHtml(s.bubble) : '-'}</td>
+            <td><div class="note-box"></div></td>
+          </tr>`,
+        });
         continue;
       }
 
@@ -539,7 +556,7 @@ export default function Packaging({
             const totalText = '';
             const key = [cleanKeyText(title), cleanKeyText(detail), cleanKeyText(totalText)].join('::');
             return { title, detail, totalText, key };
-          }).sort((a: any, b: any) => a.key.localeCompare(b.key, 'th'))
+          }).sort((a: any, b: any) => a.key.localeCompare(b.key, 'th', { numeric: true, sensitivity: 'base' }))
         : [{
             title: getSnapshotProductName(s) || s.name || '',
             detail: getSnapshotPromoName(s) || s.promo_name || '',
@@ -563,6 +580,7 @@ export default function Packaging({
           packCount: 0,
           boxName,
           bubbleName,
+          sortKey: ['multi', ...normalizedPromos.map((p: any) => p.key), cleanKeyText(boxName), cleanKeyText(bubbleName)].join('||'),
         };
       }
       multiGroups[groupKey].sourceNums.push(sourceNum);
@@ -576,17 +594,23 @@ export default function Packaging({
          <span style="color:#64748b;font-size:11px"> ${escHtml(p.detail)}</span>
          ${p.totalText ? `<div style="color:#059669;font-size:11px;font-weight:700;margin-left:18px">${escHtml(p.totalText)}</div>` : ''}</div>`).join('');
 
-      rowsHtml.push(`<tr style="background:#fffbeb">
-        <td class="num">${group.sourceNums.join(',')}</td>
-        <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
-        <td style="text-align:center"><span class="badge">${group.packCount} กล่อง</span></td>
-        <td style="text-align:center">${escHtml(group.boxName || '-')}</td>
-        <td style="text-align:center;color:#0369a1">${(group.bubbleName && group.bubbleName !== '-') ? escHtml(group.bubbleName) : '-'}</td>
-        <td><div class="note-box"></div></td>
-      </tr>`);
+      printRows.push({
+        sortKey: group.sortKey,
+        html: `<tr style="background:#fffbeb">
+          <td class="num">${group.sourceNums.join(',')}</td>
+          <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
+          <td style="text-align:center"><span class="badge">${group.packCount} กล่อง</span></td>
+          <td style="text-align:center">${escHtml(group.boxName || '-')}</td>
+          <td style="text-align:center;color:#0369a1">${(group.bubbleName && group.bubbleName !== '-') ? escHtml(group.bubbleName) : '-'}</td>
+          <td><div class="note-box"></div></td>
+        </tr>`,
+      });
     }
 
-    const tableRows = rowsHtml.join('');
+    const tableRows = printRows
+      .sort((a, b) => a.sortKey.localeCompare(b.sortKey, 'th', { numeric: true, sensitivity: 'base' }))
+      .map(r => r.html)
+      .join('');
 
     const html = `<!DOCTYPE html>
 <html><head>
@@ -742,27 +766,43 @@ export default function Packaging({
     const mMultis   = myordOrd.filter(isMulti);
 
     const buildRows = (grouped: typeof fSingle, multis: typeof fMultis, startIdx: number) => {
-      let html2 = ''; let idx = startIdx;
-      for (const g of grouped) {
-        html2 += `<tr>
-          <td class="num">${idx++}</td>
-          <td><div style="font-weight:700">${escHtml(g.short_name || g.promo_name)}</div>
-              <div style="font-size:11px;color:#64748b">${escHtml(g.promo_name)}</div></td>
-          <td style="text-align:center"><span class="badge">${g.count} กล่อง</span></td>
-          <td style="text-align:center">${escHtml(g.box)}</td>
-          <td style="text-align:center;color:#0369a1">${g.bubble !== '-' ? escHtml(g.bubble) : '-'}</td>
-          <td><div class="note-box"></div></td>
-        </tr>`;
-      }
+      let idx = startIdx;
+      type PrintRenderRow = { sortKey: string; html: string };
 
-      // รวมเฉพาะตอนปริ้น: แพ็คพิเศษที่เหมือนกันจริงจะรวมเป็นแถวเดียว
-      // โดยยังคงเลข # เดิมของแถวที่ถูกรวมไว้ เช่น 30,43,44
       const cleanKeyText = (value: any) => String(value ?? '')
         .replace(/\s+/g, ' ')
         .replace(/[|]+/g, ' ')
         .trim()
         .toLowerCase();
 
+      const printRows: PrintRenderRow[] = [];
+
+      for (const g of grouped) {
+        const sourceNum = idx++;
+        const sortKey = [
+          'single',
+          cleanKeyText(g.short_name || g.promo_name),
+          cleanKeyText(g.promo_name),
+          cleanKeyText(g.box),
+          cleanKeyText(g.bubble),
+        ].join('||');
+
+        printRows.push({
+          sortKey,
+          html: `<tr>
+            <td class="num">${sourceNum}</td>
+            <td><div style="font-weight:700">${escHtml(g.short_name || g.promo_name)}</div>
+                <div style="font-size:11px;color:#64748b">${escHtml(g.promo_name)}</div></td>
+            <td style="text-align:center"><span class="badge">${g.count} กล่อง</span></td>
+            <td style="text-align:center">${escHtml(g.box)}</td>
+            <td style="text-align:center;color:#0369a1">${g.bubble !== '-' ? escHtml(g.bubble) : '-'}</td>
+            <td><div class="note-box"></div></td>
+          </tr>`,
+        });
+      }
+
+      // รวมเฉพาะตอนปริ้น: แพ็คพิเศษที่เหมือนกันจริงจะรวมเป็นแถวเดียว
+      // โดยยังคงเลข # เดิมของแถวที่ถูกรวมไว้ เช่น 30,43,44
       type PrintMultiGroup = {
         key: string;
         sourceNums: number[];
@@ -770,6 +810,7 @@ export default function Packaging({
         packCount: number;
         boxName: string;
         bubbleName: string;
+        sortKey: string;
       };
 
       const multiGroups: Record<string, PrintMultiGroup> = {};
@@ -787,7 +828,7 @@ export default function Packaging({
           const totalText = promoTotalUnitText(p2) || '';
           const key = [cleanKeyText(title), cleanKeyText(detail), cleanKeyText(totalText)].join('::');
           return { title, detail, totalText, key };
-        }).sort((a, b) => a.key.localeCompare(b.key, 'th'));
+        }).sort((a, b) => a.key.localeCompare(b.key, 'th', { numeric: true, sensitivity: 'base' }));
 
         const groupKey = [
           cleanKeyText(bxName),
@@ -803,6 +844,7 @@ export default function Packaging({
             packCount: 0,
             boxName: bxName,
             bubbleName: buName,
+            sortKey: ['multi', ...normalizedPromos.map(p => p.key), cleanKeyText(bxName), cleanKeyText(buName)].join('||'),
           };
         }
         multiGroups[groupKey].sourceNums.push(sourceNum);
@@ -815,15 +857,25 @@ export default function Packaging({
            <strong>${escHtml(p2.title)}</strong>
            <span style="color:#64748b;font-size:11px"> ${escHtml(p2.detail)}</span>
            ${p2.totalText ? `<div style="color:#059669;font-size:11px;font-weight:700;margin-left:18px">${escHtml(p2.totalText)}</div>` : ''}</div>`).join('');
-        html2 += `<tr style="background:#fffbeb">
-          <td class="num">${group.sourceNums.join(',')}</td>
-          <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
-          <td style="text-align:center"><span class="badge">${group.packCount} กล่อง</span></td>
-          <td style="text-align:center">${escHtml(group.boxName)}</td>
-          <td style="text-align:center;color:#0369a1">${group.bubbleName !== '-' ? escHtml(group.bubbleName) : '-'}</td>
-          <td><div class="note-box"></div></td>
-        </tr>`;
+
+        printRows.push({
+          sortKey: group.sortKey,
+          html: `<tr style="background:#fffbeb">
+            <td class="num">${group.sourceNums.join(',')}</td>
+            <td>${ph}<div style="margin-top:3px"><span style="background:#fef3c7;color:#92400e;font-size:10px;border-radius:3px;padding:1px 5px">⭐ แพ็คพิเศษ</span></div></td>
+            <td style="text-align:center"><span class="badge">${group.packCount} กล่อง</span></td>
+            <td style="text-align:center">${escHtml(group.boxName)}</td>
+            <td style="text-align:center;color:#0369a1">${group.bubbleName !== '-' ? escHtml(group.bubbleName) : '-'}</td>
+            <td><div class="note-box"></div></td>
+          </tr>`,
+        });
       }
+
+      const html2 = printRows
+        .sort((a, b) => a.sortKey.localeCompare(b.sortKey, 'th', { numeric: true, sensitivity: 'base' }))
+        .map(r => r.html)
+        .join('');
+
       return { html: html2, nextIdx: idx };
     };
 
