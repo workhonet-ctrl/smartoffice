@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   ShoppingBag, Plus, Trash2, Search, X, ChevronDown,
-  CheckCircle, FileText, RefreshCw, User, Save, Pencil
+  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer
 } from 'lucide-react';
 
 type Supplier = { id: string; name: string; tel: string | null; address: string | null; note: string | null };
@@ -445,6 +445,139 @@ export default function PurchaseOrder() {
     }
   };
 
+  const printPurchaseOrder = (po: PO) => {
+    const statusText =
+      po.status === 'pending_approval' ? 'รออนุมัติ' :
+      po.status === 'approved' ? 'อนุมัติแล้ว' :
+      po.status === 'received' ? 'รับเข้าแล้ว' :
+      po.status === 'rejected' ? 'ไม่อนุมัติ' : 'ร่าง';
+
+    const supplier = suppliers.find(s => s.id === po.supplier_id);
+    const items = (po.items || []) as POItem[];
+
+    const itemRows = items.map((it, idx) => `
+      <tr>
+        <td class="center">${idx + 1}</td>
+        <td>
+          <div class="item-name">${escHtml(it.name || '-')}</div>
+        </td>
+        <td class="center">${escHtml(String(it.qty || 0))}</td>
+        <td class="center">${escHtml(it.unit || '-')}</td>
+        <td class="right">฿${Number(it.price || 0).toLocaleString()}</td>
+        <td class="right strong">฿${Number((it.qty || 0) * (it.price || 0)).toLocaleString()}</td>
+      </tr>
+    `).join('');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>ใบสั่งซื้อ ${escHtml(po.po_no)}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Sarabun',system-ui,sans-serif;color:#0f172a;background:white;padding:24px;font-size:13px}
+    .sheet{max-width:900px;margin:0 auto;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden}
+    .hero{background:linear-gradient(135deg,#111827,#7c3aed,#ec4899);color:white;padding:26px 30px;position:relative}
+    .hero:after{content:"";position:absolute;right:-50px;top:-50px;width:160px;height:160px;border-radius:999px;background:rgba(255,255,255,.12)}
+    h1{font-size:26px;margin-bottom:6px}
+    .sub{opacity:.86;font-size:12px}
+    .status{display:inline-block;margin-top:10px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 12px;font-weight:800}
+    .content{padding:24px 30px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+    .card{border:1px solid #e2e8f0;border-radius:16px;padding:14px;background:#f8fafc}
+    .label{font-size:11px;color:#64748b;margin-bottom:4px}
+    .value{font-weight:800;color:#1e293b}
+    table{width:100%;border-collapse:collapse;margin-top:12px;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden}
+    th{background:#1e293b;color:white;text-align:left;padding:10px;font-size:12px}
+    td{border-bottom:1px solid #e2e8f0;padding:10px;vertical-align:top}
+    tr:last-child td{border-bottom:0}
+    .center{text-align:center}
+    .right{text-align:right}
+    .strong{font-weight:900}
+    .item-name{font-weight:800;color:#1e293b}
+    .total-box{margin-top:16px;display:flex;justify-content:flex-end}
+    .total{min-width:260px;border-radius:18px;background:linear-gradient(135deg,#fdf2f8,#eef2ff);border:1px solid #fbcfe8;padding:16px}
+    .total-row{display:flex;justify-content:space-between;align-items:center}
+    .total .amount{font-size:24px;font-weight:900;color:#be185d}
+    .note{margin-top:16px;border-radius:16px;background:#fffbeb;border:1px solid #fde68a;padding:12px;color:#92400e;white-space:pre-wrap}
+    .footer{margin-top:32px;display:flex;justify-content:space-between;gap:40px}
+    .sig{flex:1;text-align:center;border-top:1px solid #94a3b8;padding-top:8px;color:#64748b;font-size:12px}
+    @media print{
+      body{padding:0}
+      .sheet{border:0;border-radius:0;max-width:none}
+      .hero{border-radius:0}
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="hero">
+      <h1>ใบสั่งซื้อ (Purchase Order)</h1>
+      <div class="sub">เลขที่เอกสาร: ${escHtml(po.po_no)} · วันที่: ${new Date(po.po_date).toLocaleDateString('th-TH')}</div>
+      <div class="status">${escHtml(statusText)}</div>
+    </div>
+
+    <div class="content">
+      <div class="grid">
+        <div class="card">
+          <div class="label">ผู้ขาย</div>
+          <div class="value">${escHtml(po.supplier_name || '-')}</div>
+          ${supplier?.tel ? `<div class="label" style="margin-top:8px">เบอร์โทร</div><div>${escHtml(supplier.tel)}</div>` : ''}
+          ${supplier?.address ? `<div class="label" style="margin-top:8px">ที่อยู่</div><div>${escHtml(supplier.address)}</div>` : ''}
+        </div>
+        <div class="card">
+          <div class="label">ข้อมูลเอกสาร</div>
+          <div class="value">${escHtml(po.po_no)}</div>
+          <div class="label" style="margin-top:8px">วันที่ออกเอกสาร</div>
+          <div>${new Date(po.po_date).toLocaleDateString('th-TH')}</div>
+          <div class="label" style="margin-top:8px">สถานะ</div>
+          <div>${escHtml(statusText)}</div>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th style="width:50px" class="center">#</th>
+            <th>รายการสินค้า</th>
+            <th style="width:90px" class="center">จำนวน</th>
+            <th style="width:90px" class="center">หน่วย</th>
+            <th style="width:120px" class="right">ราคา/หน่วย</th>
+            <th style="width:130px" class="right">รวม</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+
+      <div class="total-box">
+        <div class="total">
+          <div class="total-row">
+            <div>
+              <div class="label">ยอดรวมสุทธิ</div>
+              <div style="font-size:12px;color:#64748b">รวม ${items.length} รายการ</div>
+            </div>
+            <div class="amount">฿${Number(po.total_thb || 0).toLocaleString()}</div>
+          </div>
+        </div>
+      </div>
+
+      ${po.note ? `<div class="note"><b>หมายเหตุ:</b><br/>${escHtml(po.note)}</div>` : ''}
+
+      <div class="footer">
+        <div class="sig">ผู้จัดทำ / ผู้สั่งซื้อ</div>
+        <div class="sig">ผู้อนุมัติ</div>
+        <div class="sig">ผู้รับสินค้า</div>
+      </div>
+    </div>
+  </div>
+  <script>window.onload=()=>window.print()</script>
+</body>
+</html>`;
+
+    const w = window.open('', '_blank', 'width=1000,height=700');
+    if (w) { w.document.write(html); w.document.close(); }
+  };
+
   const handleReceivePO = async () => {
     if (!receiveTarget || saving) return;
 
@@ -814,6 +947,10 @@ export default function PurchaseOrder() {
                       <button onClick={() => setDetailTarget(po)}
                         className="flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs hover:bg-slate-200 font-medium">
                         <FileText size={11}/> ดูรายละเอียด
+                      </button>
+                      <button onClick={() => printPurchaseOrder(po)}
+                        className="flex items-center gap-1 px-3 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-xs hover:bg-indigo-200 font-medium">
+                        <Printer size={11}/> พิมพ์
                       </button>
                       {po.status === 'pending_approval' && (
                         <>
