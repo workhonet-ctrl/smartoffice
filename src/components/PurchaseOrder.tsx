@@ -705,6 +705,22 @@ export default function PurchaseOrder() {
   };
 
 
+  const canEditPO = (status: string) =>
+    status === 'pending_approval' || status === 'rejected' || status === 'draft';
+
+  const canDeletePO = (status: string) =>
+    status !== 'received';
+
+  const actionHintText = (status: string) => {
+    if (status === 'pending_approval') return 'รออนุมัติ: แก้ไข / อนุมัติ / ไม่อนุมัติ ได้';
+    if (status === 'approved') return 'อนุมัติแล้ว: รับเข้าสินค้าได้ แต่แก้ไขไม่ได้';
+    if (status === 'received') return 'รับเข้าแล้ว: ล็อกแก้ไขและลบ เพื่อกันสต็อกผิด';
+    if (status === 'rejected') return 'ไม่อนุมัติ: แก้ไขแล้วส่งกลับรออนุมัติได้';
+    return 'เลือกดูรายละเอียด / พิมพ์ / ประวัติได้';
+  };
+
+
+
   return (
     <div className="flex flex-col h-screen p-6 pb-2">
       {/* Header */}
@@ -920,7 +936,7 @@ export default function PurchaseOrder() {
       {/* ── Tab: รายการ PO ── */}
       {tab === 'list' && (
         <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-          <div className="sticky top-0 z-20 bg-white border-b px-4 py-3">
+          <div className="sticky top-0 z-20 bg-white border-b px-4 py-3 space-y-3">
             <div className="flex items-center gap-2 overflow-x-auto">
               {statusTabs.map(t => (
                 <button key={t.key} onClick={() => setPoStatusFilter(t.key)}
@@ -937,6 +953,24 @@ export default function PurchaseOrder() {
                   </span>
                 </button>
               ))}
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {statusTabs.filter(t => t.key !== 'all').map(t => (
+                <button key={`card-${t.key}`} onClick={() => setPoStatusFilter(t.key)}
+                  className={`rounded-2xl border px-3 py-2 text-left transition ${
+                    poStatusFilter === t.key
+                      ? 'border-indigo-300 bg-indigo-50 shadow-sm'
+                      : 'border-slate-100 bg-slate-50 hover:bg-white hover:shadow-sm'
+                  }`}>
+                  <div className="text-[11px] text-slate-500 font-bold">{t.label}</div>
+                  <div className="text-xl font-extrabold text-slate-800 leading-tight">{statusCount(t.key)}</div>
+                </button>
+              ))}
+            </div>
+
+            <div className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-2xl px-3 py-2">
+              {actionHintText(poStatusFilter)}
             </div>
           </div>
           <table className="text-sm w-full" style={{minWidth:'750px'}}>
@@ -973,13 +1007,7 @@ export default function PurchaseOrder() {
                   </td>
                   <td className="p-3 text-center">{statusBadge(po.status)}</td>
                   <td className="p-3 text-center">
-                    <div className="flex items-center justify-center gap-1.5">
-                      {(po.status === 'pending_approval' || po.status === 'rejected' || po.status === 'draft') && (
-                        <button onClick={() => startEditPO(po)}
-                          className="flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs hover:bg-amber-200 font-medium">
-                          <Pencil size={11}/> แก้ไข
-                        </button>
-                      )}
+                    <div className="flex items-center justify-center gap-1.5 flex-wrap">
                       <button onClick={() => setDetailTarget(po)}
                         className="flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs hover:bg-slate-200 font-medium">
                         <FileText size={11}/> ดูรายละเอียด
@@ -992,6 +1020,14 @@ export default function PurchaseOrder() {
                         className="flex items-center gap-1 px-3 py-1 bg-fuchsia-100 text-fuchsia-700 rounded-lg text-xs hover:bg-fuchsia-200 font-medium">
                         <History size={11}/> ประวัติ
                       </button>
+
+                      {canEditPO(po.status) && (
+                        <button onClick={() => startEditPO(po)}
+                          className="flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs hover:bg-amber-200 font-medium">
+                          <Pencil size={11}/> แก้ไข
+                        </button>
+                      )}
+
                       {po.status === 'pending_approval' && (
                         <>
                           <button onClick={() => setApproveTarget(po)}
@@ -1004,20 +1040,25 @@ export default function PurchaseOrder() {
                           </button>
                         </>
                       )}
+
                       {po.status === 'approved' && (
                         <button onClick={() => setReceiveTarget(po)}
                           className="px-3 py-1 bg-cyan-500 text-white rounded-lg text-xs hover:bg-cyan-600 font-bold">
                           รับเข้าสินค้า
                         </button>
                       )}
-                      <button onClick={() => po.status === 'received' ? setBlockedDeleteTarget(po) : setDeleteTarget(po)}
-                        className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium ${
-                          po.status === 'received'
-                            ? 'bg-slate-100 text-slate-400 hover:bg-slate-200'
-                            : 'bg-red-100 text-red-600 hover:bg-red-200'
-                        }`}>
-                        <Trash2 size={11}/> ลบ
-                      </button>
+
+                      {canDeletePO(po.status) ? (
+                        <button onClick={() => setDeleteTarget(po)}
+                          className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs hover:bg-red-200 font-medium">
+                          <Trash2 size={11}/> ลบ
+                        </button>
+                      ) : (
+                        <button onClick={() => setBlockedDeleteTarget(po)}
+                          className="flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-400 rounded-lg text-xs hover:bg-slate-200 font-medium">
+                          <Trash2 size={11}/> ล็อกลบ
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
