@@ -831,6 +831,37 @@ export default function PurchaseOrder() {
     return matchText && matchPO;
   });
 
+  const exportSupplierCsv = () => {
+    const header = ['ชื่อผู้ขาย', 'เบอร์โทร', 'ที่อยู่', 'หมายเหตุ', 'จำนวน PO'];
+    const rows = filteredSuppliers.map(sup => {
+      const poCount = poList.filter(p => p.supplier_id === sup.id || p.supplier_name === sup.name).length;
+      return [
+        sup.name,
+        sup.tel || '',
+        sup.address || '',
+        sup.note || '',
+        poCount,
+      ];
+    });
+
+    const csv = [header, ...rows]
+      .map(r => r.map(csvCell).join(','))
+      .join('\n');
+
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const today = new Date().toISOString().split('T')[0];
+    a.href = url;
+    a.download = `suppliers-${today}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    showToast(`✓ Export ผู้ขาย ${filteredSuppliers.length} รายแล้ว`);
+  };
+
   return (
     <div className="flex flex-col h-screen p-6 pb-2">
       {/* Header */}
@@ -1767,6 +1798,10 @@ export default function PurchaseOrder() {
                 <span className="text-sm font-normal text-slate-400">แสดง {filteredSuppliers.length} / {suppliers.length} ราย</span>
               </h3>
               <div className="flex items-center gap-2">
+                <button onClick={exportSupplierCsv} disabled={filteredSuppliers.length === 0}
+                  className="px-3 py-1.5 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 flex items-center gap-1.5 text-sm disabled:opacity-50">
+                  <Download size={13}/> Export Excel
+                </button>
                 <button onClick={() => { setEditSup(null); setNewSup({ name:'', tel:'', address:'', note:'' }); setShowSupModal(true); }}
                   className="px-3 py-1.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-1.5 text-sm">
                   <Plus size={13}/> เพิ่มผู้ขายใหม่
