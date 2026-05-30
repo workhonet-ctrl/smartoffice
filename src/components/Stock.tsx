@@ -56,6 +56,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [rcvRefId,  setRcvRefId]  = useState('');
   const [rcvDate,   setRcvDate]   = useState(new Date().toISOString().split('T')[0]);
   const [saving, setSaving]       = useState(false);
+  const [showSyncConfirm, setShowSyncConfirm] = useState(false);
 
   // Popup รับสต็อกเริ่มต้น (order-based)
   const [showInitStock, setShowInitStock] = useState(false);
@@ -298,6 +299,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
         .select('id', { count: 'exact', head: true });
 
       showToast(count && count > 0 ? `✓ ซิงค์แล้ว ${count} รายการใหม่` : 'ไม่มีรายการใหม่ที่ต้องซิงค์');
+      setShowSyncConfirm(false);
       await loadItems();
     } finally { setLoading(false); }
   };
@@ -434,7 +436,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button onClick={handleSync} disabled={loading}
+          <button onClick={() => setShowSyncConfirm(true)} disabled={loading}
             className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 flex items-center gap-2 text-sm">
             <RefreshCw size={13} className={loading?'animate-spin':''}/> ซิงค์จากสินค้า
           </button>
@@ -700,6 +702,53 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
             </table>
           </div>
         </>
+      )}
+
+      {/* Popup: ยืนยันซิงค์จากสินค้า */}
+      {showSyncConfirm && (
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[2rem] w-full max-w-md shadow-2xl border border-cyan-100 overflow-hidden relative">
+            <div className="absolute -top-16 -right-16 w-40 h-40 bg-cyan-300/30 rounded-full blur-2xl"></div>
+            <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-fuchsia-300/30 rounded-full blur-2xl"></div>
+
+            <div className="relative bg-gradient-to-br from-cyan-50 via-indigo-50 to-fuchsia-50 px-6 py-6 border-b border-cyan-100">
+              <div className="absolute right-5 top-5 text-3xl">✨</div>
+              <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-cyan-400 via-indigo-500 to-fuchsia-500 text-white flex items-center justify-center text-3xl shadow-lg mb-3">
+                🔄
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-800">ซิงค์รายการสินค้าเข้าส Stock ใช่ไหม?</h3>
+              <p className="text-sm text-slate-500 mt-2 leading-6">
+                ระบบจะดึงรายการจากสินค้า / กล่อง / บั้บเบิ้ล มาเพิ่มในรายการสต็อก
+                โดยรายการที่มีอยู่แล้วจะไม่เพิ่มซ้ำ
+              </p>
+            </div>
+
+            <div className="relative px-6 py-4">
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-sm text-slate-600">
+                <div className="font-bold text-slate-800 mb-1">สิ่งที่จะเกิดขึ้น</div>
+                <div>✅ เพิ่มรายการใหม่ที่ยังไม่มีในสต็อก</div>
+                <div>✅ ไม่ลบรายการเดิม</div>
+                <div>✅ ไม่เปลี่ยนยอดคงเหลือเดิม</div>
+                <div>✅ ไม่แตะประวัติการเคลื่อนไหว</div>
+              </div>
+              <div className="mt-3 rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700">
+                ⚠️ ควรใช้เมื่อมีสินค้า/กล่อง/บั้บเบิ้ลใหม่ และต้องการให้มาแสดงในหน้าจัดการสต็อก
+              </div>
+            </div>
+
+            <div className="relative px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setShowSyncConfirm(false)} disabled={loading}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button onClick={handleSync} disabled={loading}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:from-cyan-600 hover:to-fuchsia-600 font-bold shadow disabled:opacity-50 flex items-center gap-2">
+                <RefreshCw size={15} className={loading ? 'animate-spin' : ''}/>
+                {loading ? 'กำลังซิงค์...' : 'ยืนยันซิงค์'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal เพิ่มรายการ */}
