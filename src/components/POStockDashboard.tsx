@@ -14,6 +14,8 @@ import {
   Boxes,
   ArrowDown,
   FileText,
+  CalendarDays,
+  Users,
 } from 'lucide-react';
 
 type POItem = {
@@ -71,27 +73,61 @@ type DashboardProps = {
   onGoToStock?: () => void;
 };
 
-const startOfDay = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
+type DateRangeKey = 'today' | '7d' | '30d' | 'month' | 'all';
 
-const startOfMonth = () => {
+const dateRangeOptions: { key: DateRangeKey; label: string; short: string }[] = [
+  { key: 'today', label: 'วันนี้', short: 'วันนี้' },
+  { key: '7d', label: '7 วันล่าสุด', short: '7 วัน' },
+  { key: '30d', label: '30 วันล่าสุด', short: '30 วัน' },
+  { key: 'month', label: 'เดือนนี้', short: 'เดือนนี้' },
+  { key: 'all', label: 'ทั้งหมด', short: 'ทั้งหมด' },
+];
+
+const getRangeStart = (range: DateRangeKey) => {
   const d = new Date();
-  d.setDate(1);
-  d.setHours(0, 0, 0, 0);
-  return d;
+
+  if (range === 'today') {
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  if (range === '7d') {
+    d.setDate(d.getDate() - 6);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  if (range === '30d') {
+    d.setDate(d.getDate() - 29);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  if (range === 'month') {
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  return null;
 };
 
 const money = (value: number) => `฿${Number(value || 0).toLocaleString()}`;
 
 const statusText = (status: string) => {
   if (status === 'pending_approval') return 'รออนุมัติ';
-  if (status === 'approved') return 'อนุมัติแล้ว';
+  if (status === 'approved') return 'รอรับเข้า';
   if (status === 'received') return 'ปิดงานแล้ว';
   if (status === 'rejected') return 'ไม่อนุมัติ';
   return status || '-';
+};
+
+const statusBadgeClass = (status: string) => {
+  if (status === 'pending_approval') return 'bg-orange-50 text-orange-700 border-orange-100';
+  if (status === 'approved') return 'bg-cyan-50 text-cyan-700 border-cyan-100';
+  if (status === 'received') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+  if (status === 'rejected') return 'bg-rose-50 text-rose-700 border-rose-100';
+  return 'bg-slate-50 text-slate-600 border-slate-100';
 };
 
 const stockTypeText = (type: string) => {
@@ -105,6 +141,7 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
   const [poList, setPoList] = useState<PurchaseOrder[]>([]);
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [latestTxns, setLatestTxns] = useState<StockTransaction[]>([]);
+  const [range, setRange] = useState<DateRangeKey>('month');
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
@@ -131,7 +168,7 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
           .from('stock_transactions')
           .select('*, stock_items(name, unit)')
           .order('created_at', { ascending: false })
-          .limit(12),
+          .limit(30),
       ]);
 
       setPoList((po || []) as PurchaseOrder[]);
@@ -148,29 +185,34 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
     loadDashboard();
   }, []);
 
+  const rangeStart = useMemo(() => getRangeStart(range), [range]);
+  const selectedRangeLabel = dateRangeOptions.find(o => o.key === range)?.label || 'เดือนนี้';
+
+  const filteredPO = useMemo(() => {
+    if (!rangeStart) return poList;
+
+    return poList.filter(po => {
+      const rawDate = po.created_at || po.po_date;
+      if (!rawDate) return false;
+      return new Date(rawDate) >= rangeStart;
+    });
+  }, [poList, rangeStart]);
+
+  const filteredClosedPO = useMemo(() => {
+    if (!rangeStart) return poList.filter(po => po.status === 'received');
+
+    return poList.filter(po => {
+      if (po.status !== 'received') return false;
+      const rawDate = po.updated_at || po.created_at || po.po_date;
+      if (!rawDate) return false;
+      return new Date(rawDate) >= rangeStart;
+    });
+  }, [poList, rangeStart]);
+
   const summary = useMemo(() => {
-    const today = startOfDay();
-    const month = startOfMonth();
-
-    const todayPO = poList.filter(po => {
-      const d = po.created_at ? new Date(po.created_at) : new Date(po.po_date);
-      return d >= today;
-    });
-
-    const monthPO = poList.filter(po => {
-      const d = po.created_at ? new Date(po.created_at) : new Date(po.po_date);
-      return d >= month;
-    });
-
-    const monthClosedPO = poList.filter(po => {
-      const d = po.updated_at || po.created_at || po.po_date;
-      return po.status === 'received' && new Date(d) >= month;
-    });
-
-    const pending = poList.filter(po => po.status === 'pending_approval');
-    const approved = poList.filter(po => po.status === 'approved');
-    const received = poList.filter(po => po.status === 'received');
-    const rejected = poList.filter(po => po.status === 'rejected');
+    const pendingAll = poList.filter(po => po.status === 'pending_approval');
+    const approvedAll = poList.filter(po => po.status === 'approved');
+    const receivedAll = poList.filter(po => po.status === 'received');
 
     const lowStock = stockItems.filter(i => i.active && i.min_qty > 0 && Number(i.current_qty) <= Number(i.min_qty));
     const warnStock = stockItems.filter(i =>
@@ -180,52 +222,55 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
       Number(i.current_qty) <= Number(i.min_qty) * 1.5
     );
 
-    const monthPOValue = monthPO.reduce((sum, po) => sum + Number(po.total_thb || 0), 0);
-    const monthReceivedValue = monthClosedPO.reduce((sum, po) => sum + Number(po.total_thb || 0), 0);
+    const poValue = filteredPO.reduce((sum, po) => sum + Number(po.total_thb || 0), 0);
+    const receivedValue = filteredClosedPO.reduce((sum, po) => sum + Number(po.total_thb || 0), 0);
 
     return {
-      todayPOCount: todayPO.length,
-      pendingCount: pending.length,
-      approvedCount: approved.length,
-      receivedCount: received.length,
-      rejectedCount: rejected.length,
-      monthPOValue,
-      monthReceivedValue,
+      poInRangeCount: filteredPO.length,
+      pendingCount: pendingAll.length,
+      approvedCount: approvedAll.length,
+      receivedCount: receivedAll.length,
+      poValue,
+      receivedValue,
       lowStock,
       warnStock,
       totalStockItems: stockItems.length,
     };
-  }, [poList, stockItems]);
+  }, [poList, stockItems, filteredPO, filteredClosedPO]);
 
-  const recentPO = poList.slice(0, 6);
+  const recentPO = useMemo(() => filteredPO.slice(0, 5), [filteredPO]);
+
+  const filteredTxns = useMemo(() => {
+    if (!rangeStart) return latestTxns;
+    return latestTxns.filter(txn => new Date(txn.created_at) >= rangeStart);
+  }, [latestTxns, rangeStart]);
 
   const topSuppliers = useMemo(() => {
-    const month = startOfMonth();
     const map = new Map<string, { supplier: string; count: number; value: number }>();
 
-    poList
-      .filter(po => {
-        const d = po.created_at ? new Date(po.created_at) : new Date(po.po_date);
-        return d >= month;
-      })
-      .forEach(po => {
-        const name = po.supplier_name || 'ไม่ระบุผู้ขาย';
-        const cur = map.get(name) || { supplier: name, count: 0, value: 0 };
-        cur.count += 1;
-        cur.value += Number(po.total_thb || 0);
-        map.set(name, cur);
-      });
+    filteredPO.forEach(po => {
+      const name = po.supplier_name || 'ไม่ระบุผู้ขาย';
+      const cur = map.get(name) || { supplier: name, count: 0, value: 0 };
+      cur.count += 1;
+      cur.value += Number(po.total_thb || 0);
+      map.set(name, cur);
+    });
 
     return Array.from(map.values())
       .sort((a, b) => b.value - a.value)
       .slice(0, 5);
-  }, [poList]);
+  }, [filteredPO]);
+
+  const stockCareList = useMemo(
+    () => [...summary.lowStock, ...summary.warnStock].slice(0, 5),
+    [summary.lowStock, summary.warnStock]
+  );
 
   const statCards = [
     {
-      title: 'PO วันนี้',
-      value: summary.todayPOCount.toLocaleString(),
-      sub: 'ใบสั่งซื้อที่สร้างวันนี้',
+      title: `PO ${selectedRangeLabel}`,
+      value: summary.poInRangeCount.toLocaleString(),
+      sub: 'จำนวนใบสั่งซื้อในช่วงที่เลือก',
       icon: ShoppingBag,
       tone: 'from-indigo-500 to-violet-500',
       bg: 'bg-indigo-50',
@@ -233,7 +278,7 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
     {
       title: 'รออนุมัติ',
       value: summary.pendingCount.toLocaleString(),
-      sub: 'ต้องตรวจสอบ',
+      sub: 'รายการค้างตรวจ',
       icon: Clock,
       tone: 'from-orange-500 to-amber-500',
       bg: 'bg-orange-50',
@@ -249,7 +294,7 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
     {
       title: 'ปิดงานแล้ว',
       value: summary.receivedCount.toLocaleString(),
-      sub: 'รับเข้าสินค้าแล้ว',
+      sub: 'รับเข้าสินค้าแล้วทั้งหมด',
       icon: CheckCircle2,
       tone: 'from-emerald-500 to-green-500',
       bg: 'bg-emerald-50',
@@ -272,6 +317,22 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 bg-white border border-slate-100 rounded-2xl p-1 shadow-sm">
+            {dateRangeOptions.map(option => (
+              <button
+                key={option.key}
+                onClick={() => setRange(option.key)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                  range === option.key
+                    ? 'bg-indigo-500 text-white shadow'
+                    : 'text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                {option.short}
+              </button>
+            ))}
+          </div>
+
           <button
             onClick={loadDashboard}
             disabled={loading}
@@ -329,51 +390,38 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
               <div>
                 <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
                   <TrendingUp size={18} className="text-indigo-500" />
-                  มูลค่าเดือนนี้
+                  มูลค่า {selectedRangeLabel}
                 </h3>
-                <p className="text-xs text-slate-400 mt-0.5">สรุปมูลค่า PO และมูลค่าที่รับเข้าแล้ว</p>
+                <p className="text-xs text-slate-400 mt-0.5">สรุปมูลค่า PO และมูลค่าที่รับเข้าแล้วตามช่วงเวลาที่เลือก</p>
+              </div>
+              <div className="hidden sm:flex items-center gap-1 text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full">
+                <CalendarDays size={13} />
+                {selectedRangeLabel}
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="rounded-3xl bg-gradient-to-br from-indigo-50 to-fuchsia-50 border border-indigo-100 p-4">
-                <div className="text-xs font-bold text-indigo-500">มูลค่า PO เดือนนี้</div>
-                <div className="text-3xl font-extrabold text-slate-800 mt-2">{money(summary.monthPOValue)}</div>
-                <div className="text-xs text-slate-500 mt-2">รวมจาก PO ที่สร้างในเดือนนี้</div>
+                <div className="text-xs font-bold text-indigo-500">มูลค่า PO</div>
+                <div className="text-3xl font-extrabold text-slate-800 mt-2">{money(summary.poValue)}</div>
+                <div className="text-xs text-slate-500 mt-2">รวมจาก PO ในช่วงที่เลือก</div>
               </div>
               <div className="rounded-3xl bg-gradient-to-br from-emerald-50 to-cyan-50 border border-emerald-100 p-4">
-                <div className="text-xs font-bold text-emerald-600">มูลค่ารับเข้าเดือนนี้</div>
-                <div className="text-3xl font-extrabold text-slate-800 mt-2">{money(summary.monthReceivedValue)}</div>
-                <div className="text-xs text-slate-500 mt-2">รวมจาก PO ที่ปิดงานแล้วในเดือนนี้</div>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3">
-                <div className="text-xs text-slate-400">ไม่อนุมัติ</div>
-                <div className="text-xl font-extrabold text-rose-600">{summary.rejectedCount.toLocaleString()} ใบ</div>
-              </div>
-              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3">
-                <div className="text-xs text-slate-400">รายการสต็อกทั้งหมด</div>
-                <div className="text-xl font-extrabold text-slate-800">{summary.totalStockItems.toLocaleString()} รายการ</div>
-              </div>
-              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3">
-                <div className="text-xs text-slate-400">ต้องระวังสต็อก</div>
-                <div className="text-xl font-extrabold text-amber-600">
-                  {(summary.lowStock.length + summary.warnStock.length).toLocaleString()} รายการ
-                </div>
+                <div className="text-xs font-bold text-emerald-600">มูลค่ารับเข้า</div>
+                <div className="text-3xl font-extrabold text-slate-800 mt-2">{money(summary.receivedValue)}</div>
+                <div className="text-xs text-slate-500 mt-2">รวมจาก PO ที่ปิดงานแล้วในช่วงที่เลือก</div>
               </div>
             </div>
           </div>
 
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5">
-            <h3 className="font-extrabold text-slate-800 flex items-center gap-2 mb-4">
+            <h3 className="font-extrabold text-slate-800 flex items-center gap-2 mb-3">
               <AlertTriangle size={18} className="text-amber-500" />
               สต็อกที่ควรดูแล
             </h3>
 
             <div className="space-y-2">
-              {[...summary.lowStock, ...summary.warnStock].slice(0, 7).map(item => {
+              {stockCareList.map(item => {
                 const isLow = Number(item.current_qty) <= Number(item.min_qty);
                 return (
                   <div key={item.id} className={`rounded-2xl border p-3 ${isLow ? 'bg-rose-50 border-rose-100' : 'bg-amber-50 border-amber-100'}`}>
@@ -396,12 +444,40 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
                 );
               })}
 
-              {summary.lowStock.length + summary.warnStock.length === 0 && (
+              {stockCareList.length === 0 && (
                 <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-5 text-center text-emerald-700 font-bold">
                   ✅ สต็อกยังปกติ
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* ย้ายผู้ขายยอดสูงสุดขึ้นมาไว้ด้านบน ตามที่ตูนขอ */}
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
+                <Users size={18} className="text-indigo-500" />
+                ผู้ขายยอดสูงสุด {selectedRangeLabel}
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">แสดงสูงสุด 5 ราย เพื่อไม่ให้ข้อมูลเยอะเกินไป</p>
+            </div>
+          </div>
+          <div className="p-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+            {topSuppliers.length === 0 && (
+              <div className="col-span-full text-center text-slate-400 p-6">ยังไม่มีข้อมูลผู้ขายในช่วงนี้</div>
+            )}
+            {topSuppliers.map((s, idx) => (
+              <div key={s.supplier} className="rounded-3xl bg-gradient-to-br from-slate-50 to-indigo-50 border border-slate-100 p-4">
+                <div className="w-9 h-9 rounded-2xl bg-indigo-500 text-white flex items-center justify-center font-extrabold shadow mb-3">
+                  {idx + 1}
+                </div>
+                <div className="font-extrabold text-slate-800 truncate">{s.supplier}</div>
+                <div className="text-xs text-slate-500 mt-1">{s.count} PO</div>
+                <div className="text-lg font-extrabold text-indigo-700 mt-2">{money(s.value)}</div>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -412,6 +488,7 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
                 <FileText size={18} className="text-indigo-500" />
                 PO ล่าสุด
               </h3>
+              <span className="text-xs text-slate-400">แสดง 5 รายการ</span>
             </div>
             <div className="overflow-auto">
               <table className="w-full text-sm" style={{ minWidth: '680px' }}>
@@ -426,7 +503,7 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
                 <tbody>
                   {recentPO.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="p-8 text-center text-slate-400">ยังไม่มี PO</td>
+                      <td colSpan={4} className="p-8 text-center text-slate-400">ยังไม่มี PO ในช่วงนี้</td>
                     </tr>
                   )}
                   {recentPO.map(po => (
@@ -435,7 +512,7 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
                       <td className="px-4 py-3 font-medium text-slate-800">{po.supplier_name || '-'}</td>
                       <td className="px-4 py-3 text-right font-bold">{money(po.total_thb)}</td>
                       <td className="px-4 py-3 text-center">
-                        <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold">
+                        <span className={`px-2 py-1 rounded-full border text-xs font-bold ${statusBadgeClass(po.status)}`}>
                           {statusText(po.status)}
                         </span>
                       </td>
@@ -447,17 +524,19 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
           </div>
 
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
               <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
                 <ArrowDown size={18} className="text-emerald-500" />
                 การเคลื่อนไหวสต็อกล่าสุด
               </h3>
+              <span className="text-xs text-slate-400">เกิน 5 รายการเลื่อนได้</span>
             </div>
-            <div className="divide-y divide-slate-100">
-              {latestTxns.length === 0 && (
-                <div className="p-8 text-center text-slate-400">ยังไม่มีประวัติการเคลื่อนไหว</div>
+
+            <div className="max-h-[360px] overflow-y-auto divide-y divide-slate-100">
+              {filteredTxns.length === 0 && (
+                <div className="p-8 text-center text-slate-400">ยังไม่มีประวัติการเคลื่อนไหวในช่วงนี้</div>
               )}
-              {latestTxns.map(txn => (
+              {filteredTxns.map(txn => (
                 <div key={txn.id} className="p-4 hover:bg-slate-50">
                   <div className="flex justify-between gap-3">
                     <div className="min-w-0">
@@ -475,28 +554,6 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100">
-            <h3 className="font-extrabold text-slate-800">ผู้ขายยอดสูงสุดเดือนนี้</h3>
-            <p className="text-xs text-slate-400 mt-0.5">เรียงตามมูลค่า PO เดือนปัจจุบัน</p>
-          </div>
-          <div className="p-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
-            {topSuppliers.length === 0 && (
-              <div className="col-span-full text-center text-slate-400 p-6">ยังไม่มีข้อมูลผู้ขายเดือนนี้</div>
-            )}
-            {topSuppliers.map((s, idx) => (
-              <div key={s.supplier} className="rounded-3xl bg-gradient-to-br from-slate-50 to-indigo-50 border border-slate-100 p-4">
-                <div className="w-9 h-9 rounded-2xl bg-indigo-500 text-white flex items-center justify-center font-extrabold shadow mb-3">
-                  {idx + 1}
-                </div>
-                <div className="font-extrabold text-slate-800 truncate">{s.supplier}</div>
-                <div className="text-xs text-slate-500 mt-1">{s.count} PO</div>
-                <div className="text-lg font-extrabold text-indigo-700 mt-2">{money(s.value)}</div>
-              </div>
-            ))}
           </div>
         </div>
       </div>
