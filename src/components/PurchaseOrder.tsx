@@ -667,7 +667,11 @@ export default function PurchaseOrder() {
       po.supplier_name || '',
       itemText,
       po.note || '',
-      statusLabelText(po.status),
+      po.status === 'pending_approval' ? 'รออนุมัติ pending_approval' :
+      po.status === 'approved' ? 'อนุมัติแล้ว approved' :
+      po.status === 'received' ? 'รับเข้าแล้ว received' :
+      po.status === 'rejected' ? 'ไม่อนุมัติ rejected' :
+      po.status === 'draft' ? 'ร่าง draft' : po.status,
     ].join(' ').toLowerCase();
     const matchText = !q || haystack.includes(q);
 
