@@ -15,6 +15,20 @@ type PO        = {
   created_at?: string | null; updated_at?: string | null;
 };
 
+
+type POAuditLog = {
+  id: string;
+  po_id: string | null;
+  po_no: string;
+  action: string;
+  action_label: string;
+  detail: string | null;
+  old_status: string | null;
+  new_status: string | null;
+  meta: Record<string, any> | null;
+  created_at: string;
+};
+
 // SearchableDropdown
 function SearchDrop({ options, value, onChange, placeholder, onAdd }:
   { options: { id: string; label: string; sub?: string }[]; value: string;
@@ -113,6 +127,9 @@ export default function PurchaseOrder() {
   const [receiveTarget, setReceiveTarget] = useState<PO | null>(null);
   const [blockedDeleteTarget, setBlockedDeleteTarget] = useState<PO | null>(null);
   const [historyTarget, setHistoryTarget] = useState<PO | null>(null);
+  const [auditTarget, setAuditTarget] = useState<PO | null>(null);
+  const [auditLogs, setAuditLogs] = useState<POAuditLog[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
   const [deleteSupplierTarget, setDeleteSupplierTarget] = useState<Supplier | null>(null);
   const actionLockRef = useRef(false);
 
@@ -147,6 +164,43 @@ export default function PurchaseOrder() {
     } catch (err) {
       console.warn('PO audit log skipped:', err);
     }
+  };
+
+  const openAuditTimeline = async (po: PO) => {
+    setAuditTarget(po);
+    setAuditLogs([]);
+    setAuditLoading(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('po_audit_logs')
+        .select('*')
+        .eq('po_no', po.po_no)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setAuditLogs((data || []) as POAuditLog[]);
+    } catch (err: any) {
+      showToast('❌ โหลดประวัติละเอียดไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const auditActionIcon = (action: string) => {
+    if (action === 'submit_approval') return '📨';
+    if (action === 'approve') return '✅';
+    if (action === 'reject') return '💬';
+    if (action === 'receive_stock') return '📦';
+    if (action === 'edit' || action === 'edit_resubmit') return '✏️';
+    if (action === 'delete_po') return '🗑️';
+    if (action === 'disable_supplier') return '🏷️';
+    return '🕘';
+  };
+
+  const auditStatusText = (value?: string | null) => {
+    if (!value) return '-';
+    return statusLabelText(value);
   };
 
   useEffect(() => { loadData(); initPoNo(); }, []);
@@ -1381,6 +1435,10 @@ export default function PurchaseOrder() {
                         className="flex items-center gap-1 px-3 py-1 bg-fuchsia-100 text-fuchsia-700 rounded-lg text-xs hover:bg-fuchsia-200 font-medium">
                         <History size={11}/> ประวัติ
                       </button>
+                      <button onClick={() => openAuditTimeline(po)}
+                        className="flex items-center gap-1 px-3 py-1 bg-violet-100 text-violet-700 rounded-lg text-xs hover:bg-violet-200 font-medium">
+                        <History size={11}/> ประวัติละเอียด
+                      </button>
 
                       {canEditPO(po.status) && (
                         <button onClick={() => startEditPO(po)}
@@ -1426,6 +1484,116 @@ export default function PurchaseOrder() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Popup: ประวัติละเอียดจาก Audit Log */}
+      {auditTarget && (
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[2rem] w-full max-w-3xl shadow-2xl border border-violet-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-slate-950 via-violet-900 to-fuchsia-800 px-6 py-6 text-white relative overflow-hidden">
+              <div className="absolute -right-10 -top-10 w-36 h-36 bg-white/10 rounded-full blur-xl"></div>
+              <div className="absolute right-5 top-5 text-3xl">🔎</div>
+              <div className="w-16 h-16 rounded-3xl bg-white/15 border border-white/20 backdrop-blur flex items-center justify-center text-3xl shadow-lg mb-3">
+                📜
+              </div>
+              <h3 className="text-xl font-extrabold">ประวัติละเอียด PO</h3>
+              <p className="text-sm text-white/75 mt-1">
+                {auditTarget.po_no} · บันทึกจากตาราง po_audit_logs
+              </p>
+            </div>
+
+            <div className="p-6 bg-gradient-to-br from-white via-violet-50 to-fuchsia-50 max-h-[68vh] overflow-auto">
+              <div className="rounded-2xl bg-white/90 border border-violet-100 shadow-sm p-3 text-sm mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <div className="text-xs text-slate-400">เลขที่เอกสาร</div>
+                  <div className="font-mono font-bold text-violet-700">{auditTarget.po_no}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400">ผู้ขาย</div>
+                  <div className="font-bold text-slate-800">{auditTarget.supplier_name || '-'}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400">ยอดรวม</div>
+                  <div className="font-bold text-slate-800">฿{Number(auditTarget.total_thb).toLocaleString()}</div>
+                </div>
+              </div>
+
+              {auditLoading && (
+                <div className="p-8 text-center text-slate-400">กำลังโหลดประวัติละเอียด...</div>
+              )}
+
+              {!auditLoading && auditLogs.length === 0 && (
+                <div className="p-8 text-center text-slate-400 bg-white rounded-2xl border border-slate-100">
+                  ยังไม่มี audit log ของ PO นี้
+                </div>
+              )}
+
+              {!auditLoading && auditLogs.length > 0 && (
+                <div className="space-y-3">
+                  {auditLogs.map((log, idx) => (
+                    <div key={log.id} className="flex gap-3">
+                      <div className="flex flex-col items-center">
+                        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white flex items-center justify-center text-xl shadow">
+                          {auditActionIcon(log.action)}
+                        </div>
+                        {idx < auditLogs.length - 1 && <div className="w-px flex-1 bg-violet-100 mt-2"></div>}
+                      </div>
+
+                      <div className="flex-1 rounded-2xl bg-white border border-violet-100 p-4 shadow-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="font-extrabold text-slate-800">{log.action_label}</div>
+                            <div className="text-xs text-slate-400 mt-0.5">
+                              {new Date(log.created_at).toLocaleString('th-TH')}
+                            </div>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 text-xs font-bold">
+                            {log.action}
+                          </span>
+                        </div>
+
+                        {log.detail && (
+                          <div className="mt-3 text-sm text-slate-600 bg-slate-50 rounded-xl px-3 py-2">
+                            {log.detail}
+                          </div>
+                        )}
+
+                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div className="rounded-xl bg-rose-50 border border-rose-100 px-3 py-2">
+                            <span className="text-rose-400">สถานะเดิม:</span>
+                            <b className="ml-1 text-rose-700">{auditStatusText(log.old_status)}</b>
+                          </div>
+                          <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2">
+                            <span className="text-emerald-500">สถานะใหม่:</span>
+                            <b className="ml-1 text-emerald-700">{auditStatusText(log.new_status)}</b>
+                          </div>
+                        </div>
+
+                        {log.meta && Object.keys(log.meta).length > 0 && (
+                          <details className="mt-3">
+                            <summary className="cursor-pointer text-xs font-bold text-violet-600 hover:text-violet-800">
+                              ดูข้อมูล meta
+                            </summary>
+                            <pre className="mt-2 text-[11px] bg-slate-900 text-slate-100 rounded-xl p-3 overflow-auto max-h-40">
+{JSON.stringify(log.meta, null, 2)}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 pb-6 bg-gradient-to-br from-violet-50 to-white flex justify-end">
+              <button onClick={() => { setAuditTarget(null); setAuditLogs([]); }}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white hover:from-violet-600 hover:to-fuchsia-600 font-bold shadow">
+                ปิด
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
