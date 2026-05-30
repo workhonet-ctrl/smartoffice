@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   ShoppingBag, Plus, Trash2, Search, X, ChevronDown,
-  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer, History, Search, Download
+  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer, History, Download
 } from 'lucide-react';
 
 type Supplier = { id: string; name: string; tel: string | null; address: string | null; note: string | null };
@@ -114,6 +114,7 @@ export default function PurchaseOrder() {
   const [blockedDeleteTarget, setBlockedDeleteTarget] = useState<PO | null>(null);
   const [historyTarget, setHistoryTarget] = useState<PO | null>(null);
   const [deleteSupplierTarget, setDeleteSupplierTarget] = useState<Supplier | null>(null);
+  const actionLockRef = useRef(false);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000);
@@ -191,21 +192,34 @@ export default function PurchaseOrder() {
   };
 
   const handleDeleteSupplier = async (supplier: Supplier) => {
-    const relatedPOCount = poList.filter(p => p.supplier_id === supplier.id || p.supplier_name === supplier.name).length;
-    if (relatedPOCount > 0) {
-      showToast('ผู้ขายนี้มีประวัติ PO แล้ว ระบบจะปิดใช้งานผู้ขาย แต่ไม่ลบประวัติเอกสารเดิม');
+    if (saving || actionLockRef.current) return;
+    actionLockRef.current = true;
+    setSaving(true);
+
+    try {
+      const relatedPOCount = poList.filter(p => p.supplier_id === supplier.id || p.supplier_name === supplier.name).length;
+      if (relatedPOCount > 0) {
+        showToast('ผู้ขายนี้มีประวัติ PO แล้ว ระบบจะปิดใช้งานผู้ขาย แต่ไม่ลบประวัติเอกสารเดิม');
+      }
+
+      const { error } = await supabase.from('suppliers').update({ active: false }).eq('id', supplier.id);
+      if (error) throw error;
+
+      setSuppliers(p => p.filter(s => s.id !== supplier.id));
+
+      if (supplierId === supplier.id) {
+        setSupplierId('');
+        setSupplierName('');
+      }
+
+      setDeleteSupplierTarget(null);
+      showToast('✓ ปิดใช้งานผู้ขายแล้ว');
+    } catch (err: any) {
+      showToast('❌ ปิดใช้งานผู้ขายไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setSaving(false);
+      actionLockRef.current = false;
     }
-
-    await supabase.from('suppliers').update({ active: false }).eq('id', supplier.id);
-    setSuppliers(p => p.filter(s => s.id !== supplier.id));
-
-    if (supplierId === supplier.id) {
-      setSupplierId('');
-      setSupplierName('');
-    }
-
-    setDeleteSupplierTarget(null);
-    showToast('✓ ปิดใช้งานผู้ขายแล้ว');
   };
 
   // ── load PO เข้า form สำหรับแก้ไข ──────────────────────────────────
@@ -253,12 +267,13 @@ export default function PurchaseOrder() {
   };
 
   const handleUpdatePO = async () => {
-    if (!editingPO) return;
+    if (!editingPO || saving || actionLockRef.current) return;
     const validItems = validateEditPO();
     if (!validItems) return;
 
     const nextStatus = editingPO.status === 'rejected' ? 'pending_approval' : editingPO.status;
 
+    actionLockRef.current = true;
     setSaving(true);
     try {
       const { error } = await supabase.from('purchase_orders').update({
@@ -285,10 +300,12 @@ export default function PurchaseOrder() {
       setPoStatusFilter(nextStatus === 'pending_approval' ? 'pending_approval' : poStatusFilter);
     } catch (err: any) {
       showToast('❌ ' + (err.message||'เกิดข้อผิดพลาด'), 'error');
-    } finally { setSaving(false); }
+    } finally { setSaving(false); actionLockRef.current = false; }
   };
 
   const handleDeletePO = async (po: PO) => {
+    if (saving || actionLockRef.current) return;
+    actionLockRef.current = true;
     setSaving(true);
     try {
       // ถ้า approved → สร้าง transactions 'out' ย้อนคืนสต็อก
@@ -334,7 +351,7 @@ export default function PurchaseOrder() {
       await loadData();
     } catch (err: any) {
       showToast('❌ ลบไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
-    } finally { setSaving(false); }
+    } finally { setSaving(false); actionLockRef.current = false; }
   };
 
   const validatePOForm = () => {
@@ -351,8 +368,10 @@ export default function PurchaseOrder() {
   };
 
   const handleSubmitApproval = async () => {
+    if (saving || actionLockRef.current) return;
     const validItems = validatePOForm();
     if (!validItems) return;
+    actionLockRef.current = true;
     setSaving(true);
     try {
       // สร้างเลข PO ใหม่ตอนกดยืนยันจริง เพื่อกันเลขซ้ำจากเลขที่ค้างอยู่บนหน้าฟอร์ม
@@ -390,7 +409,7 @@ export default function PurchaseOrder() {
       await Promise.all([initPoNo(), loadData()]);
     } catch (err: any) {
       showToast('❌ ' + (err.message||'เกิดข้อผิดพลาด'), 'error');
-    } finally { setSaving(false); }
+    } finally { setSaving(false); actionLockRef.current = false; }
   };
 
   const handleDraft = async () => {
@@ -409,11 +428,12 @@ export default function PurchaseOrder() {
       await Promise.all([initPoNo(), loadData()]);
     } catch (err: any) {
       showToast('❌ ' + (err.message||'เกิดข้อผิดพลาด'), 'error');
-    } finally { setSaving(false); }
+    } finally { setSaving(false); actionLockRef.current = false; }
   };
 
   const handleApprovePendingPO = async () => {
-    if (!approveTarget || saving) return;
+    if (!approveTarget || saving || actionLockRef.current) return;
+    actionLockRef.current = true;
     setSaving(true);
     try {
       const { error } = await supabase
@@ -430,15 +450,17 @@ export default function PurchaseOrder() {
       showToast('❌ อนุมัติไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
     } finally {
       setSaving(false);
+      actionLockRef.current = false;
     }
   };
 
   const handleRejectPO = async () => {
-    if (!rejectTarget || saving) return;
+    if (!rejectTarget || saving || actionLockRef.current) return;
     if (!rejectReason.trim()) {
       showToast('กรุณาระบุเหตุผลที่ไม่อนุมัติ', 'error');
       return;
     }
+    actionLockRef.current = true;
     setSaving(true);
     try {
       const nextNote = [
@@ -461,6 +483,7 @@ export default function PurchaseOrder() {
       showToast('❌ ไม่อนุมัติไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
     } finally {
       setSaving(false);
+      actionLockRef.current = false;
     }
   };
 
@@ -605,7 +628,7 @@ export default function PurchaseOrder() {
   };
 
   const handleReceivePO = async () => {
-    if (!receiveTarget || saving) return;
+    if (!receiveTarget || saving || actionLockRef.current) return;
 
     const itemsWithStock = ((receiveTarget.items as any[]) || [])
       .filter(it => it.stock_item_id && Number(it.qty) > 0);
@@ -615,6 +638,7 @@ export default function PurchaseOrder() {
       return;
     }
 
+    actionLockRef.current = true;
     setSaving(true);
     try {
       // ตรวจว่ารายการ stock_item_id ยังมีอยู่จริง
@@ -638,6 +662,7 @@ export default function PurchaseOrder() {
       if (transactions.length === 0) {
         showToast('ไม่พบรายการสินค้าที่สามารถรับเข้าสต็อกได้', 'error');
         setSaving(false);
+        actionLockRef.current = false;
         return;
       }
 
@@ -660,6 +685,7 @@ export default function PurchaseOrder() {
       showToast('❌ รับเข้าสินค้าไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
     } finally {
       setSaving(false);
+      actionLockRef.current = false;
     }
   };
 
