@@ -104,6 +104,7 @@ export default function PurchaseOrder() {
   const [rejectReason, setRejectReason] = useState('');
   const [showEditConfirm, setShowEditConfirm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PO | null>(null);
+  const [receiveTarget, setReceiveTarget] = useState<PO | null>(null);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000);
@@ -443,6 +444,65 @@ export default function PurchaseOrder() {
     }
   };
 
+  const handleReceivePO = async () => {
+    if (!receiveTarget || saving) return;
+
+    const itemsWithStock = ((receiveTarget.items as any[]) || [])
+      .filter(it => it.stock_item_id && Number(it.qty) > 0);
+
+    if (itemsWithStock.length === 0) {
+      showToast('PO นี้ไม่มีรายการสินค้าที่ผูกกับสต็อก จึงรับเข้าไม่ได้', 'error');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // ตรวจว่ารายการ stock_item_id ยังมีอยู่จริง
+      const { data: validItems } = await supabase
+        .from('stock_items')
+        .select('id')
+        .in('id', itemsWithStock.map((it: any) => it.stock_item_id));
+      const validIds = new Set((validItems || []).map((v: any) => v.id));
+
+      const transactions = itemsWithStock
+        .filter((it: any) => validIds.has(it.stock_item_id))
+        .map((it: any) => ({
+          stock_item_id: it.stock_item_id,
+          txn_type: 'in',
+          qty: Number(it.qty),
+          ref_type: 'purchase',
+          ref_id: receiveTarget.po_no,
+          note: `รับเข้า PO ${receiveTarget.po_no} - ${it.name}`,
+        }));
+
+      if (transactions.length === 0) {
+        showToast('ไม่พบรายการสินค้าที่สามารถรับเข้าสต็อกได้', 'error');
+        setSaving(false);
+        return;
+      }
+
+      const { error: txnErr } = await supabase
+        .from('stock_transactions')
+        .insert(transactions);
+      if (txnErr) throw txnErr;
+
+      const { error: poErr } = await supabase
+        .from('purchase_orders')
+        .update({ status: 'received' })
+        .eq('id', receiveTarget.id);
+      if (poErr) throw poErr;
+
+      showToast(`✓ รับเข้าสินค้า ${receiveTarget.po_no} แล้ว`);
+      setReceiveTarget(null);
+      setPoStatusFilter('received');
+      await loadData();
+    } catch (err: any) {
+      showToast('❌ รับเข้าสินค้าไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const statusTabs = [
     { key: 'all' as const, label: 'ทั้งหมด' },
     { key: 'pending_approval' as const, label: 'รออนุมัติ' },
@@ -766,6 +826,12 @@ export default function PurchaseOrder() {
                           </button>
                         </>
                       )}
+                      {po.status === 'approved' && (
+                        <button onClick={() => setReceiveTarget(po)}
+                          className="px-3 py-1 bg-cyan-500 text-white rounded-lg text-xs hover:bg-cyan-600 font-bold">
+                          รับเข้าสินค้า
+                        </button>
+                      )}
                       <button onClick={() => setDeleteTarget(po)}
                         className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs hover:bg-red-200 font-medium">
                         <Trash2 size={11}/> ลบ
@@ -776,6 +842,69 @@ export default function PurchaseOrder() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Popup: รับเข้าสินค้า */}
+      {receiveTarget && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border-2 border-cyan-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-cyan-50 via-emerald-50 to-lime-50 px-6 py-6 border-b border-cyan-100 relative">
+              <div className="absolute right-5 top-5 text-3xl">✨</div>
+              <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-cyan-400 via-emerald-500 to-lime-400 text-white flex items-center justify-center text-3xl shadow-lg mb-3">
+                📦
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-800">ยืนยันรับเข้าสินค้า</h3>
+              <p className="text-sm text-slate-500 mt-2 leading-6">
+                เมื่อยืนยัน ระบบจะบันทึกรายการสินค้าเข้าสต็อก และเปลี่ยนสถานะ PO เป็น <b className="text-cyan-700">รับเข้าแล้ว</b>
+              </p>
+            </div>
+
+            <div className="px-6 py-4">
+              <div className="rounded-2xl bg-cyan-50/70 border border-cyan-100 p-3 text-sm">
+                <div className="flex justify-between gap-3"><span className="text-slate-400">เลขที่เอกสาร</span><b className="font-mono text-cyan-700">{receiveTarget.po_no}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ผู้ขาย</span><b>{receiveTarget.supplier_name || '-'}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ยอดรวม</span><b>฿{Number(receiveTarget.total_thb).toLocaleString()}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">จำนวนรายการ</span><b>{receiveTarget.items.length} รายการ</b></div>
+              </div>
+
+              <div className="mt-3 rounded-2xl border border-slate-100 overflow-hidden max-h-44 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-800 text-white sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left">สินค้า</th>
+                      <th className="px-3 py-2 text-center">จำนวน</th>
+                      <th className="px-3 py-2 text-center">หน่วย</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {receiveTarget.items.map((it, i) => (
+                      <tr key={i} className="border-b last:border-0">
+                        <td className="px-3 py-2 font-medium text-slate-700">{it.name}</td>
+                        <td className="px-3 py-2 text-center font-bold">{it.qty}</td>
+                        <td className="px-3 py-2 text-center text-slate-500">{it.unit}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-3 rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700">
+                ⚠️ หลังรับเข้าแล้ว ไม่ควรแก้ไขรายการ PO เพื่อป้องกันยอดสต็อกคลาดเคลื่อน
+              </div>
+            </div>
+
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setReceiveTarget(null)} disabled={saving}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button onClick={handleReceivePO} disabled={saving}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 text-white hover:from-cyan-600 hover:to-emerald-600 font-bold shadow disabled:opacity-50">
+                {saving ? 'กำลังรับเข้า...' : 'ยืนยันรับเข้า'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
