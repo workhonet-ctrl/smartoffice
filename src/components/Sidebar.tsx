@@ -6,12 +6,13 @@ import {
   History, TrendingUp, ArrowDownCircle, Search, Target,
   BookOpen, UserPlus, GraduationCap, PieChart, Building2,
   MessageSquare, Megaphone, Store, AlertTriangle, PanelLeftClose, PanelLeftOpen,
+  Calculator,
 } from 'lucide-react';
 
 type PageKey =
   | 'sales-admin' | 'sales-customers' | 'sales-customers-problem' | 'sales-crm'
   | 'marketing-graphic' | 'marketing-ads' | 'marketing-ads-assign'
-  | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
+  | 'product-list' | 'product-search' | 'product-kpi' | 'product-cost-formula' | 'products' | 'packaging'
   | 'orders' | 'flash-export' | 'myorder-export' | 'shipping-import'
   | 'pack-products' | 'requisition'
   | 'stock' | 'purchase-order' | 'po-stock-dashboard' | 'suppliers'
@@ -70,6 +71,7 @@ const GROUPS = [
       { key: 'product-list',   label: 'รายการสินค้าทั้งหมด', icon: List,     built: true  },
       { key: 'product-search', label: 'หาสินค้า',             icon: Search,   built: false },
       { key: 'product-kpi',    label: 'KPI สินค้า',            icon: PieChart, built: true  },
+      { key: 'product-cost-formula', label: 'สูตรต้นทุนสินค้า', icon: Calculator, built: true },
       { key: 'products',       label: 'เพิ่มสินค้า',           icon: Package,  built: true  },
       { key: 'packaging',      label: 'วัสดุแพ็กสินค้า',        icon: Archive,  built: true  },
     ] as MenuItem[],
