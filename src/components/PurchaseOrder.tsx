@@ -1027,7 +1027,7 @@ export default function PurchaseOrder() {
       return <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">✓ อนุมัติแล้ว</span>;
     }
     if (s === 'received') {
-      return <span className="px-2 py-0.5 bg-cyan-100 text-cyan-700 rounded-full text-xs font-bold">📦 รับเข้าแล้ว</span>;
+      return <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">✅ ปิดงานแล้ว</span>;
     }
     if (s === 'rejected') {
       return <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-xs font-bold">ไม่อนุมัติ</span>;
@@ -1038,7 +1038,7 @@ export default function PurchaseOrder() {
   const statusLabelText = (status: string) => {
     if (status === 'pending_approval') return 'รออนุมัติ';
     if (status === 'approved') return 'อนุมัติแล้ว';
-    if (status === 'received') return 'รับเข้าแล้ว';
+    if (status === 'received') return 'ปิดงานแล้ว';
     if (status === 'rejected') return 'ไม่อนุมัติ';
     if (status === 'draft') return 'ร่าง';
     return status || '-';
@@ -1412,7 +1412,7 @@ export default function PurchaseOrder() {
             <tbody>
               {filteredPOList.length===0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีใบสั่งซื้อตามตัวกรองนี้</td></tr>}
               {filteredPOList.map(po => (
-                <tr key={po.id} className="border-b hover:bg-slate-50">
+                <tr key={po.id} className={`border-b hover:bg-slate-50 ${po.status === 'received' ? 'bg-emerald-50/20' : ''}`}>
                   <td className="p-3 font-mono text-xs text-indigo-700 whitespace-nowrap">{po.po_no}</td>
                   <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
                     {new Date(po.po_date).toLocaleDateString('th-TH')}
@@ -1420,6 +1420,11 @@ export default function PurchaseOrder() {
                   <td className="p-3 font-medium whitespace-nowrap">{po.supplier_name || <span className="text-slate-300">-</span>}</td>
                   <td className="p-3 text-xs text-slate-500 max-w-[260px]">
                     <div className="space-y-0.5">
+                      {po.status === 'received' && (
+                        <div className="inline-flex items-center gap-1 px-2 py-0.5 mb-1 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-100">
+                          🔒 เอกสารปิดงาน
+                        </div>
+                      )}
                       {po.items.slice(0,3).map((it, i) => (
                         <div key={i} className="truncate">{it.name} <span className="text-slate-400">×{it.qty} {it.unit}</span></div>
                       ))}
@@ -1871,6 +1876,18 @@ export default function PurchaseOrder() {
             </div>
 
             <div className="p-6 max-h-[65vh] overflow-auto">
+              {detailTarget.status === 'received' && (
+                <div className="mb-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-cyan-50 border border-emerald-100 px-4 py-3 text-sm text-emerald-700 flex items-start gap-2">
+                  <span className="text-lg">🔒</span>
+                  <div>
+                    <div className="font-extrabold">เอกสารนี้ปิดงานแล้ว</div>
+                    <div className="text-xs text-emerald-600 mt-0.5">
+                      รับเข้าสินค้าเข้าสต็อกเรียบร้อย ระบบล็อกการแก้ไขและการลบ เพื่อป้องกันยอดสต็อกผิดพลาด
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
                 <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3">
                   <div className="text-xs text-slate-400">ผู้ขาย</div>
