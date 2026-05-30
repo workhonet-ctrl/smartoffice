@@ -14,7 +14,7 @@ type PageKey =
   | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
   | 'orders' | 'flash-export' | 'myorder-export' | 'shipping-import'
   | 'pack-products' | 'requisition'
-  | 'stock' | 'purchase-order' | 'suppliers'
+  | 'stock' | 'purchase-order' | 'po-stock-dashboard' | 'suppliers'
   | 'finance-daily' | 'finance-monthly' | 'finance-yearly'
   | 'finance-expenses' | 'finance-income' | 'finance-cost'
   | 'hr-recruit' | 'hr' | 'hr-train' | 'hr-kpi' | 'hr-sop';
@@ -84,6 +84,7 @@ const GROUPS = [
       { key: 'shipping-import', label: 'นำเข้าค่าขนส่ง',     icon: Truck,           built: true },
       { key: 'pack-products',  label: 'แพ็คสินค้า',        icon: PackageCheck,    built: true },
       { key: 'requisition',    label: 'ใบเบิกสินค้า',      icon: FileText,        built: true },
+      { key: 'po-stock-dashboard', label: 'Dashboard คลัง', icon: PieChart,        built: true },
       { key: 'stock',          label: 'จัดการสต็อก',        icon: BarChart2,       built: true },
       { key: 'purchase-order', label: 'ใบสั่งซื้อ (PO)',    icon: ShoppingBag,     built: true },
       { key: 'suppliers',      label: 'จัดการผู้ขาย',        icon: Handshake,       built: true },
