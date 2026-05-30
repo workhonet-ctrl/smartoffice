@@ -1321,7 +1321,7 @@ export default function PurchaseOrder() {
       {/* ── Tab: รายการ PO ── */}
       {tab === 'list' && (
         <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-          <div className="sticky top-0 z-20 bg-white border-b px-4 py-3 space-y-3">
+          <div className="sticky top-0 z-20 bg-white border-b px-4 py-3 space-y-2">
             <div className="flex items-center gap-2 overflow-x-auto">
               {statusTabs.map(t => (
                 <button key={t.key} onClick={() => setPoStatusFilter(t.key)}
@@ -1338,24 +1338,6 @@ export default function PurchaseOrder() {
                   </span>
                 </button>
               ))}
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-              {statusTabs.filter(t => t.key !== 'all').map(t => (
-                <button key={`card-${t.key}`} onClick={() => setPoStatusFilter(t.key)}
-                  className={`rounded-2xl border px-3 py-2 text-left transition ${
-                    poStatusFilter === t.key
-                      ? 'border-indigo-300 bg-indigo-50 shadow-sm'
-                      : 'border-slate-100 bg-slate-50 hover:bg-white hover:shadow-sm'
-                  }`}>
-                  <div className="text-[11px] text-slate-500 font-bold">{t.label}</div>
-                  <div className="text-xl font-extrabold text-slate-800 leading-tight">{statusCount(t.key)}</div>
-                </button>
-              ))}
-            </div>
-
-            <div className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-2xl px-3 py-2">
-              {actionHintText(poStatusFilter)}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-[1fr_160px_160px_auto_auto] gap-2">
@@ -1409,7 +1391,7 @@ export default function PurchaseOrder() {
                     {new Date(po.po_date).toLocaleDateString('th-TH')}
                   </td>
                   <td className="p-3 font-medium whitespace-nowrap">{po.supplier_name || <span className="text-slate-300">-</span>}</td>
-                  <td className="p-3 text-xs text-slate-500 max-w-[200px]">
+                  <td className="p-3 text-xs text-slate-500 max-w-[260px]">
                     <div className="space-y-0.5">
                       {po.items.slice(0,3).map((it, i) => (
                         <div key={i} className="truncate">{it.name} <span className="text-slate-400">×{it.qty} {it.unit}</span></div>
@@ -1431,13 +1413,9 @@ export default function PurchaseOrder() {
                         className="flex items-center gap-1 px-3 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-xs hover:bg-indigo-200 font-medium">
                         <Printer size={11}/> พิมพ์
                       </button>
-                      <button onClick={() => setHistoryTarget(po)}
+                      <button onClick={() => openAuditTimeline(po)}
                         className="flex items-center gap-1 px-3 py-1 bg-fuchsia-100 text-fuchsia-700 rounded-lg text-xs hover:bg-fuchsia-200 font-medium">
                         <History size={11}/> ประวัติ
-                      </button>
-                      <button onClick={() => openAuditTimeline(po)}
-                        className="flex items-center gap-1 px-3 py-1 bg-violet-100 text-violet-700 rounded-lg text-xs hover:bg-violet-200 font-medium">
-                        <History size={11}/> ประวัติละเอียด
                       </button>
 
                       {canEditPO(po.status) && (
@@ -1467,15 +1445,10 @@ export default function PurchaseOrder() {
                         </button>
                       )}
 
-                      {canDeletePO(po.status) ? (
+                      {canDeletePO(po.status) && (
                         <button onClick={() => setDeleteTarget(po)}
                           className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs hover:bg-red-200 font-medium">
                           <Trash2 size={11}/> ลบ
-                        </button>
-                      ) : (
-                        <button onClick={() => setBlockedDeleteTarget(po)}
-                          className="flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-400 rounded-lg text-xs hover:bg-slate-200 font-medium">
-                          <Trash2 size={11}/> ล็อกลบ
                         </button>
                       )}
                     </div>
@@ -1590,116 +1563,6 @@ export default function PurchaseOrder() {
             <div className="px-6 pb-6 bg-gradient-to-br from-violet-50 to-white flex justify-end">
               <button onClick={() => { setAuditTarget(null); setAuditLogs([]); }}
                 className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white hover:from-violet-600 hover:to-fuchsia-600 font-bold shadow">
-                ปิด
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Popup: ประวัติการเคลื่อนไหว PO */}
-      {historyTarget && (
-        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[2rem] w-full max-w-lg shadow-2xl border border-fuchsia-100 overflow-hidden">
-            <div className="bg-gradient-to-br from-slate-950 via-indigo-900 to-fuchsia-800 px-6 py-6 text-white relative overflow-hidden">
-              <div className="absolute -right-10 -top-10 w-32 h-32 bg-white/10 rounded-full blur-xl"></div>
-              <div className="absolute right-5 top-5 text-3xl">✨</div>
-              <div className="w-15 h-15 rounded-3xl bg-white/15 border border-white/20 backdrop-blur flex items-center justify-center text-3xl shadow-lg mb-3 p-3">
-                🕘
-              </div>
-              <h3 className="text-xl font-extrabold">ประวัติการเคลื่อนไหว PO</h3>
-              <p className="text-sm text-white/75 mt-1">
-                {historyTarget.po_no} · {statusLabelText(historyTarget.status)}
-              </p>
-            </div>
-
-            <div className="p-6 bg-gradient-to-br from-white via-fuchsia-50 to-cyan-50">
-              <div className="rounded-2xl bg-white/90 border border-fuchsia-100 shadow-sm p-3 text-sm mb-4">
-                <div className="flex justify-between gap-3">
-                  <span className="text-slate-400">ผู้ขาย</span>
-                  <b>{historyTarget.supplier_name || '-'}</b>
-                </div>
-                <div className="flex justify-between gap-3 mt-1">
-                  <span className="text-slate-400">ยอดรวม</span>
-                  <b>฿{Number(historyTarget.total_thb).toLocaleString()}</b>
-                </div>
-                <div className="flex justify-between gap-3 mt-1">
-                  <span className="text-slate-400">สถานะปัจจุบัน</span>
-                  <span>{statusBadge(historyTarget.status)}</span>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex gap-3">
-                  <div className="w-9 h-9 rounded-full bg-indigo-500 text-white flex items-center justify-center font-bold shrink-0">1</div>
-                  <div className="flex-1 rounded-2xl bg-white border border-indigo-100 p-3">
-                    <div className="font-bold text-slate-800">สร้างใบสั่งซื้อ</div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      วันที่เอกสาร: {new Date(historyTarget.po_date).toLocaleDateString('th-TH')}
-                      {historyTarget.created_at ? ` · สร้างเมื่อ: ${formatDateTimeTH(historyTarget.created_at)}` : ''}
-                    </div>
-                  </div>
-                </div>
-
-                {(historyTarget.status === 'pending_approval' || historyTarget.status === 'approved' || historyTarget.status === 'received' || historyTarget.status === 'rejected') && (
-                  <div className="flex gap-3">
-                    <div className="w-9 h-9 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold shrink-0">2</div>
-                    <div className="flex-1 rounded-2xl bg-white border border-orange-100 p-3">
-                      <div className="font-bold text-slate-800">ส่งอนุมัติ</div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        สถานะเอกสารเข้าสู่ขั้นตอนรออนุมัติ
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {(historyTarget.status === 'approved' || historyTarget.status === 'received') && (
-                  <div className="flex gap-3">
-                    <div className="w-9 h-9 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold shrink-0">3</div>
-                    <div className="flex-1 rounded-2xl bg-white border border-emerald-100 p-3">
-                      <div className="font-bold text-slate-800">อนุมัติแล้ว</div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        เอกสารผ่านการอนุมัติ และรอรับสินค้าเข้าสต็อก
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {historyTarget.status === 'received' && (
-                  <div className="flex gap-3">
-                    <div className="w-9 h-9 rounded-full bg-cyan-500 text-white flex items-center justify-center font-bold shrink-0">4</div>
-                    <div className="flex-1 rounded-2xl bg-white border border-cyan-100 p-3">
-                      <div className="font-bold text-slate-800">รับเข้าสินค้าแล้ว</div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        ระบบบันทึกรายการเข้า stock_transactions แล้ว และล็อกการแก้ไข/ลบเอกสาร
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {historyTarget.status === 'rejected' && (
-                  <div className="flex gap-3">
-                    <div className="w-9 h-9 rounded-full bg-rose-500 text-white flex items-center justify-center font-bold shrink-0">!</div>
-                    <div className="flex-1 rounded-2xl bg-white border border-rose-100 p-3">
-                      <div className="font-bold text-slate-800">ไม่อนุมัติ</div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        {rejectedReasonText(historyTarget)
-                          ? `เหตุผล: ${rejectedReasonText(historyTarget)}`
-                          : 'เอกสารนี้ถูกปฏิเสธและรอแก้ไข'}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700">
-                หมายเหตุ: ประวัตินี้อิงจากสถานะปัจจุบันของ PO และข้อมูลที่บันทึกไว้ในเอกสาร รอบถัดไปสามารถทำ audit log แบบละเอียดแยกตารางได้
-              </div>
-            </div>
-
-            <div className="px-6 pb-6 bg-gradient-to-br from-fuchsia-50 to-white flex justify-end">
-              <button onClick={() => setHistoryTarget(null)}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-indigo-500 text-white hover:from-fuchsia-600 hover:to-indigo-600 font-bold shadow">
                 ปิด
               </button>
             </div>
