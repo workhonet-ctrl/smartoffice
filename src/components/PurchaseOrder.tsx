@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   ShoppingBag, Plus, Trash2, Search, X, ChevronDown,
-  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer, History
+  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer, History, Search
 } from 'lucide-react';
 
 type Supplier = { id: string; name: string; tel: string | null; address: string | null; note: string | null };
@@ -97,6 +97,9 @@ export default function PurchaseOrder() {
   const [supSearch, setSupSearch] = useState('');
   const [showSupListModal, setShowSupListModal] = useState(false);
   const [poStatusFilter, setPoStatusFilter] = useState<'all'|'pending_approval'|'approved'|'received'|'rejected'>('all');
+  const [poSearch, setPoSearch] = useState('');
+  const [poDateFrom, setPoDateFrom] = useState('');
+  const [poDateTo, setPoDateTo] = useState('');
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
   const [approveTarget, setApproveTarget] = useState<PO | null>(null);
@@ -654,9 +657,32 @@ export default function PurchaseOrder() {
     { key: 'rejected' as const, label: 'ไม่อนุมัติ' },
   ];
 
-  const filteredPOList = poStatusFilter === 'all'
-    ? poList
-    : poList.filter(po => po.status === poStatusFilter);
+  const filteredPOList = poList.filter(po => {
+    const matchStatus = poStatusFilter === 'all' || po.status === poStatusFilter;
+
+    const q = poSearch.trim().toLowerCase();
+    const itemText = (po.items || []).map(it => `${it.name} ${it.qty} ${it.unit}`).join(' ');
+    const haystack = [
+      po.po_no,
+      po.supplier_name || '',
+      itemText,
+      po.note || '',
+      statusLabelText(po.status),
+    ].join(' ').toLowerCase();
+    const matchText = !q || haystack.includes(q);
+
+    const rowDate = po.po_date ? new Date(po.po_date) : null;
+    const fromOk = !poDateFrom || (rowDate && rowDate >= new Date(poDateFrom + 'T00:00:00'));
+    const toOk = !poDateTo || (rowDate && rowDate <= new Date(poDateTo + 'T23:59:59'));
+
+    return matchStatus && matchText && fromOk && toOk;
+  });
+
+  const clearPOFilters = () => {
+    setPoSearch('');
+    setPoDateFrom('');
+    setPoDateTo('');
+  };
 
   const statusCount = (status: typeof poStatusFilter) =>
     status === 'all' ? poList.length : poList.filter(po => po.status === status).length;
@@ -972,6 +998,32 @@ export default function PurchaseOrder() {
             <div className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-2xl px-3 py-2">
               {actionHintText(poStatusFilter)}
             </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_170px_170px_auto] gap-2">
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                <input value={poSearch} onChange={e => setPoSearch(e.target.value)}
+                  placeholder="ค้นหาเลข PO / ผู้ขาย / รายการสินค้า..."
+                  className="w-full pl-9 pr-3 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+              </div>
+              <input type="date" value={poDateFrom} onChange={e => setPoDateFrom(e.target.value)}
+                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+              <input type="date" value={poDateTo} onChange={e => setPoDateTo(e.target.value)}
+                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+              <button onClick={clearPOFilters}
+                className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 text-sm font-semibold whitespace-nowrap">
+                ล้างตัวกรอง
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="px-3 py-1 rounded-full bg-slate-50 text-slate-700 font-bold">
+                แสดง {filteredPOList.length} / {poList.length} ใบ
+              </span>
+              <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 font-bold">
+                รวมมูลค่า ฿{filteredPOList.reduce((sum, po) => sum + Number(po.total_thb || 0), 0).toLocaleString()}
+              </span>
+            </div>
           </div>
           <table className="text-sm w-full" style={{minWidth:'750px'}}>
             <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
@@ -986,7 +1038,7 @@ export default function PurchaseOrder() {
               </tr>
             </thead>
             <tbody>
-              {filteredPOList.length===0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีใบสั่งซื้อในสถานะนี้</td></tr>}
+              {filteredPOList.length===0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีใบสั่งซื้อตามตัวกรองนี้</td></tr>}
               {filteredPOList.map(po => (
                 <tr key={po.id} className="border-b hover:bg-slate-50">
                   <td className="p-3 font-mono text-xs text-indigo-700 whitespace-nowrap">{po.po_no}</td>
