@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   ShoppingBag, Plus, Trash2, Search, X, ChevronDown,
-  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer
+  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer, History
 } from 'lucide-react';
 
 type Supplier = { id: string; name: string; tel: string | null; address: string | null; note: string | null };
@@ -12,6 +12,7 @@ type PO        = {
   id: string; po_no: string; po_date: string;
   supplier_id: string | null; supplier_name: string | null;
   items: POItem[]; total_thb: number; status: string; note: string | null;
+  created_at?: string | null; updated_at?: string | null;
 };
 
 // SearchableDropdown
@@ -106,6 +107,7 @@ export default function PurchaseOrder() {
   const [deleteTarget, setDeleteTarget] = useState<PO | null>(null);
   const [receiveTarget, setReceiveTarget] = useState<PO | null>(null);
   const [blockedDeleteTarget, setBlockedDeleteTarget] = useState<PO | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<PO | null>(null);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000);
@@ -675,6 +677,33 @@ export default function PurchaseOrder() {
     return <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">ร่าง</span>;
   };
 
+  const statusLabelText = (status: string) => {
+    if (status === 'pending_approval') return 'รออนุมัติ';
+    if (status === 'approved') return 'อนุมัติแล้ว';
+    if (status === 'received') return 'รับเข้าแล้ว';
+    if (status === 'rejected') return 'ไม่อนุมัติ';
+    if (status === 'draft') return 'ร่าง';
+    return status || '-';
+  };
+
+  const formatDateTimeTH = (value?: string | null) => {
+    if (!value) return '-';
+    try {
+      return new Date(value).toLocaleString('th-TH', {
+        day: '2-digit', month: '2-digit', year: '2-digit',
+        hour: '2-digit', minute: '2-digit',
+      });
+    } catch {
+      return '-';
+    }
+  };
+
+  const rejectedReasonText = (po: PO) => {
+    const noteText = po.note || '';
+    const found = noteText.split('\n').find(line => line.trim().startsWith('ไม่อนุมัติ:'));
+    return found ? found.replace('ไม่อนุมัติ:', '').trim() : '';
+  };
+
 
   return (
     <div className="flex flex-col h-screen p-6 pb-2">
@@ -959,6 +988,10 @@ export default function PurchaseOrder() {
                         className="flex items-center gap-1 px-3 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-xs hover:bg-indigo-200 font-medium">
                         <Printer size={11}/> พิมพ์
                       </button>
+                      <button onClick={() => setHistoryTarget(po)}
+                        className="flex items-center gap-1 px-3 py-1 bg-fuchsia-100 text-fuchsia-700 rounded-lg text-xs hover:bg-fuchsia-200 font-medium">
+                        <History size={11}/> ประวัติ
+                      </button>
                       {po.status === 'pending_approval' && (
                         <>
                           <button onClick={() => setApproveTarget(po)}
@@ -991,6 +1024,116 @@ export default function PurchaseOrder() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Popup: ประวัติการเคลื่อนไหว PO */}
+      {historyTarget && (
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[2rem] w-full max-w-lg shadow-2xl border border-fuchsia-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-slate-950 via-indigo-900 to-fuchsia-800 px-6 py-6 text-white relative overflow-hidden">
+              <div className="absolute -right-10 -top-10 w-32 h-32 bg-white/10 rounded-full blur-xl"></div>
+              <div className="absolute right-5 top-5 text-3xl">✨</div>
+              <div className="w-15 h-15 rounded-3xl bg-white/15 border border-white/20 backdrop-blur flex items-center justify-center text-3xl shadow-lg mb-3 p-3">
+                🕘
+              </div>
+              <h3 className="text-xl font-extrabold">ประวัติการเคลื่อนไหว PO</h3>
+              <p className="text-sm text-white/75 mt-1">
+                {historyTarget.po_no} · {statusLabelText(historyTarget.status)}
+              </p>
+            </div>
+
+            <div className="p-6 bg-gradient-to-br from-white via-fuchsia-50 to-cyan-50">
+              <div className="rounded-2xl bg-white/90 border border-fuchsia-100 shadow-sm p-3 text-sm mb-4">
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">ผู้ขาย</span>
+                  <b>{historyTarget.supplier_name || '-'}</b>
+                </div>
+                <div className="flex justify-between gap-3 mt-1">
+                  <span className="text-slate-400">ยอดรวม</span>
+                  <b>฿{Number(historyTarget.total_thb).toLocaleString()}</b>
+                </div>
+                <div className="flex justify-between gap-3 mt-1">
+                  <span className="text-slate-400">สถานะปัจจุบัน</span>
+                  <span>{statusBadge(historyTarget.status)}</span>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex gap-3">
+                  <div className="w-9 h-9 rounded-full bg-indigo-500 text-white flex items-center justify-center font-bold shrink-0">1</div>
+                  <div className="flex-1 rounded-2xl bg-white border border-indigo-100 p-3">
+                    <div className="font-bold text-slate-800">สร้างใบสั่งซื้อ</div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      วันที่เอกสาร: {new Date(historyTarget.po_date).toLocaleDateString('th-TH')}
+                      {historyTarget.created_at ? ` · สร้างเมื่อ: ${formatDateTimeTH(historyTarget.created_at)}` : ''}
+                    </div>
+                  </div>
+                </div>
+
+                {(historyTarget.status === 'pending_approval' || historyTarget.status === 'approved' || historyTarget.status === 'received' || historyTarget.status === 'rejected') && (
+                  <div className="flex gap-3">
+                    <div className="w-9 h-9 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold shrink-0">2</div>
+                    <div className="flex-1 rounded-2xl bg-white border border-orange-100 p-3">
+                      <div className="font-bold text-slate-800">ส่งอนุมัติ</div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        สถานะเอกสารเข้าสู่ขั้นตอนรออนุมัติ
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {(historyTarget.status === 'approved' || historyTarget.status === 'received') && (
+                  <div className="flex gap-3">
+                    <div className="w-9 h-9 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold shrink-0">3</div>
+                    <div className="flex-1 rounded-2xl bg-white border border-emerald-100 p-3">
+                      <div className="font-bold text-slate-800">อนุมัติแล้ว</div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        เอกสารผ่านการอนุมัติ และรอรับสินค้าเข้าสต็อก
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {historyTarget.status === 'received' && (
+                  <div className="flex gap-3">
+                    <div className="w-9 h-9 rounded-full bg-cyan-500 text-white flex items-center justify-center font-bold shrink-0">4</div>
+                    <div className="flex-1 rounded-2xl bg-white border border-cyan-100 p-3">
+                      <div className="font-bold text-slate-800">รับเข้าสินค้าแล้ว</div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        ระบบบันทึกรายการเข้า stock_transactions แล้ว และล็อกการแก้ไข/ลบเอกสาร
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {historyTarget.status === 'rejected' && (
+                  <div className="flex gap-3">
+                    <div className="w-9 h-9 rounded-full bg-rose-500 text-white flex items-center justify-center font-bold shrink-0">!</div>
+                    <div className="flex-1 rounded-2xl bg-white border border-rose-100 p-3">
+                      <div className="font-bold text-slate-800">ไม่อนุมัติ</div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        {rejectedReasonText(historyTarget)
+                          ? `เหตุผล: ${rejectedReasonText(historyTarget)}`
+                          : 'เอกสารนี้ถูกปฏิเสธและรอแก้ไข'}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700">
+                หมายเหตุ: ประวัตินี้อิงจากสถานะปัจจุบันของ PO และข้อมูลที่บันทึกไว้ในเอกสาร รอบถัดไปสามารถทำ audit log แบบละเอียดแยกตารางได้
+              </div>
+            </div>
+
+            <div className="px-6 pb-6 bg-gradient-to-br from-fuchsia-50 to-white flex justify-end">
+              <button onClick={() => setHistoryTarget(null)}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-indigo-500 text-white hover:from-fuchsia-600 hover:to-indigo-600 font-bold shadow">
+                ปิด
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
