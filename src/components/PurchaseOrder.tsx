@@ -445,6 +445,13 @@ export default function PurchaseOrder() {
     }
   };
 
+  const escHtml = (value: any) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
   const printPurchaseOrder = (po: PO) => {
     const statusText =
       po.status === 'pending_approval' ? 'รออนุมัติ' :
