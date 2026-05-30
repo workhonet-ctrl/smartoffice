@@ -26,11 +26,12 @@ import Marketing from './components/Marketing';
 import HR from './components/HR';
 import ComingSoon from './components/ComingSoon';
 import ProductKPI from './components/ProductKPI';
+import ProductCostFormula from './components/ProductCostFormula';
 
 type PageKey =
   | 'sales-admin' | 'sales-customers' | 'sales-customers-problem' | 'sales-crm'
   | 'marketing-graphic' | 'marketing-ads' | 'marketing-ads-assign'
-  | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
+  | 'product-list' | 'product-search' | 'product-kpi' | 'product-cost-formula' | 'products' | 'packaging'
   | 'orders' | 'flash-export' | 'myorder-export' | 'shipping-import'
   | 'pack-products' | 'requisition'
   | 'stock' | 'purchase-order' | 'po-stock-dashboard' | 'suppliers'
@@ -74,6 +75,7 @@ export default function App() {
       case 'product-list':    return <ProductList />;
       case 'product-search':  return <ComingSoon title="หาสินค้า" description="ค้นหาสินค้าจากแหล่งต่างๆ" />;
       case 'product-kpi':     return <ProductKPI />;
+      case 'product-cost-formula': return <ProductCostFormula />;
       case 'packaging':       return <PackingMaterials />;
       case 'pack-products':   return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} onCreateRequisition={goToRequisition}/>;
       case 'requisition':     return <Requisition packHistoryId={packHistoryId} />;
