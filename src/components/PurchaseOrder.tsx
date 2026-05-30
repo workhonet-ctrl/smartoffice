@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   ShoppingBag, Plus, Trash2, Search, X, ChevronDown,
-  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer, History, Search
+  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer, History, Search, Download
 } from 'lucide-react';
 
 type Supplier = { id: string; name: string; tel: string | null; address: string | null; note: string | null };
@@ -688,6 +688,49 @@ export default function PurchaseOrder() {
     setPoDateTo('');
   };
 
+  const csvCell = (value: any) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+  const exportPOCsv = () => {
+    const header = [
+      'เลขที่ PO',
+      'วันที่',
+      'ผู้ขาย',
+      'สถานะ',
+      'จำนวนรายการ',
+      'รายการสินค้า',
+      'ยอดรวม',
+      'หมายเหตุ',
+    ];
+
+    const rows = filteredPOList.map(po => [
+      po.po_no,
+      po.po_date ? new Date(po.po_date).toLocaleDateString('th-TH') : '',
+      po.supplier_name || '',
+      statusLabelText(po.status),
+      po.items.length,
+      po.items.map(it => `${it.name} x${it.qty} ${it.unit}`).join(' | '),
+      Number(po.total_thb || 0),
+      po.note || '',
+    ]);
+
+    const csv = [header, ...rows]
+      .map(r => r.map(csvCell).join(','))
+      .join('\n');
+
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const today = new Date().toISOString().split('T')[0];
+    a.href = url;
+    a.download = `purchase-orders-${today}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    showToast(`✓ Export PO ${filteredPOList.length} ใบแล้ว`);
+  };
+
   const statusCount = (status: typeof poStatusFilter) =>
     status === 'all' ? poList.length : poList.filter(po => po.status === status).length;
 
@@ -1003,7 +1046,7 @@ export default function PurchaseOrder() {
               {actionHintText(poStatusFilter)}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_170px_170px_auto] gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_160px_160px_auto_auto] gap-2">
               <div className="relative">
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
                 <input value={poSearch} onChange={e => setPoSearch(e.target.value)}
@@ -1017,6 +1060,10 @@ export default function PurchaseOrder() {
               <button onClick={clearPOFilters}
                 className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 text-sm font-semibold whitespace-nowrap">
                 ล้างตัวกรอง
+              </button>
+              <button onClick={exportPOCsv} disabled={filteredPOList.length === 0}
+                className="px-4 py-2.5 bg-cyan-500 text-white rounded-xl hover:bg-cyan-600 text-sm font-semibold whitespace-nowrap disabled:opacity-50 flex items-center justify-center gap-1.5">
+                <Download size={13}/> Export Excel
               </button>
             </div>
 
