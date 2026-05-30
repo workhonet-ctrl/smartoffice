@@ -103,6 +103,7 @@ export default function PurchaseOrder() {
   const [detailTarget, setDetailTarget] = useState<PO | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [showEditConfirm, setShowEditConfirm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<PO | null>(null);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000);
@@ -267,20 +268,15 @@ export default function PurchaseOrder() {
   };
 
   const handleDeletePO = async (po: PO) => {
-    const warn = po.status === 'approved'
-      ? `⚠ PO ${po.po_no} อนุมัติแล้ว\nระบบจะย้อน transaction สต็อกอัตโนมัติ\n\nยืนยันลบ?`
-      : `ลบ ${po.po_no} ยืนยัน?`;
-    if (!confirm(warn)) return;
-
     setSaving(true);
     try {
       // ถ้า approved → สร้าง transactions 'out' ย้อนคืนสต็อก
+      // ปกติ approved/received จะไม่ควรลบง่าย ๆ แต่คง logic เดิมไว้เพื่อไม่กระทบของเก่า
       if (po.status === 'approved') {
         const itemsWithStock = ((po.items as any[]) || [])
           .filter(it => it.stock_item_id && it.qty > 0);
 
         if (itemsWithStock.length > 0) {
-          // ตรวจก่อนว่า stock_item_id ยังมีใน stock_items จริงๆ
           const { data: validItems } = await supabase
             .from('stock_items')
             .select('id')
@@ -306,7 +302,6 @@ export default function PurchaseOrder() {
         }
       }
 
-      // ลบ PO
       const { error } = await supabase.from('purchase_orders').delete().eq('id', po.id);
       if (error) throw error;
 
@@ -314,6 +309,7 @@ export default function PurchaseOrder() {
         ? `✓ ลบ ${po.po_no} และย้อน transaction สต็อกแล้ว`
         : `✓ ลบ ${po.po_no} แล้ว`;
       showToast(msg);
+      setDeleteTarget(null);
       await loadData();
     } catch (err: any) {
       showToast('❌ ลบไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
@@ -770,7 +766,7 @@ export default function PurchaseOrder() {
                           </button>
                         </>
                       )}
-                      <button onClick={() => handleDeletePO(po)}
+                      <button onClick={() => setDeleteTarget(po)}
                         className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs hover:bg-red-200 font-medium">
                         <Trash2 size={11}/> ลบ
                       </button>
@@ -780,6 +776,50 @@ export default function PurchaseOrder() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Popup: ยืนยันลบ PO */}
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border-2 border-rose-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-rose-50 via-pink-50 to-amber-50 px-6 py-6 border-b border-rose-100 relative">
+              <div className="absolute right-5 top-5 text-3xl">🌟</div>
+              <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-rose-400 via-pink-500 to-orange-400 text-white flex items-center justify-center text-3xl shadow-lg mb-3">
+                🧸
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-800">แน่ใจหรือไม่ที่จะลบใบสั่งซื้อนี้?</h3>
+              <p className="text-sm text-slate-500 mt-2 leading-6">
+                หากกดยืนยัน ระบบจะลบใบสั่งซื้อนี้ออกจากรายการ
+                {deleteTarget.status === 'approved'
+                  ? ' และจะทำรายการย้อนสต็อกตาม logic เดิมของระบบ'
+                  : ''}
+              </p>
+            </div>
+
+            <div className="px-6 py-4">
+              <div className="rounded-2xl bg-rose-50/70 border border-rose-100 p-3 text-sm">
+                <div className="flex justify-between gap-3"><span className="text-slate-400">เลขที่เอกสาร</span><b className="font-mono text-rose-700">{deleteTarget.po_no}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ผู้ขาย</span><b>{deleteTarget.supplier_name || '-'}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ยอดรวม</span><b>฿{Number(deleteTarget.total_thb).toLocaleString()}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">สถานะ</span><span>{statusBadge(deleteTarget.status)}</span></div>
+              </div>
+              <div className="mt-3 rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700">
+                ⚠️ การลบเป็นการนำรายการออกจากระบบ ควรใช้เฉพาะกรณีสร้างผิดหรือไม่ต้องการเอกสารนี้แล้ว
+              </div>
+            </div>
+
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setDeleteTarget(null)} disabled={saving}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button onClick={() => handleDeletePO(deleteTarget)} disabled={saving}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:from-rose-600 hover:to-pink-600 font-bold shadow disabled:opacity-50">
+                {saving ? 'กำลังลบ...' : 'ยืนยันลบ'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
