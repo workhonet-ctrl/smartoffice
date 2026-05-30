@@ -120,6 +120,35 @@ export default function PurchaseOrder() {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000);
   };
 
+  const writePOAuditLog = async (payload: {
+    po_id?: string | null;
+    po_no: string;
+    action: string;
+    action_label: string;
+    detail?: string | null;
+    old_status?: string | null;
+    new_status?: string | null;
+    meta?: Record<string, any>;
+  }) => {
+    try {
+      const { error } = await supabase.from('po_audit_logs').insert([{
+        po_id: payload.po_id || null,
+        po_no: payload.po_no,
+        action: payload.action,
+        action_label: payload.action_label,
+        detail: payload.detail || null,
+        old_status: payload.old_status || null,
+        new_status: payload.new_status || null,
+        meta: payload.meta || {},
+      }]);
+
+      // ถ้ายังไม่ได้สร้างตาราง po_audit_logs ให้ไม่ทำให้ flow หลักพัง
+      if (error) console.warn('PO audit log skipped:', error.message);
+    } catch (err) {
+      console.warn('PO audit log skipped:', err);
+    }
+  };
+
   useEffect(() => { loadData(); initPoNo(); }, []);
 
   const loadData = async () => {
@@ -212,6 +241,17 @@ export default function PurchaseOrder() {
         setSupplierName('');
       }
 
+      await writePOAuditLog({
+        po_id: null,
+        po_no: `SUPPLIER-${supplier.id}`,
+        action: 'disable_supplier',
+        action_label: 'ปิดใช้งานผู้ขาย',
+        detail: `ปิดใช้งานผู้ขาย: ${supplier.name}`,
+        old_status: 'active',
+        new_status: 'inactive',
+        meta: { supplier_id: supplier.id, supplier_name: supplier.name, related_po_count: relatedPOCount },
+      });
+
       setDeleteSupplierTarget(null);
       showToast('✓ ปิดใช้งานผู้ขายแล้ว');
     } catch (err: any) {
@@ -287,6 +327,19 @@ export default function PurchaseOrder() {
       }).eq('id', editingPO.id);
       if (error) throw error;
 
+      await writePOAuditLog({
+        po_id: editingPO.id,
+        po_no: editingPO.po_no,
+        action: editingPO.status === 'rejected' ? 'edit_resubmit' : 'edit',
+        action_label: editingPO.status === 'rejected' ? 'แก้ไขและส่งกลับรออนุมัติ' : 'แก้ไขใบสั่งซื้อ',
+        detail: editingPO.status === 'rejected'
+          ? 'แก้ไขใบสั่งซื้อที่ไม่อนุมัติ และส่งกลับไปรออนุมัติใหม่'
+          : 'แก้ไขข้อมูลใบสั่งซื้อ',
+        old_status: editingPO.status,
+        new_status: nextStatus,
+        meta: { supplier_name: supplierName || null, total_thb: total, items_count: validItems.length },
+      });
+
       showToast(editingPO.status === 'rejected'
         ? '✓ บันทึกการแก้ไข และส่งกลับไปรออนุมัติแล้ว'
         : '✓ บันทึกการแก้ไขสำเร็จ');
@@ -343,6 +396,19 @@ export default function PurchaseOrder() {
       const { error } = await supabase.from('purchase_orders').delete().eq('id', po.id);
       if (error) throw error;
 
+      await writePOAuditLog({
+        po_id: po.id,
+        po_no: po.po_no,
+        action: 'delete_po',
+        action_label: 'ลบใบสั่งซื้อ',
+        detail: po.status === 'approved'
+          ? 'ลบ PO และสร้าง transaction ย้อนคืนสต็อกตาม logic เดิม'
+          : 'ลบ PO ออกจากระบบ',
+        old_status: po.status,
+        new_status: null,
+        meta: { supplier_name: po.supplier_name || null, total_thb: po.total_thb, items_count: po.items.length },
+      });
+
       const msg = po.status === 'approved'
         ? `✓ ลบ ${po.po_no} และย้อน transaction สต็อกแล้ว`
         : `✓ ลบ ${po.po_no} แล้ว`;
@@ -377,7 +443,7 @@ export default function PurchaseOrder() {
       // สร้างเลข PO ใหม่ตอนกดยืนยันจริง เพื่อกันเลขซ้ำจากเลขที่ค้างอยู่บนหน้าฟอร์ม
       const nextPoNo = await generateUniquePoNo();
 
-      let { error } = await supabase.from('purchase_orders').insert([{
+      let { data: createdPO, error } = await supabase.from('purchase_orders').insert([{
         po_no: nextPoNo, po_date: poDate,
         supplier_id: supplierId || null,
         supplier_name: supplierName || null,
@@ -395,10 +461,22 @@ export default function PurchaseOrder() {
           items: validItems, total_thb: total,
           status: 'pending_approval', note: note || null,
         }]).select().single();
+        createdPO = retry.data;
         error = retry.error;
       }
 
       if (error) throw error;
+
+      await writePOAuditLog({
+        po_id: createdPO?.id || null,
+        po_no: createdPO?.po_no || nextPoNo,
+        action: 'submit_approval',
+        action_label: 'ส่งอนุมัติ',
+        detail: `ส่งใบสั่งซื้อเพื่อรออนุมัติ ยอดรวม ฿${Number(total || 0).toLocaleString()}`,
+        old_status: null,
+        new_status: 'pending_approval',
+        meta: { supplier_name: supplierName || null, total_thb: total, items_count: validItems.length },
+      });
 
       setShowSubmitConfirm(false);
       setShowSubmitSuccess(true);
@@ -442,6 +520,17 @@ export default function PurchaseOrder() {
         .eq('id', approveTarget.id);
       if (error) throw error;
 
+      await writePOAuditLog({
+        po_id: approveTarget.id,
+        po_no: approveTarget.po_no,
+        action: 'approve',
+        action_label: 'อนุมัติใบสั่งซื้อ',
+        detail: 'อนุมัติใบสั่งซื้อ และย้ายไปสถานะอนุมัติแล้ว',
+        old_status: approveTarget.status,
+        new_status: 'approved',
+        meta: { supplier_name: approveTarget.supplier_name || null, total_thb: approveTarget.total_thb },
+      });
+
       showToast(`✓ อนุมัติ ${approveTarget.po_no} แล้ว`);
       setApproveTarget(null);
       setPoStatusFilter('approved');
@@ -473,6 +562,17 @@ export default function PurchaseOrder() {
         .update({ status: 'rejected', note: nextNote })
         .eq('id', rejectTarget.id);
       if (error) throw error;
+
+      await writePOAuditLog({
+        po_id: rejectTarget.id,
+        po_no: rejectTarget.po_no,
+        action: 'reject',
+        action_label: 'ไม่อนุมัติใบสั่งซื้อ',
+        detail: rejectReason.trim(),
+        old_status: rejectTarget.status,
+        new_status: 'rejected',
+        meta: { supplier_name: rejectTarget.supplier_name || null, total_thb: rejectTarget.total_thb },
+      });
 
       showToast(`✓ ไม่อนุมัติ ${rejectTarget.po_no} แล้ว`);
       setRejectTarget(null);
@@ -716,6 +816,22 @@ export default function PurchaseOrder() {
         .from('stock_transactions')
         .insert(transactions);
       if (txnErr) throw txnErr;
+
+      await writePOAuditLog({
+        po_id: receiveTarget.id,
+        po_no: receiveTarget.po_no,
+        action: 'receive_stock',
+        action_label: 'รับเข้าสินค้า',
+        detail: `รับเข้าสินค้า ${transactions.length} รายการ`,
+        old_status: 'approved',
+        new_status: 'received',
+        meta: {
+          supplier_name: receiveTarget.supplier_name || null,
+          total_thb: receiveTarget.total_thb,
+          transactions_count: transactions.length,
+          total_qty: transactions.reduce((sum: number, t: any) => sum + Number(t.qty || 0), 0),
+        },
+      });
 
       showToast(`✓ รับเข้าสินค้า ${receiveTarget.po_no} แล้ว`);
       setReceiveTarget(null);
