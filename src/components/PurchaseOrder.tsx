@@ -102,6 +102,7 @@ export default function PurchaseOrder() {
   const [rejectTarget, setRejectTarget] = useState<PO | null>(null);
   const [detailTarget, setDetailTarget] = useState<PO | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [showEditConfirm, setShowEditConfirm] = useState(false);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000);
@@ -187,6 +188,10 @@ export default function PurchaseOrder() {
 
   // ── load PO เข้า form สำหรับแก้ไข ──────────────────────────────────
   const startEditPO = (po: PO) => {
+    if (po.status === 'approved' || po.status === 'received') {
+      showToast('PO ที่อนุมัติแล้วหรือรับเข้าแล้ว ไม่สามารถแก้ไขได้ เพื่อป้องกันข้อมูลผิดพลาด', 'error');
+      return;
+    }
     setEditingPO(po);
     setPoDate(po.po_date || new Date().toISOString().split('T')[0]);
     setPoNo(po.po_no || '');
@@ -208,14 +213,30 @@ export default function PurchaseOrder() {
     setTab('list');
   };
 
+  const validateEditPO = () => {
+    if (!editingPO) return null;
+    const validItems = poItems.filter(it => it.name.trim() && it.qty > 0);
+    if (!validItems.length) { showToast('กรุณาเพิ่มรายการสินค้า', 'error'); return null; }
+    if (editingPO.status === 'approved' || editingPO.status === 'received') {
+      showToast('PO ที่อนุมัติแล้วหรือรับเข้าแล้ว ไม่สามารถแก้ไขได้', 'error');
+      return null;
+    }
+    return validItems;
+  };
+
+  const openUpdateConfirm = () => {
+    const validItems = validateEditPO();
+    if (!validItems) return;
+    setShowEditConfirm(true);
+  };
+
   const handleUpdatePO = async () => {
     if (!editingPO) return;
-    const validItems = poItems.filter(it => it.name.trim() && it.qty > 0);
-    if (!validItems.length) { showToast('กรุณาเพิ่มรายการสินค้า', 'error'); return; }
-    // แจ้งเตือนถ้า PO นี้อนุมัติแล้ว (ตัวเลขสต็อกจะไม่เปลี่ยนตาม)
-    if (editingPO.status === 'approved') {
-      if (!confirm('⚠ PO นี้อนุมัติแล้ว\nการแก้ไขจะเปลี่ยนรายการใบสั่งซื้อ แต่ไม่ย้อน transaction สต็อกที่บันทึกไปแล้ว\nยืนยันแก้ไขต่อไหม?')) return;
-    }
+    const validItems = validateEditPO();
+    if (!validItems) return;
+
+    const nextStatus = editingPO.status === 'rejected' ? 'pending_approval' : editingPO.status;
+
     setSaving(true);
     try {
       const { error } = await supabase.from('purchase_orders').update({
@@ -225,14 +246,21 @@ export default function PurchaseOrder() {
         items:         validItems,
         total_thb:     total,
         note:          note || null,
+        status:        nextStatus,
       }).eq('id', editingPO.id);
       if (error) throw error;
-      showToast('✓ บันทึกการแก้ไขสำเร็จ');
+
+      showToast(editingPO.status === 'rejected'
+        ? '✓ บันทึกการแก้ไข และส่งกลับไปรออนุมัติแล้ว'
+        : '✓ บันทึกการแก้ไขสำเร็จ');
+
+      setShowEditConfirm(false);
       setEditingPO(null);
       setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
       setSupplierId(''); setSupplierName(''); setNote('');
       await Promise.all([initPoNo(), loadData()]);
       setTab('list');
+      setPoStatusFilter(nextStatus === 'pending_approval' ? 'pending_approval' : poStatusFilter);
     } catch (err: any) {
       showToast('❌ ' + (err.message||'เกิดข้อผิดพลาด'), 'error');
     } finally { setSaving(false); }
@@ -499,7 +527,12 @@ export default function PurchaseOrder() {
           {editingPO && (
             <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
               <Pencil size={15}/>
-              <span>กำลังแก้ไข <strong>{editingPO.po_no}</strong> — กดบันทึกการแก้ไขเมื่อเสร็จสิ้น</span>
+              <span>
+                กำลังแก้ไข <strong>{editingPO.po_no}</strong>
+                {editingPO.status === 'rejected'
+                  ? ' — เมื่อบันทึกแล้วจะส่งกลับไปรออนุมัติ'
+                  : ' — กดบันทึกการแก้ไขเมื่อเสร็จสิ้น'}
+              </span>
               <button onClick={cancelEditPO} className="ml-auto text-xs text-amber-500 hover:text-amber-700 flex items-center gap-1">
                 <X size={12}/> ยกเลิก
               </button>
@@ -641,8 +674,8 @@ export default function PurchaseOrder() {
                   className="px-5 py-2.5 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 font-medium flex items-center gap-2 disabled:opacity-50">
                   <X size={16}/> ยกเลิก
                 </button>
-                <button onClick={handleUpdatePO} disabled={saving}
-                  className="px-6 py-2.5 bg-amber-500 text-white rounded-xl hover:bg-amber-600 font-semibold flex items-center gap-2 disabled:opacity-50 shadow">
+                <button onClick={openUpdateConfirm} disabled={saving}
+                  className="px-6 py-2.5 bg-gradient-to-r from-amber-400 to-pink-500 text-white rounded-xl hover:from-amber-500 hover:to-pink-600 font-semibold flex items-center gap-2 disabled:opacity-50 shadow">
                   <Save size={18}/> {saving ? 'กำลังบันทึก...' : 'บันทึกการแก้ไข'}
                 </button>
               </>
@@ -715,10 +748,12 @@ export default function PurchaseOrder() {
                   <td className="p-3 text-center">{statusBadge(po.status)}</td>
                   <td className="p-3 text-center">
                     <div className="flex items-center justify-center gap-1.5">
-                      <button onClick={() => startEditPO(po)}
-                        className="flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs hover:bg-amber-200 font-medium">
-                        <Pencil size={11}/> แก้ไข
-                      </button>
+                      {(po.status === 'pending_approval' || po.status === 'rejected' || po.status === 'draft') && (
+                        <button onClick={() => startEditPO(po)}
+                          className="flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs hover:bg-amber-200 font-medium">
+                          <Pencil size={11}/> แก้ไข
+                        </button>
+                      )}
                       <button onClick={() => setDetailTarget(po)}
                         className="flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs hover:bg-slate-200 font-medium">
                         <FileText size={11}/> ดูรายละเอียด
@@ -745,6 +780,50 @@ export default function PurchaseOrder() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Popup: ยืนยันบันทึกการแก้ไข */}
+      {showEditConfirm && editingPO && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border-2 border-pink-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-pink-50 via-amber-50 to-fuchsia-50 px-6 py-6 border-b border-pink-100 relative">
+              <div className="absolute right-5 top-5 text-3xl">🌈</div>
+              <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-pink-400 via-fuchsia-500 to-indigo-500 text-white flex items-center justify-center text-3xl shadow-lg mb-3">
+                🎀
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-800">
+                {editingPO.status === 'rejected' ? 'ส่งกลับไปรออนุมัติอีกครั้ง' : 'บันทึกการแก้ไขใบสั่งซื้อ'}
+              </h3>
+              <p className="text-sm text-slate-500 mt-2 leading-6">
+                {editingPO.status === 'rejected'
+                  ? 'แก้ไขข้อมูลใบสั่งซื้อเรียบร้อยแล้วใช่ไหม? หากกดยืนยัน ใบสั่งซื้อนี้จะถูกส่งกลับไปที่แท็บ “รออนุมัติ” เพื่อให้ตรวจสอบใหม่อีกครั้ง'
+                  : 'ตรวจสอบข้อมูลที่แก้ไขเรียบร้อยแล้วใช่ไหม? หากกดยืนยัน ระบบจะบันทึกข้อมูลล่าสุดของใบสั่งซื้อนี้'}
+              </p>
+            </div>
+
+            <div className="px-6 py-4">
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-sm">
+                <div className="flex justify-between gap-3"><span className="text-slate-400">เลขที่เอกสาร</span><b className="font-mono text-indigo-700">{editingPO.po_no}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ผู้ขาย</span><b>{supplierName || '-'}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ยอดรวม</span><b>฿{total.toLocaleString()}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">สถานะหลังบันทึก</span><b className={editingPO.status === 'rejected' ? 'text-orange-600' : 'text-slate-700'}>
+                  {editingPO.status === 'rejected' ? 'รออนุมัติ' : 'ยังอยู่รออนุมัติ'}
+                </b></div>
+              </div>
+            </div>
+
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setShowEditConfirm(false)} disabled={saving}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button onClick={handleUpdatePO} disabled={saving}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-indigo-500 text-white hover:from-pink-600 hover:to-indigo-600 font-bold shadow disabled:opacity-50">
+                {saving ? 'กำลังบันทึก...' : (editingPO.status === 'rejected' ? 'ยืนยันส่งกลับรออนุมัติ' : 'ยืนยันบันทึก')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
