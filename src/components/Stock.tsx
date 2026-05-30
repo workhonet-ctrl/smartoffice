@@ -40,6 +40,9 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [receivedRows, setReceivedRows] = useState<StockInRow[]>([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
+  const [receiveSearch, setReceiveSearch] = useState('');
+  const [receiveDateFrom, setReceiveDateFrom] = useState('');
+  const [receiveDateTo, setReceiveDateTo] = useState('');
   const [toast, setToast]     = useState<{ msg: string; type: 'success'|'error' } | null>(null);
 
   // รับเข้าสต็อก form (simplified)
@@ -148,6 +151,30 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     if (tab === 'history' && txns.length === 0) loadTxns();
     if (tab === 'receive') loadPO();
   }, [tab]);
+
+  const filteredReceivedRows = receivedRows.filter(row => {
+    const q = receiveSearch.trim().toLowerCase();
+    const haystack = [
+      row.po_no,
+      row.supplier_name || '',
+      row.item_name,
+      row.unit,
+    ].join(' ').toLowerCase();
+
+    const matchText = !q || haystack.includes(q);
+
+    const rowDate = row.po_date ? new Date(row.po_date) : null;
+    const fromOk = !receiveDateFrom || (rowDate && rowDate >= new Date(receiveDateFrom + 'T00:00:00'));
+    const toOk = !receiveDateTo || (rowDate && rowDate <= new Date(receiveDateTo + 'T23:59:59'));
+
+    return matchText && fromOk && toOk;
+  });
+
+  const clearReceiveFilters = () => {
+    setReceiveSearch('');
+    setReceiveDateFrom('');
+    setReceiveDateTo('');
+  };
 
   // sync จาก products_master + boxes + bubbles (ใช้ upsert + unique constraint แทน JS loop)
   const handleSync = async () => {
@@ -394,7 +421,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
         <>
           <div className="flex items-center justify-between mb-3 shrink-0 flex-wrap gap-2">
             <p className="text-sm text-slate-500">
-              รายการรับเข้าทั้งหมด <span className="font-semibold text-slate-700">{receivedRows.length}</span> รายการ
+              รายการรับเข้าแสดง <span className="font-semibold text-slate-700">{filteredReceivedRows.length}</span> / {receivedRows.length} รายการ
               (จาก PO ที่รับเข้าแล้ว)
             </p>
             <button onClick={onGoToPO}
@@ -402,6 +429,34 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
               <ShoppingBag size={13}/> สร้าง PO ใหม่
             </button>
           </div>
+
+          <div className="mb-3 bg-white rounded-2xl shadow-sm border border-slate-100 p-3 shrink-0">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_170px_170px_auto] gap-2">
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                <input value={receiveSearch} onChange={e => setReceiveSearch(e.target.value)}
+                  placeholder="ค้นหาเลข PO / ผู้ขาย / รายการสินค้า..."
+                  className="w-full pl-9 pr-3 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              </div>
+              <input type="date" value={receiveDateFrom} onChange={e => setReceiveDateFrom(e.target.value)}
+                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              <input type="date" value={receiveDateTo} onChange={e => setReceiveDateTo(e.target.value)}
+                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              <button onClick={clearReceiveFilters}
+                className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 text-sm font-semibold whitespace-nowrap">
+                ล้างตัวกรอง
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              <span className="px-3 py-1 rounded-full bg-green-50 text-green-700 font-bold">
+                รวมจำนวน {filteredReceivedRows.reduce((sum, r) => sum + Number(r.qty || 0), 0).toLocaleString()} ชิ้น
+              </span>
+              <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 font-bold">
+                รวมมูลค่า ฿{filteredReceivedRows.reduce((sum, r) => sum + Number(r.total || 0), 0).toLocaleString()}
+              </span>
+            </div>
+          </div>
+
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
             <table className="text-sm w-full" style={{minWidth:'850px'}}>
               <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
@@ -417,12 +472,12 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {receivedRows.length === 0 && (
+                {filteredReceivedRows.length === 0 && (
                   <tr><td colSpan={8} className="p-10 text-center text-slate-400">
                     ยังไม่มีการรับเข้าสต็อก — รับเข้า PO แล้วรายการจะแสดงที่นี่
                   </td></tr>
                 )}
-                {receivedRows.map((row, idx) => (
+                {filteredReceivedRows.map((row, idx) => (
                   <tr key={idx} className="border-b hover:bg-slate-50">
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
                       {new Date(row.po_date).toLocaleDateString('th-TH')}
@@ -443,17 +498,17 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                   </tr>
                 ))}
               </tbody>
-              {receivedRows.length > 0 && (
+              {filteredReceivedRows.length > 0 && (
                 <tfoot className="bg-slate-50 border-t-2 border-slate-200 sticky bottom-0">
                   <tr>
                     <td colSpan={4} className="p-3 text-right text-sm font-semibold text-slate-600">รวมทั้งสิ้น</td>
                     <td className="p-3 text-center font-bold text-green-600">
-                      {receivedRows.reduce((s, r) => s + r.qty, 0)}
+                      {filteredReceivedRows.reduce((s, r) => s + r.qty, 0)}
                     </td>
                     <td/>
                     <td/>
                     <td className="p-3 text-right font-bold text-slate-800">
-                      ฿{receivedRows.reduce((s, r) => s + r.total, 0).toLocaleString()}
+                      ฿{filteredReceivedRows.reduce((s, r) => s + r.total, 0).toLocaleString()}
                     </td>
                   </tr>
                 </tfoot>
