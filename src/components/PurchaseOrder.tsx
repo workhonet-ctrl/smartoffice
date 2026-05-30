@@ -105,6 +105,7 @@ export default function PurchaseOrder() {
   const [showEditConfirm, setShowEditConfirm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PO | null>(null);
   const [receiveTarget, setReceiveTarget] = useState<PO | null>(null);
+  const [blockedDeleteTarget, setBlockedDeleteTarget] = useState<PO | null>(null);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000);
@@ -832,8 +833,12 @@ export default function PurchaseOrder() {
                           รับเข้าสินค้า
                         </button>
                       )}
-                      <button onClick={() => setDeleteTarget(po)}
-                        className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs hover:bg-red-200 font-medium">
+                      <button onClick={() => po.status === 'received' ? setBlockedDeleteTarget(po) : setDeleteTarget(po)}
+                        className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium ${
+                          po.status === 'received'
+                            ? 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                            : 'bg-red-100 text-red-600 hover:bg-red-200'
+                        }`}>
                         <Trash2 size={11}/> ลบ
                       </button>
                     </div>
@@ -902,6 +907,47 @@ export default function PurchaseOrder() {
               <button onClick={handleReceivePO} disabled={saving}
                 className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 text-white hover:from-cyan-600 hover:to-emerald-600 font-bold shadow disabled:opacity-50">
                 {saving ? 'กำลังรับเข้า...' : 'ยืนยันรับเข้า'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup: ห้ามลบ PO ที่รับเข้าแล้ว */}
+      {blockedDeleteTarget && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[2rem] w-full max-w-md shadow-2xl border border-fuchsia-200 overflow-hidden relative">
+            <div className="absolute -top-16 -right-16 w-40 h-40 bg-fuchsia-300/30 rounded-full blur-2xl"></div>
+            <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-amber-300/30 rounded-full blur-2xl"></div>
+
+            <div className="relative bg-gradient-to-br from-slate-950 via-fuchsia-900 to-rose-800 px-6 py-7 text-white">
+              <div className="absolute right-5 top-5 text-3xl">💎</div>
+              <div className="w-16 h-16 rounded-3xl bg-white/15 border border-white/20 backdrop-blur text-white flex items-center justify-center text-3xl shadow-xl mb-4">
+                👑
+              </div>
+              <h3 className="text-xl font-extrabold">ไม่สามารถลบ PO ที่รับเข้าแล้วได้</h3>
+              <p className="text-sm text-white/80 mt-2 leading-6">
+                ใบสั่งซื้อนี้ถูกบันทึกรับเข้าสต็อกแล้ว เพื่อป้องกันยอดสต็อกผิดพลาดและป้องกันการแก้ไขย้อนหลัง ระบบจึงไม่อนุญาตให้ลบรายการนี้
+              </p>
+            </div>
+
+            <div className="relative px-6 py-5 bg-gradient-to-br from-white via-fuchsia-50 to-amber-50">
+              <div className="rounded-2xl bg-white/90 border border-fuchsia-100 shadow-sm p-3 text-sm">
+                <div className="flex justify-between gap-3"><span className="text-slate-400">เลขที่เอกสาร</span><b className="font-mono text-fuchsia-700">{blockedDeleteTarget.po_no}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ผู้ขาย</span><b>{blockedDeleteTarget.supplier_name || '-'}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ยอดรวม</span><b>฿{Number(blockedDeleteTarget.total_thb).toLocaleString()}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">สถานะ</span><span>{statusBadge(blockedDeleteTarget.status)}</span></div>
+              </div>
+
+              <div className="mt-3 rounded-2xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
+                ✨ ถ้ารับเข้าผิด ควรใช้ขั้นตอน “ปรับสต็อก/คืนรายการ” แยกต่างหาก เพื่อให้มีประวัติการเคลื่อนไหวครบถ้วน
+              </div>
+            </div>
+
+            <div className="relative px-6 pb-6 flex justify-end">
+              <button onClick={() => setBlockedDeleteTarget(null)}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-rose-500 text-white hover:from-fuchsia-600 hover:to-rose-600 font-bold shadow">
+                เข้าใจแล้ว
               </button>
             </div>
           </div>
