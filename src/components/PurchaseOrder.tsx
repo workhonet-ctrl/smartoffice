@@ -640,7 +640,48 @@ export default function PurchaseOrder() {
 
     actionLockRef.current = true;
     setSaving(true);
+
+    let statusMovedToReceived = false;
+
     try {
+      // กันรับเข้าซ้ำอีกชั้น: ถ้ามี transaction ของ PO นี้แล้ว ห้ามรับเข้าอีก
+      const { data: existingTxns, error: checkErr } = await supabase
+        .from('stock_transactions')
+        .select('id')
+        .eq('ref_type', 'purchase')
+        .eq('ref_id', receiveTarget.po_no)
+        .limit(1);
+
+      if (checkErr) throw checkErr;
+
+      if ((existingTxns || []).length > 0) {
+        showToast('PO นี้เคยรับเข้าสินค้าแล้ว ระบบไม่ทำซ้ำให้ เพื่อป้องกันสต็อกซ้ำ', 'error');
+        setReceiveTarget(null);
+        setPoStatusFilter('received');
+        await loadData();
+        return;
+      }
+
+      // กันรับเข้าซ้ำจากหลายแท็บ: อัปเดตได้เฉพาะ PO ที่ยังเป็น approved เท่านั้น
+      const { data: movedPO, error: moveErr } = await supabase
+        .from('purchase_orders')
+        .update({ status: 'received' })
+        .eq('id', receiveTarget.id)
+        .eq('status', 'approved')
+        .select('id, po_no, status')
+        .maybeSingle();
+
+      if (moveErr) throw moveErr;
+
+      if (!movedPO) {
+        showToast('PO นี้ไม่ได้อยู่สถานะอนุมัติแล้ว หรือถูกรับเข้าไปแล้วจากอีกแท็บ', 'error');
+        setReceiveTarget(null);
+        await loadData();
+        return;
+      }
+
+      statusMovedToReceived = true;
+
       // ตรวจว่ารายการ stock_item_id ยังมีอยู่จริง
       const { data: validItems } = await supabase
         .from('stock_items')
@@ -660,9 +701,14 @@ export default function PurchaseOrder() {
         }));
 
       if (transactions.length === 0) {
+        // ถ้าไม่มีรายการที่รับเข้าได้ ให้ rollback สถานะกลับ approved
+        await supabase.from('purchase_orders')
+          .update({ status: 'approved' })
+          .eq('id', receiveTarget.id)
+          .eq('status', 'received');
+        statusMovedToReceived = false;
+
         showToast('ไม่พบรายการสินค้าที่สามารถรับเข้าสต็อกได้', 'error');
-        setSaving(false);
-        actionLockRef.current = false;
         return;
       }
 
@@ -671,17 +717,19 @@ export default function PurchaseOrder() {
         .insert(transactions);
       if (txnErr) throw txnErr;
 
-      const { error: poErr } = await supabase
-        .from('purchase_orders')
-        .update({ status: 'received' })
-        .eq('id', receiveTarget.id);
-      if (poErr) throw poErr;
-
       showToast(`✓ รับเข้าสินค้า ${receiveTarget.po_no} แล้ว`);
       setReceiveTarget(null);
       setPoStatusFilter('received');
       await loadData();
     } catch (err: any) {
+      // ถ้าเปลี่ยนสถานะเป็น received แล้ว แต่ insert stock_transactions ล้มเหลว ให้พยายาม rollback
+      if (statusMovedToReceived && receiveTarget) {
+        await supabase.from('purchase_orders')
+          .update({ status: 'approved' })
+          .eq('id', receiveTarget.id)
+          .eq('status', 'received');
+      }
+
       showToast('❌ รับเข้าสินค้าไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
     } finally {
       setSaving(false);
