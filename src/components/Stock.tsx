@@ -57,7 +57,6 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [rcvDate,   setRcvDate]   = useState(new Date().toISOString().split('T')[0]);
   const [saving, setSaving]       = useState(false);
   const [showSyncConfirm, setShowSyncConfirm] = useState(false);
-  const [minEditTarget, setMinEditTarget] = useState<{ item: StockItem; min: number } | null>(null);
 
   // Popup รับสต็อกเริ่มต้น (order-based)
   const [showInitStock, setShowInitStock] = useState(false);
@@ -382,23 +381,9 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     } finally { setInitSaving(false); }
   };
 
-  const openMinQtyConfirm = (item: StockItem, min: number) => {
-    if (Number(item.min_qty) === Number(min)) return;
-    setMinEditTarget({ item, min });
-  };
-
-  const handleUpdateMin = async () => {
-    if (!minEditTarget) return;
-    const { item, min } = minEditTarget;
-    setSaving(true);
-    try {
-      await supabase.from('stock_items').update({ min_qty: min }).eq('id', item.id);
-      setItems(p => p.map(i => i.id === item.id ? { ...i, min_qty: min } : i));
-      showToast(`✓ เปลี่ยนขั้นต่ำ ${item.name} เป็น ${min} ${item.unit}`);
-      setMinEditTarget(null);
-    } catch (err: any) {
-      showToast('❌ แก้ขั้นต่ำไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
-    } finally { setSaving(false); }
+  const handleUpdateMin = async (id: string, min: number) => {
+    await supabase.from('stock_items').update({ min_qty: min }).eq('id', id);
+    setItems(p => p.map(i => i.id === id ? { ...i, min_qty: min } : i));
   };
 
   const handleAddItem = async () => {
@@ -509,7 +494,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                     </td>
                     <td className="p-3 text-center">
                       <input type="number" min={0} value={item.min_qty}
-                        onChange={e => openMinQtyConfirm(item, Number(e.target.value))}
+                        onChange={e => handleUpdateMin(item.id, Number(e.target.value))}
                         className="w-16 text-center border rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-300"/>
                     </td>
                     <td className="p-3 text-center">{statusBadge(item)}</td>
@@ -717,50 +702,6 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
             </table>
           </div>
         </>
-      )}
-
-      {/* Popup: ยืนยันแก้ขั้นต่ำสินค้า */}
-      {minEditTarget && (
-        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[2rem] w-full max-w-md shadow-2xl border border-amber-100 overflow-hidden relative">
-            <div className="absolute -top-16 -right-16 w-40 h-40 bg-amber-300/30 rounded-full blur-2xl"></div>
-            <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-pink-300/30 rounded-full blur-2xl"></div>
-
-            <div className="relative bg-gradient-to-br from-amber-50 via-pink-50 to-fuchsia-50 px-6 py-6 border-b border-amber-100">
-              <div className="absolute right-5 top-5 text-3xl">🌟</div>
-              <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-amber-400 via-pink-500 to-fuchsia-500 text-white flex items-center justify-center text-3xl shadow-lg mb-3">
-                📌
-              </div>
-              <h3 className="text-xl font-extrabold text-slate-800">ยืนยันเปลี่ยนขั้นต่ำสินค้า</h3>
-              <p className="text-sm text-slate-500 mt-2 leading-6">
-                การเปลี่ยนขั้นต่ำจะมีผลกับสถานะ <b className="text-red-500">สต็อกต่ำ</b> และ <b className="text-amber-500">ใกล้หมด</b> ทันที
-              </p>
-            </div>
-
-            <div className="relative px-6 py-4">
-              <div className="rounded-2xl bg-white border border-amber-100 shadow-sm p-3 text-sm">
-                <div className="font-bold text-slate-800 mb-2">{minEditTarget.item.name}</div>
-                <div className="flex justify-between gap-3"><span className="text-slate-400">ขั้นต่ำเดิม</span><b>{Number(minEditTarget.item.min_qty)} {minEditTarget.item.unit}</b></div>
-                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ขั้นต่ำใหม่</span><b className="text-fuchsia-700">{Number(minEditTarget.min)} {minEditTarget.item.unit}</b></div>
-                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">คงเหลือปัจจุบัน</span><b>{Number(minEditTarget.item.current_qty)} {minEditTarget.item.unit}</b></div>
-              </div>
-              <div className="mt-3 rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700">
-                ⚠️ ถ้าตั้งขั้นต่ำสูงกว่ายอดคงเหลือ สถานะสินค้าอาจเปลี่ยนเป็น “ต่ำ” หรือ “ใกล้หมด” ทันที
-              </div>
-            </div>
-
-            <div className="relative px-6 pb-6 flex justify-end gap-2">
-              <button onClick={() => setMinEditTarget(null)} disabled={saving}
-                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
-                ยกเลิก
-              </button>
-              <button onClick={handleUpdateMin} disabled={saving}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-fuchsia-500 text-white hover:from-amber-600 hover:to-fuchsia-600 font-bold shadow disabled:opacity-50">
-                {saving ? 'กำลังบันทึก...' : 'ยืนยันเปลี่ยนขั้นต่ำ'}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Popup: ยืนยันซิงค์จากสินค้า */}
