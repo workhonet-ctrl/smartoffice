@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Plus, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, X, ShoppingBag, PackagePlus, Download, Trash2, Sparkles } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { Package, Plus, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, X, ShoppingBag, PackagePlus } from 'lucide-react';
 
 type StockItem = {
   id: string; name: string; unit: string; type: string;
@@ -42,15 +41,6 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
   const [toast, setToast]     = useState<{ msg: string; type: 'success'|'error' } | null>(null);
-
-  // ตัวกรองประวัติการเคลื่อนไหว
-  const [historySearch, setHistorySearch] = useState('');
-  const [historyTxnFilter, setHistoryTxnFilter] = useState<'all'|'in'|'out'|'return'|'adjustment'>('all');
-  const [historyDateFrom, setHistoryDateFrom] = useState('');
-  const [historyDateTo, setHistoryDateTo] = useState('');
-  const [selectedTxnIds, setSelectedTxnIds] = useState<string[]>([]);
-  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; mode: 'selected' | 'all'; ids: string[] }>({ open: false, mode: 'selected', ids: [] });
-  const [deletingTxns, setDeletingTxns] = useState(false);
 
   // รับเข้าสต็อก form (simplified)
   const [rcvItemId, setRcvItemId] = useState('');
@@ -103,33 +93,46 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     setLoading(true);
     const { data } = await supabase.from('stock_transactions')
       .select('*, stock_items(name,unit)')
-      .order('created_at', { ascending: false }).limit(1000);
+      .order('created_at', { ascending: false }).limit(200);
     if (data) setTxns(data as Transaction[]);
     setLoading(false);
   };
 
-  // load PO (lazy — เฉพาะเมื่อเปิดแท็บ receive)
+  // load PO ที่รับเข้าแล้ว (lazy — เฉพาะเมื่อเปิดแท็บ receive)
   const loadPO = async () => {
     setLoading(true);
-    const { data: po } = await supabase.from('purchase_orders')
-      .select('*').eq('status', 'approved')
-      .order('po_date', { ascending: false });
-    if (po) {
+    try {
+      // เดิมใช้ status = approved ทำให้พอกดรับเข้าแล้ว PO เปลี่ยนเป็น received
+      // จึงไม่แสดงในแท็บ "รับเข้าสต็อก" ทั้งที่ประวัติการเคลื่อนไหวมี transaction แล้ว
+      const { data: po, error } = await supabase.from('purchase_orders')
+        .select('*')
+        .eq('status', 'received')
+        .order('po_date', { ascending: false });
+
+      if (error) throw error;
+
       const rows: StockInRow[] = [];
-      for (const p of po) {
+      for (const p of (po || [])) {
         for (const item of (p.items || [])) {
           rows.push({
-            po_no: p.po_no, po_date: p.po_date,
+            po_no: p.po_no,
+            po_date: p.updated_at || p.created_at || p.po_date,
             supplier_name: p.supplier_name,
-            item_name: item.name, qty: item.qty,
-            unit: item.unit, price: item.price,
-            total: item.qty * item.price,
+            item_name: item.name,
+            qty: Number(item.qty || 0),
+            unit: item.unit || '',
+            price: Number(item.price || 0),
+            total: Number(item.qty || 0) * Number(item.price || 0),
           });
         }
       }
+
       setReceivedRows(rows);
+    } catch (err: any) {
+      showToast('❌ โหลดรายการรับเข้าสต็อกไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const loadAll = async () => {
@@ -143,7 +146,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   // lazy load เมื่อสลับแท็บ
   useEffect(() => {
     if (tab === 'history' && txns.length === 0) loadTxns();
-    if (tab === 'receive' && receivedRows.length === 0) loadPO();
+    if (tab === 'receive') loadPO();
   }, [tab]);
 
   // sync จาก products_master + boxes + bubbles (ใช้ upsert + unique constraint แทน JS loop)
@@ -281,120 +284,6 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     return <span className="text-slate-300 text-xs">-</span>;
   };
 
-
-  const getTxnCategory = (t: Transaction): 'in'|'out'|'return'|'adjustment' => {
-    if (t.ref_type === 'return') return 'return';
-    if (t.ref_type === 'adjustment') return 'adjustment';
-    return t.txn_type === 'in' ? 'in' : 'out';
-  };
-
-  const getTxnLabel = (t: Transaction) => {
-    const category = getTxnCategory(t);
-    if (category === 'return') return 'คืนสต็อก';
-    if (category === 'adjustment') return 'ปรับปรุง';
-    return t.txn_type === 'in' ? 'รับเข้า' : 'เบิกออก';
-  };
-
-  const txnTypeBadge = (t: Transaction) => {
-    const category = getTxnCategory(t);
-    if (category === 'return') {
-      return <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold"><ArrowDown size={10}/>คืนสต็อก</span>;
-    }
-    if (category === 'adjustment') {
-      return <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-bold">↕ ปรับปรุง</span>;
-    }
-    return t.txn_type === 'in'
-      ? <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold"><ArrowDown size={10}/>รับเข้า</span>
-      : <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-bold"><ArrowUp size={10}/>เบิกออก</span>;
-  };
-
-  const filteredTxns = txns.filter(t => {
-    const q = historySearch.trim().toLowerCase();
-    const itemName = ((t as any).stock_items?.name || '').toLowerCase();
-    const ref = `${t.ref_type || ''} ${t.ref_id || ''}`.toLowerCase();
-    const note = (t.note || '').toLowerCase();
-    const matchSearch = !q || itemName.includes(q) || ref.includes(q) || note.includes(q);
-    const matchType = historyTxnFilter === 'all' || getTxnCategory(t) === historyTxnFilter;
-    const txnDate = new Date(t.created_at).toISOString().split('T')[0];
-    const matchFrom = !historyDateFrom || txnDate >= historyDateFrom;
-    const matchTo = !historyDateTo || txnDate <= historyDateTo;
-    return matchSearch && matchType && matchFrom && matchTo;
-  });
-
-  const historyTotals = filteredTxns.reduce((acc, t) => {
-    const qty = Number(t.qty) || 0;
-    const category = getTxnCategory(t);
-    if (category === 'return') acc.returnQty += qty;
-    else if (category === 'adjustment') acc.adjustQty += qty;
-    else if (t.txn_type === 'in') acc.inQty += qty;
-    else acc.outQty += qty;
-    return acc;
-  }, { inQty: 0, outQty: 0, returnQty: 0, adjustQty: 0 });
-
-
-  const filteredTxnIds = filteredTxns.map(t => t.id);
-  const allFilteredSelected = filteredTxnIds.length > 0 && filteredTxnIds.every(id => selectedTxnIds.includes(id));
-
-  const toggleSelectAllFiltered = (checked: boolean) => {
-    if (checked) {
-      setSelectedTxnIds(Array.from(new Set([...selectedTxnIds, ...filteredTxnIds])));
-    } else {
-      setSelectedTxnIds(selectedTxnIds.filter(id => !filteredTxnIds.includes(id)));
-    }
-  };
-
-  const toggleTxnSelection = (id: string, checked: boolean) => {
-    setSelectedTxnIds(prev => checked ? Array.from(new Set([...prev, id])) : prev.filter(x => x !== id));
-  };
-
-  const openDeleteDialog = (mode: 'selected' | 'all') => {
-    const ids = mode === 'selected' ? selectedTxnIds : filteredTxnIds;
-    if (ids.length === 0) {
-      showToast(mode === 'selected' ? 'กรุณาเลือกรายการที่ต้องการลบ' : 'ไม่มีรายการสำหรับลบ', 'error');
-      return;
-    }
-    setDeleteDialog({ open: true, mode, ids });
-  };
-
-  const handleDeleteTransactions = async () => {
-    if (deleteDialog.ids.length === 0) return;
-    setDeletingTxns(true);
-    try {
-      const { error } = await supabase.from('stock_transactions').delete().in('id', deleteDialog.ids);
-      if (error) throw error;
-      showToast(`✓ ลบประวัติการเคลื่อนไหว ${deleteDialog.ids.length} รายการแล้ว`);
-      setSelectedTxnIds(prev => prev.filter(id => !deleteDialog.ids.includes(id)));
-      setDeleteDialog({ open: false, mode: 'selected', ids: [] });
-      await loadTxns();
-      await loadItems();
-    } catch (err: any) {
-      showToast('❌ ลบไม่สำเร็จ: ' + (err.message || 'unknown error'), 'error');
-    } finally {
-      setDeletingTxns(false);
-    }
-  };
-
-  const handleExportHistory = () => {
-    const rows = filteredTxns.map(t => ({
-      'วันที่': new Date(t.created_at).toLocaleDateString('th-TH'),
-      'เวลา': new Date(t.created_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
-      'ประเภท': getTxnLabel(t),
-      'รายการ': (t as any).stock_items?.name || '-',
-      'จำนวน': `${t.txn_type === 'in' ? '+' : '-'}${Number(t.qty)}`,
-      'หน่วย': (t as any).stock_items?.unit || '',
-      'อ้างอิง': `${t.ref_type ? `${t.ref_type}: ` : ''}${t.ref_id || '-'}`,
-      'หมายเหตุ': t.note || '-',
-    }));
-    if (rows.length === 0) {
-      showToast('ไม่มีข้อมูลสำหรับ Export', 'error');
-      return;
-    }
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Stock Movement');
-    XLSX.writeFile(wb, `stock_movement_${new Date().toISOString().split('T')[0]}.xlsx`);
-  };
-
   return (
     <div className="flex flex-col h-screen p-3 sm:p-6 pb-2">
       {/* Header */}
@@ -506,7 +395,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
           <div className="flex items-center justify-between mb-3 shrink-0 flex-wrap gap-2">
             <p className="text-sm text-slate-500">
               รายการรับเข้าทั้งหมด <span className="font-semibold text-slate-700">{receivedRows.length}</span> รายการ
-              (จาก PO ที่อนุมัติแล้ว)
+              (จาก PO ที่รับเข้าแล้ว)
             </p>
             <button onClick={onGoToPO}
               className="px-3 py-1.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-1.5 text-sm font-medium">
@@ -530,7 +419,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
               <tbody>
                 {receivedRows.length === 0 && (
                   <tr><td colSpan={8} className="p-10 text-center text-slate-400">
-                    ยังไม่มีการรับเข้าสต็อก — อนุมัติ PO เพื่อรับเข้าสต็อก
+                    ยังไม่มีการรับเข้าสต็อก — รับเข้า PO แล้วรายการจะแสดงที่นี่
                   </td></tr>
                 )}
                 {receivedRows.map((row, idx) => (
@@ -576,130 +465,48 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
 
       {/* ── Tab: ประวัติ ── */}
       {tab === 'history' && (
-        <div className="flex flex-col flex-1 min-h-0 gap-3">
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-3 shrink-0 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
-              <div className="relative md:col-span-2">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                <input
-                  value={historySearch}
-                  onChange={e => setHistorySearch(e.target.value)}
-                  placeholder="ค้นหาสินค้า / กล่อง / อ้างอิง / หมายเหตุ..."
-                  className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-              </div>
-              <select
-                value={historyTxnFilter}
-                onChange={e => setHistoryTxnFilter(e.target.value as any)}
-                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
-                <option value="all">ทุกประเภท</option>
-                <option value="in">รับเข้า</option>
-                <option value="out">เบิกออก</option>
-                <option value="return">คืนสต็อก</option>
-                <option value="adjustment">ปรับปรุง</option>
-              </select>
-              <input
-                type="date"
-                value={historyDateFrom}
-                onChange={e => setHistoryDateFrom(e.target.value)}
-                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-              <input
-                type="date"
-                value={historyDateTo}
-                onChange={e => setHistoryDateTo(e.target.value)}
-                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-            </div>
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex gap-2 flex-wrap text-xs">
-                <span className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg font-semibold">แสดง {filteredTxns.length} / {txns.length} รายการ</span>
-                <span className="px-3 py-1.5 bg-green-50 text-green-700 rounded-lg font-bold">รับเข้า +{historyTotals.inQty.toLocaleString()}</span>
-                <span className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-bold">เบิกออก -{historyTotals.outQty.toLocaleString()}</span>
-                <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg font-bold">คืนสต็อก +{historyTotals.returnQty.toLocaleString()}</span>
-                <span className="px-3 py-1.5 bg-amber-50 text-amber-700 rounded-lg font-bold">ปรับปรุง {historyTotals.adjustQty.toLocaleString()}</span>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { setHistorySearch(''); setHistoryTxnFilter('all'); setHistoryDateFrom(''); setHistoryDateTo(''); }}
-                  className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center gap-1 text-xs font-medium">
-                  <X size={12}/> ล้างตัวกรอง
-                </button>
-                <button
-                  onClick={loadTxns}
-                  className="px-3 py-1.5 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 flex items-center gap-1 text-xs font-medium">
-                  <RefreshCw size={12} className={loading ? 'animate-spin' : ''}/> รีโหลด
-                </button>
-                <button
-                  onClick={handleExportHistory}
-                  className="px-3 py-1.5 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 flex items-center gap-1 text-xs font-bold">
-                  <Download size={12}/> Export Excel
-                </button>
-                <button
-                  onClick={() => openDeleteDialog('selected')}
-                  className="px-3 py-1.5 bg-rose-500 text-white rounded-lg hover:bg-rose-600 flex items-center gap-1 text-xs font-bold">
-                  <Trash2 size={12}/> เลือกลบ
-                </button>
-                <button
-                  onClick={() => openDeleteDialog('all')}
-                  className="px-3 py-1.5 bg-fuchsia-500 text-white rounded-lg hover:bg-fuchsia-600 flex items-center gap-1 text-xs font-bold">
-                  <Trash2 size={12}/> ลบทั้งหมด
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-            <table className="text-sm w-full" style={{minWidth:'980px'}}>
-              <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
-                <tr>
-                  <th className="p-3 text-center w-12">
-                    <input
-                      type="checkbox"
-                      checked={allFilteredSelected}
-                      onChange={e => toggleSelectAllFiltered(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-400 cursor-pointer"
-                    />
-                  </th>
-                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
-                  <th className="p-3 text-center whitespace-nowrap">ประเภท</th>
-                  <th className="p-3 text-left whitespace-nowrap">รายการ</th>
-                  <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
-                  <th className="p-3 text-left whitespace-nowrap">อ้างอิง</th>
-                  <th className="p-3 text-left whitespace-nowrap">หมายเหตุ</th>
+        <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+          <table className="text-sm w-full" style={{minWidth:'700px'}}>
+            <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+              <tr>
+                <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                <th className="p-3 text-center whitespace-nowrap">ประเภท</th>
+                <th className="p-3 text-left whitespace-nowrap">รายการ</th>
+                <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
+                <th className="p-3 text-left whitespace-nowrap">อ้างอิง</th>
+                <th className="p-3 text-left whitespace-nowrap">หมายเหตุ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {txns.length===0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">ยังไม่มีการเคลื่อนไหว</td></tr>}
+              {txns.map(t => (
+                <tr key={t.id} className={`border-b hover:bg-slate-50 ${t.txn_type==='in'?'':'bg-red-50/30'}`}>
+                  <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                    {new Date(t.created_at).toLocaleDateString('th-TH')}
+                    <div className="text-slate-400">{new Date(t.created_at).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}</div>
+                  </td>
+                  <td className="p-3 text-center">
+                    {t.txn_type==='in'
+                      ? <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold"><ArrowDown size={10}/>รับเข้า</span>
+                      : <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-bold"><ArrowUp size={10}/>เบิกออก</span>
+                    }
+                  </td>
+                  <td className="p-3 font-medium whitespace-nowrap">{(t as any).stock_items?.name || '-'}</td>
+                  <td className="p-3 text-center font-bold">
+                    <span className={t.txn_type==='in'?'text-green-600':' text-red-500'}>
+                      {t.txn_type==='in'?'+':'-'}{Number(t.qty)}
+                    </span>
+                    <span className="text-xs text-slate-400 ml-1">{(t as any).stock_items?.unit}</span>
+                  </td>
+                  <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                    {t.ref_type && <span className="text-slate-400">{t.ref_type}: </span>}
+                    {t.ref_id || '-'}
+                  </td>
+                  <td className="p-3 text-xs text-slate-500">{t.note || '-'}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {filteredTxns.length===0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">ไม่พบประวัติการเคลื่อนไหวตามตัวกรอง</td></tr>}
-                {filteredTxns.map(t => (
-                  <tr key={t.id} className={`border-b hover:bg-slate-50 ${selectedTxnIds.includes(t.id) ? 'bg-rose-50/70' : t.txn_type==='in' ? '' : 'bg-red-50/30'}`}>
-                    <td className="p-3 text-center">
-                      <input
-                        type="checkbox"
-                        checked={selectedTxnIds.includes(t.id)}
-                        onChange={e => toggleTxnSelection(t.id, e.target.checked)}
-                        className="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-400 cursor-pointer"
-                      />
-                    </td>
-                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
-                      {new Date(t.created_at).toLocaleDateString('th-TH')}
-                      <div className="text-slate-400">{new Date(t.created_at).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}</div>
-                    </td>
-                    <td className="p-3 text-center">{txnTypeBadge(t)}</td>
-                    <td className="p-3 font-medium whitespace-nowrap">{(t as any).stock_items?.name || '-'}</td>
-                    <td className="p-3 text-center font-bold">
-                      <span className={t.txn_type==='in'?'text-green-600':' text-red-500'}>
-                        {t.txn_type==='in'?'+':'-'}{Number(t.qty)}
-                      </span>
-                      <span className="text-xs text-slate-400 ml-1">{(t as any).stock_items?.unit}</span>
-                    </td>
-                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
-                      {t.ref_type && <span className="text-slate-400">{t.ref_type}: </span>}
-                      {t.ref_id || '-'}
-                    </td>
-                    <td className="p-3 text-xs text-slate-500">{t.note || '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -944,56 +751,6 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                 className="flex-1 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 disabled:opacity-50 font-medium">
                 เพิ่มรายการ
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-
-      {deleteDialog.open && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-[110] flex items-center justify-center p-4">
-          <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-[0_25px_80px_rgba(0,0,0,0.25)] border border-rose-100">
-            <div className="relative bg-gradient-to-br from-pink-500 via-fuchsia-500 to-orange-400 px-6 py-6 text-white">
-              <div className="absolute -top-6 -right-4 h-24 w-24 rounded-full bg-white/15" />
-              <div className="absolute -bottom-8 -left-6 h-24 w-24 rounded-full bg-white/10" />
-              <div className="relative flex items-start gap-4">
-                <div className="h-14 w-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center shadow-lg shrink-0">
-                  <Trash2 size={26} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <Sparkles size={16} className="text-yellow-200" />
-                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-pink-100">Delete Confirm</p>
-                  </div>
-                  <h3 className="text-xl font-extrabold leading-tight">แน่ใจหรือไม่ที่จะลบรายการนี้?</h3>
-                  <p className="mt-2 text-sm text-pink-50/95">
-                    {deleteDialog.mode === 'selected'
-                      ? `คุณกำลังจะลบประวัติที่เลือก ${deleteDialog.ids.length} รายการ`
-                      : `คุณกำลังจะลบทั้งหมด ${deleteDialog.ids.length} รายการตามตัวกรองที่แสดงอยู่`}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="px-6 py-5 bg-gradient-to-b from-rose-50 to-orange-50">
-              <div className="rounded-2xl border border-rose-200 bg-white/90 px-4 py-4 text-sm text-slate-700 shadow-sm">
-                <p className="font-bold text-rose-600 mb-1">⚠️ คำเตือนสำคัญ</p>
-                <p>หากลบแล้ว <span className="font-bold text-rose-600">จะไม่สามารถกู้คืนกลับมาได้</span> กรุณาตรวจสอบอีกครั้งก่อนยืนยันนะคะ</p>
-              </div>
-
-              <div className="mt-5 flex gap-3">
-                <button
-                  onClick={() => setDeleteDialog({ open: false, mode: 'selected', ids: [] })}
-                  className="flex-1 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 transition">
-                  ยกเลิก
-                </button>
-                <button
-                  onClick={handleDeleteTransactions}
-                  disabled={deletingTxns}
-                  className="flex-1 rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-fuchsia-500 px-4 py-3 text-sm font-bold text-white shadow-lg hover:scale-[1.02] transition disabled:opacity-60 disabled:hover:scale-100">
-                  {deletingTxns ? 'กำลังลบ...' : 'ยืนยันการลบ'}
-                </button>
-              </div>
             </div>
           </div>
         </div>
