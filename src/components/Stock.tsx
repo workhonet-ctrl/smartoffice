@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Plus, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, X, ShoppingBag, PackagePlus } from 'lucide-react';
+import { Package, Plus, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, X, ShoppingBag, PackagePlus, Download } from 'lucide-react';
 
 type StockItem = {
   id: string; name: string; unit: string; type: string;
@@ -176,6 +176,38 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     setReceiveDateTo('');
   };
 
+  const csvCell = (value: any) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+  const exportReceivedRowsCsv = () => {
+    const header = ['วันที่รับเข้า', 'เลขที่เอกสาร', 'ผู้ขาย', 'รายการสินค้า', 'จำนวน', 'หน่วย', 'ราคา/หน่วย', 'รวม'];
+    const rows = filteredReceivedRows.map(row => [
+      row.po_date ? new Date(row.po_date).toLocaleDateString('th-TH') : '',
+      row.po_no,
+      row.supplier_name || '',
+      row.item_name,
+      row.qty,
+      row.unit,
+      row.price,
+      row.total,
+    ]);
+
+    const csv = [header, ...rows]
+      .map(r => r.map(csvCell).join(','))
+      .join('\n');
+
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const today = new Date().toISOString().split('T')[0];
+    a.href = url;
+    a.download = `stock-receive-${today}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast(`✓ Export รายการรับเข้า ${filteredReceivedRows.length} รายการแล้ว`);
+  };
+
   // sync จาก products_master + boxes + bubbles (ใช้ upsert + unique constraint แทน JS loop)
   const handleSync = async () => {
     setLoading(true);
@@ -338,13 +370,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
             className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 flex items-center gap-2 text-sm">
             <RefreshCw size={13} className={loading?'animate-spin':''}/> ซิงค์จากสินค้า
           </button>
-
-          <button onClick={handleOpenInitStock}
-            className="px-3 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 flex items-center gap-2 text-sm">
-            <PackagePlus size={13}/> รับสต็อกเริ่มต้น
-          </button>
-
-        </div>
+</div>
       </div>
 
       {/* Tabs */}
@@ -418,10 +444,16 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
               รายการรับเข้าแสดง <span className="font-semibold text-slate-700">{filteredReceivedRows.length}</span> / {receivedRows.length} รายการ
               (จาก PO ที่รับเข้าแล้ว)
             </p>
-            <button onClick={onGoToPO}
-              className="px-3 py-1.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-1.5 text-sm font-medium">
-              <ShoppingBag size={13}/> สร้าง PO ใหม่
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={exportReceivedRowsCsv} disabled={filteredReceivedRows.length === 0}
+                className="px-3 py-1.5 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 flex items-center gap-1.5 text-sm font-medium disabled:opacity-50">
+                <Download size={13}/> Export Excel
+              </button>
+              <button onClick={onGoToPO}
+                className="px-3 py-1.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-1.5 text-sm font-medium">
+                <ShoppingBag size={13}/> สร้าง PO ใหม่
+              </button>
+            </div>
           </div>
 
           <div className="mb-3 bg-white rounded-2xl shadow-sm border border-slate-100 p-3 shrink-0">
