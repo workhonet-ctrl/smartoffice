@@ -338,18 +338,12 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
             className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 flex items-center gap-2 text-sm">
             <RefreshCw size={13} className={loading?'animate-spin':''}/> ซิงค์จากสินค้า
           </button>
-          <button onClick={onGoToPO}
-            className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-2 text-sm">
-            <ShoppingBag size={13}/> ใบสั่งซื้อ (PO)
-          </button>
+
           <button onClick={handleOpenInitStock}
             className="px-3 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 flex items-center gap-2 text-sm">
             <PackagePlus size={13}/> รับสต็อกเริ่มต้น
           </button>
-          <button onClick={() => setShowAddItem(true)}
-            className="px-3 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 flex items-center gap-2 text-sm">
-            <Plus size={13}/> เพิ่มรายการ
-          </button>
+
         </div>
       </div>
 
