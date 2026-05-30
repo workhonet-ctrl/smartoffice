@@ -129,6 +129,22 @@ export default function PurchaseOrder() {
     setPoNo(`PO-${dateStr}-${String((count||0)+1).padStart('3','0')}`);
   };
 
+  const generateUniquePoNo = async () => {
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g,'');
+    const prefix = `PO-${dateStr}-`;
+
+    const { data } = await supabase
+      .from('purchase_orders')
+      .select('po_no')
+      .like('po_no', `${prefix}%`)
+      .order('po_no', { ascending: false })
+      .limit(1);
+
+    const lastNo = data?.[0]?.po_no || '';
+    const lastSeq = Number(lastNo.replace(prefix, '')) || 0;
+    return `${prefix}${String(lastSeq + 1).padStart(3, '0')}`;
+  };
+
   const supplierOpts = suppliers.map(s => ({ id: s.id, label: s.name, sub: s.tel || '' }));
   const stockOpts    = stockItems.map(s => ({ id: s.id, label: s.name, sub: s.unit }));
 
@@ -294,13 +310,30 @@ export default function PurchaseOrder() {
     if (!validItems) return;
     setSaving(true);
     try {
-      const { error } = await supabase.from('purchase_orders').insert([{
-        po_no: poNo, po_date: poDate,
+      // สร้างเลข PO ใหม่ตอนกดยืนยันจริง เพื่อกันเลขซ้ำจากเลขที่ค้างอยู่บนหน้าฟอร์ม
+      const nextPoNo = await generateUniquePoNo();
+
+      let { error } = await supabase.from('purchase_orders').insert([{
+        po_no: nextPoNo, po_date: poDate,
         supplier_id: supplierId || null,
         supplier_name: supplierName || null,
         items: validItems, total_thb: total,
         status: 'pending_approval', note: note || null,
       }]).select().single();
+
+      // กันกรณีมีคนสร้างพร้อมกันพอดีจนเลขชน ให้ขอเลขใหม่แล้วลองอีกครั้ง
+      if (error && String(error.message || '').includes('duplicate key')) {
+        const retryPoNo = await generateUniquePoNo();
+        const retry = await supabase.from('purchase_orders').insert([{
+          po_no: retryPoNo, po_date: poDate,
+          supplier_id: supplierId || null,
+          supplier_name: supplierName || null,
+          items: validItems, total_thb: total,
+          status: 'pending_approval', note: note || null,
+        }]).select().single();
+        error = retry.error;
+      }
+
       if (error) throw error;
 
       setShowSubmitConfirm(false);
@@ -436,7 +469,13 @@ export default function PurchaseOrder() {
             className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 flex items-center gap-2 text-sm">
             <User size={13}/> จัดการผู้ขาย
           </button>
-          <button onClick={() => { setTab('create'); }} disabled={tab==='create'}
+          <button onClick={() => {
+              setEditingPO(null);
+              setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
+              setSupplierId(''); setSupplierName(''); setNote('');
+              initPoNo();
+              setTab('create');
+            }} disabled={tab==='create' && !editingPO}
             className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-2 text-sm disabled:opacity-50">
             <Plus size={13}/> สร้าง PO ใหม่
           </button>
