@@ -11,6 +11,7 @@ import PackingMaterials from './components/PackingMaterials';
 import Requisition from './components/Requisition';
 import Stock from './components/Stock';
 import PurchaseOrder from './components/PurchaseOrder';
+import POStockDashboard from './components/POStockDashboard';
 import Suppliers from './components/Suppliers';
 import Customers from './components/Customers';
 import Orders from './components/Orders';
@@ -32,7 +33,7 @@ type PageKey =
   | 'product-list' | 'product-search' | 'product-kpi' | 'products' | 'packaging'
   | 'orders' | 'flash-export' | 'myorder-export' | 'shipping-import'
   | 'pack-products' | 'requisition'
-  | 'stock' | 'purchase-order' | 'suppliers'
+  | 'stock' | 'purchase-order' | 'po-stock-dashboard' | 'suppliers'
   | 'finance-daily' | 'finance-monthly' | 'finance-yearly'
   | 'finance-expenses' | 'finance-income' | 'finance-cost'
   | 'hr-recruit' | 'hr' | 'hr-train' | 'hr-kpi' | 'hr-sop';
@@ -76,6 +77,7 @@ export default function App() {
       case 'packaging':       return <PackingMaterials />;
       case 'pack-products':   return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} onCreateRequisition={goToRequisition}/>;
       case 'requisition':     return <Requisition packHistoryId={packHistoryId} />;
+      case 'po-stock-dashboard': return <POStockDashboard onGoToPO={() => setActivePage('purchase-order')} onGoToStock={() => setActivePage('stock')} />;
       case 'stock':           return <Stock onGoToPO={() => setActivePage('purchase-order')} />;
       case 'purchase-order':  return <PurchaseOrder />;
       case 'suppliers':       return <Suppliers />;
