@@ -203,6 +203,33 @@ export default function PurchaseOrder() {
     return statusLabelText(value);
   };
 
+  const auditMetaLabel = (key: string) => {
+    const labels: Record<string, string> = {
+      supplier_name: 'ผู้ขาย',
+      total_thb: 'ยอดรวม',
+      total_qty: 'จำนวนรวม',
+      items_count: 'จำนวนรายการ',
+      transactions_count: 'รายการรับเข้า',
+      related_po_count: 'PO ที่เกี่ยวข้อง',
+      supplier_id: 'รหัสผู้ขาย',
+      supplier_name_old: 'ผู้ขายเดิม',
+    };
+    return labels[key] || key.replace(/_/g, ' ');
+  };
+
+  const auditMetaValue = (key: string, value: any) => {
+    if (value === null || value === undefined || value === '') return '-';
+    if (typeof value === 'number') {
+      if (key.includes('thb') || key.includes('price') || key.includes('total')) {
+        return `฿${Number(value).toLocaleString()}`;
+      }
+      return Number(value).toLocaleString();
+    }
+    if (typeof value === 'boolean') return value ? 'ใช่' : 'ไม่ใช่';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+  };
+
   useEffect(() => { loadData(); initPoNo(); }, []);
 
   const loadData = async () => {
@@ -1472,7 +1499,7 @@ export default function PurchaseOrder() {
               </div>
               <h3 className="text-xl font-extrabold">ประวัติละเอียด PO</h3>
               <p className="text-sm text-white/75 mt-1">
-                {auditTarget.po_no} · บันทึกจากตาราง po_audit_logs
+                {auditTarget.po_no} · ประวัติการทำรายการแบบละเอียด
               </p>
             </div>
 
@@ -1521,13 +1548,13 @@ export default function PurchaseOrder() {
                               {new Date(log.created_at).toLocaleString('th-TH')}
                             </div>
                           </div>
-                          <span className="px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 text-xs font-bold">
-                            {log.action}
+                          <span className="px-2.5 py-1 rounded-full bg-gradient-to-r from-violet-100 to-fuchsia-100 text-violet-700 text-xs font-bold border border-violet-100">
+                            {log.action_label}
                           </span>
                         </div>
 
                         {log.detail && (
-                          <div className="mt-3 text-sm text-slate-600 bg-slate-50 rounded-xl px-3 py-2">
+                          <div className="mt-3 text-sm text-slate-700 bg-gradient-to-r from-slate-50 to-violet-50 rounded-xl px-3 py-2 border border-slate-100">
                             {log.detail}
                           </div>
                         )}
@@ -1544,14 +1571,19 @@ export default function PurchaseOrder() {
                         </div>
 
                         {log.meta && Object.keys(log.meta).length > 0 && (
-                          <details className="mt-3">
-                            <summary className="cursor-pointer text-xs font-bold text-violet-600 hover:text-violet-800">
-                              ดูข้อมูล meta
-                            </summary>
-                            <pre className="mt-2 text-[11px] bg-slate-900 text-slate-100 rounded-xl p-3 overflow-auto max-h-40">
-{JSON.stringify(log.meta, null, 2)}
-                            </pre>
-                          </details>
+                          <div className="mt-3 rounded-2xl bg-gradient-to-br from-violet-50 to-fuchsia-50 border border-violet-100 p-3">
+                            <div className="text-xs font-extrabold text-violet-700 mb-2 flex items-center gap-1">
+                              ✨ ข้อมูลเพิ่มเติม
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {Object.entries(log.meta).map(([key, value]) => (
+                                <div key={key} className="rounded-xl bg-white/90 border border-white px-3 py-2 shadow-sm">
+                                  <div className="text-[11px] text-slate-400 font-semibold">{auditMetaLabel(key)}</div>
+                                  <div className="text-sm font-bold text-slate-800 break-words">{auditMetaValue(key, value)}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         )}
                       </div>
                     </div>
