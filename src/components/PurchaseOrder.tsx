@@ -32,6 +32,29 @@ function SearchDrop({ options, value, onChange, placeholder, onAdd }:
 
   const filtered = options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()) || (o.sub||'').toLowerCase().includes(q.toLowerCase()));
   const selected = options.find(o => o.id === value);
+  const filteredSuppliers = suppliers.filter(sup => {
+    const poCount = poList.filter(p => p.supplier_id === sup.id || p.supplier_name === sup.name).length;
+
+    const q = supSearch.trim().toLowerCase();
+    const haystack = [
+      sup.name,
+      sup.tel || '',
+      sup.address || '',
+      sup.note || '',
+    ].join(' ').toLowerCase();
+
+    const matchText = !q || haystack.includes(q);
+    const matchPO =
+      supPOFilter === 'all'
+        ? true
+        : supPOFilter === 'has_po'
+          ? poCount > 0
+          : poCount === 0;
+
+    return matchText && matchPO;
+  });
+
+
 
   return (
     <div ref={ref} className="relative">
@@ -95,6 +118,7 @@ export default function PurchaseOrder() {
   const [editingPO, setEditingPO] = useState<PO | null>(null); // PO ที่กำลัง edit
   const [editSup, setEditSup]   = useState<Supplier | null>(null);
   const [supSearch, setSupSearch] = useState('');
+  const [supPOFilter, setSupPOFilter] = useState<'all'|'has_po'|'no_po'>('all');
   const [showSupListModal, setShowSupListModal] = useState(false);
   const [poStatusFilter, setPoStatusFilter] = useState<'all'|'pending_approval'|'approved'|'received'|'rejected'>('all');
   const [poSearch, setPoSearch] = useState('');
@@ -1739,7 +1763,7 @@ export default function PurchaseOrder() {
             <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
               <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                 <User size={18} className="text-indigo-500"/> รายชื่อผู้ขาย
-                <span className="text-sm font-normal text-slate-400">{suppliers.length} ราย</span>
+                <span className="text-sm font-normal text-slate-400">แสดง {filteredSuppliers.length} / {suppliers.length} ราย</span>
               </h3>
               <div className="flex items-center gap-2">
                 <button onClick={() => { setEditSup(null); setNewSup({ name:'', tel:'', address:'', note:'' }); setShowSupModal(true); }}
@@ -1749,13 +1773,36 @@ export default function PurchaseOrder() {
                 <button onClick={() => setShowSupListModal(false)} className="text-slate-400 hover:text-slate-600 ml-1"><X size={20}/></button>
               </div>
             </div>
-            {/* Search */}
-            <div className="px-6 py-3 border-b shrink-0">
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                <input value={supSearch} onChange={e => setSupSearch(e.target.value)}
-                  placeholder="ค้นหาชื่อผู้ขาย..."
-                  className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+            {/* Search / Filter */}
+            <div className="px-6 py-3 border-b shrink-0 space-y-2">
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_160px_auto] gap-2">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                  <input value={supSearch} onChange={e => setSupSearch(e.target.value)}
+                    placeholder="ค้นหาชื่อผู้ขาย / เบอร์โทร / ที่อยู่ / หมายเหตุ..."
+                    className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+                </div>
+                <select value={supPOFilter} onChange={e => setSupPOFilter(e.target.value as any)}
+                  className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                  <option value="all">ทุกผู้ขาย</option>
+                  <option value="has_po">มี PO</option>
+                  <option value="no_po">ยังไม่มี PO</option>
+                </select>
+                <button onClick={() => { setSupSearch(''); setSupPOFilter('all'); }}
+                  className="px-3 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 text-sm font-semibold whitespace-nowrap">
+                  ล้างตัวกรอง
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 font-bold">
+                  แสดง {filteredSuppliers.length} ราย
+                </span>
+                <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 font-bold">
+                  มี PO {filteredSuppliers.filter(s => poList.some(p => p.supplier_id === s.id || p.supplier_name === s.name)).length} ราย
+                </span>
+                <span className="px-3 py-1 rounded-full bg-slate-50 text-slate-600 font-bold">
+                  ยังไม่มี PO {filteredSuppliers.filter(s => !poList.some(p => p.supplier_id === s.id || p.supplier_name === s.name)).length} ราย
+                </span>
               </div>
             </div>
             {/* List */}
@@ -1772,11 +1819,10 @@ export default function PurchaseOrder() {
                   </tr>
                 </thead>
                 <tbody>
-                  {suppliers.filter(s => !supSearch || s.name.toLowerCase().includes(supSearch.toLowerCase())).length === 0 && (
-                    <tr><td colSpan={6} className="p-8 text-center text-slate-400">ยังไม่มีผู้ขาย</td></tr>
+                  {filteredSuppliers.length === 0 && (
+                    <tr><td colSpan={6} className="p-8 text-center text-slate-400">ไม่พบผู้ขายตามตัวกรอง</td></tr>
                   )}
-                  {suppliers
-                    .filter(s => !supSearch || s.name.toLowerCase().includes(supSearch.toLowerCase()))
+                  {filteredSuppliers
                     .map((s, idx) => {
                       const poCount = poList.filter(p => p.supplier_id === s.id || p.supplier_name === s.name).length;
                       return (
