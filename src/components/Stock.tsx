@@ -43,6 +43,10 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [receiveSearch, setReceiveSearch] = useState('');
   const [receiveDateFrom, setReceiveDateFrom] = useState('');
   const [receiveDateTo, setReceiveDateTo] = useState('');
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyType, setHistoryType] = useState<'all'|'in'|'out'>('all');
+  const [historyDateFrom, setHistoryDateFrom] = useState('');
+  const [historyDateTo, setHistoryDateTo] = useState('');
   const [toast, setToast]     = useState<{ msg: string; type: 'success'|'error' } | null>(null);
 
   // รับเข้าสต็อก form (simplified)
@@ -206,6 +210,70 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     a.remove();
     URL.revokeObjectURL(url);
     showToast(`✓ Export รายการรับเข้า ${filteredReceivedRows.length} รายการแล้ว`);
+  };
+
+  const filteredHistoryRows = txns.filter(t => {
+    const q = historySearch.trim().toLowerCase();
+    const itemName = (t as any).stock_items?.name || '';
+    const unit = (t as any).stock_items?.unit || '';
+    const haystack = [
+      itemName,
+      unit,
+      t.ref_type || '',
+      t.ref_id || '',
+      t.note || '',
+      t.txn_type || '',
+    ].join(' ').toLowerCase();
+
+    const matchText = !q || haystack.includes(q);
+    const matchType = historyType === 'all' || t.txn_type === historyType;
+
+    const rowDate = t.created_at ? new Date(t.created_at) : null;
+    const fromOk = !historyDateFrom || (rowDate && rowDate >= new Date(historyDateFrom + 'T00:00:00'));
+    const toOk = !historyDateTo || (rowDate && rowDate <= new Date(historyDateTo + 'T23:59:59'));
+
+    return matchText && matchType && fromOk && toOk;
+  });
+
+  const clearHistoryFilters = () => {
+    setHistorySearch('');
+    setHistoryType('all');
+    setHistoryDateFrom('');
+    setHistoryDateTo('');
+  };
+
+  const exportHistoryRowsCsv = () => {
+    const header = ['วันที่', 'เวลา', 'ประเภท', 'รายการ', 'จำนวน', 'หน่วย', 'อ้างอิงประเภท', 'อ้างอิงเลขที่', 'หมายเหตุ'];
+    const rows = filteredHistoryRows.map(t => {
+      const dt = t.created_at ? new Date(t.created_at) : null;
+      return [
+        dt ? dt.toLocaleDateString('th-TH') : '',
+        dt ? dt.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '',
+        t.txn_type === 'in' ? 'รับเข้า' : 'เบิกออก',
+        (t as any).stock_items?.name || '',
+        Number(t.qty || 0),
+        (t as any).stock_items?.unit || '',
+        t.ref_type || '',
+        t.ref_id || '',
+        t.note || '',
+      ];
+    });
+
+    const csv = [header, ...rows]
+      .map(r => r.map(csvCell).join(','))
+      .join('\n');
+
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const today = new Date().toISOString().split('T')[0];
+    a.href = url;
+    a.download = `stock-history-${today}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast(`✓ Export ประวัติการเคลื่อนไหว ${filteredHistoryRows.length} รายการแล้ว`);
   };
 
   // sync จาก products_master + boxes + bubbles (ใช้ upsert + unique constraint แทน JS loop)
@@ -546,49 +614,92 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
 
       {/* ── Tab: ประวัติ ── */}
       {tab === 'history' && (
-        <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-          <table className="text-sm w-full" style={{minWidth:'700px'}}>
-            <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
-              <tr>
-                <th className="p-3 text-left whitespace-nowrap">วันที่</th>
-                <th className="p-3 text-center whitespace-nowrap">ประเภท</th>
-                <th className="p-3 text-left whitespace-nowrap">รายการ</th>
-                <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
-                <th className="p-3 text-left whitespace-nowrap">อ้างอิง</th>
-                <th className="p-3 text-left whitespace-nowrap">หมายเหตุ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {txns.length===0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">ยังไม่มีการเคลื่อนไหว</td></tr>}
-              {txns.map(t => (
-                <tr key={t.id} className={`border-b hover:bg-slate-50 ${t.txn_type==='in'?'':'bg-red-50/30'}`}>
-                  <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
-                    {new Date(t.created_at).toLocaleDateString('th-TH')}
-                    <div className="text-slate-400">{new Date(t.created_at).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}</div>
-                  </td>
-                  <td className="p-3 text-center">
-                    {t.txn_type==='in'
-                      ? <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold"><ArrowDown size={10}/>รับเข้า</span>
-                      : <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-bold"><ArrowUp size={10}/>เบิกออก</span>
-                    }
-                  </td>
-                  <td className="p-3 font-medium whitespace-nowrap">{(t as any).stock_items?.name || '-'}</td>
-                  <td className="p-3 text-center font-bold">
-                    <span className={t.txn_type==='in'?'text-green-600':' text-red-500'}>
-                      {t.txn_type==='in'?'+':'-'}{Number(t.qty)}
-                    </span>
-                    <span className="text-xs text-slate-400 ml-1">{(t as any).stock_items?.unit}</span>
-                  </td>
-                  <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
-                    {t.ref_type && <span className="text-slate-400">{t.ref_type}: </span>}
-                    {t.ref_id || '-'}
-                  </td>
-                  <td className="p-3 text-xs text-slate-500">{t.note || '-'}</td>
+        <>
+          <div className="mb-3 bg-white rounded-2xl shadow-sm border border-slate-100 p-3 shrink-0">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_140px_160px_160px_auto_auto] gap-2">
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                <input value={historySearch} onChange={e => setHistorySearch(e.target.value)}
+                  placeholder="ค้นหารายการ / อ้างอิง / หมายเหตุ..."
+                  className="w-full pl-9 pr-3 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              </div>
+              <select value={historyType} onChange={e => setHistoryType(e.target.value as any)}
+                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300">
+                <option value="all">ทั้งหมด</option>
+                <option value="in">รับเข้า</option>
+                <option value="out">เบิกออก</option>
+              </select>
+              <input type="date" value={historyDateFrom} onChange={e => setHistoryDateFrom(e.target.value)}
+                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              <input type="date" value={historyDateTo} onChange={e => setHistoryDateTo(e.target.value)}
+                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              <button onClick={clearHistoryFilters}
+                className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 text-sm font-semibold whitespace-nowrap">
+                ล้างตัวกรอง
+              </button>
+              <button onClick={exportHistoryRowsCsv} disabled={filteredHistoryRows.length === 0}
+                className="px-4 py-2.5 bg-cyan-500 text-white rounded-xl hover:bg-cyan-600 text-sm font-semibold whitespace-nowrap disabled:opacity-50 flex items-center justify-center gap-1.5">
+                <Download size={13}/> Export Excel
+              </button>
+            </div>
+
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              <span className="px-3 py-1 rounded-full bg-slate-50 text-slate-700 font-bold">
+                แสดง {filteredHistoryRows.length} / {txns.length} รายการ
+              </span>
+              <span className="px-3 py-1 rounded-full bg-green-50 text-green-700 font-bold">
+                รับเข้า +{filteredHistoryRows.filter(t => t.txn_type === 'in').reduce((sum, t) => sum + Number(t.qty || 0), 0).toLocaleString()}
+              </span>
+              <span className="px-3 py-1 rounded-full bg-red-50 text-red-700 font-bold">
+                เบิกออก -{filteredHistoryRows.filter(t => t.txn_type !== 'in').reduce((sum, t) => sum + Number(t.qty || 0), 0).toLocaleString()}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
+            <table className="text-sm w-full" style={{minWidth:'700px'}}>
+              <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
+                <tr>
+                  <th className="p-3 text-left whitespace-nowrap">วันที่</th>
+                  <th className="p-3 text-center whitespace-nowrap">ประเภท</th>
+                  <th className="p-3 text-left whitespace-nowrap">รายการ</th>
+                  <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
+                  <th className="p-3 text-left whitespace-nowrap">อ้างอิง</th>
+                  <th className="p-3 text-left whitespace-nowrap">หมายเหตุ</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filteredHistoryRows.length===0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">ยังไม่มีการเคลื่อนไหวตามตัวกรอง</td></tr>}
+                {filteredHistoryRows.map(t => (
+                  <tr key={t.id} className={`border-b hover:bg-slate-50 ${t.txn_type==='in'?'':'bg-red-50/30'}`}>
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                      {new Date(t.created_at).toLocaleDateString('th-TH')}
+                      <div className="text-slate-400">{new Date(t.created_at).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}</div>
+                    </td>
+                    <td className="p-3 text-center">
+                      {t.txn_type==='in'
+                        ? <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold"><ArrowDown size={10}/>รับเข้า</span>
+                        : <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-bold"><ArrowUp size={10}/>เบิกออก</span>
+                      }
+                    </td>
+                    <td className="p-3 font-medium whitespace-nowrap">{(t as any).stock_items?.name || '-'}</td>
+                    <td className="p-3 text-center font-bold">
+                      <span className={t.txn_type==='in'?'text-green-600':' text-red-500'}>
+                        {t.txn_type==='in'?'+':'-'}{Number(t.qty)}
+                      </span>
+                      <span className="text-xs text-slate-400 ml-1">{(t as any).stock_items?.unit}</span>
+                    </td>
+                    <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
+                      {t.ref_type && <span className="text-slate-400">{t.ref_type}: </span>}
+                      {t.ref_id || '-'}
+                    </td>
+                    <td className="p-3 text-xs text-slate-500">{t.note || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {/* Modal เพิ่มรายการ */}
