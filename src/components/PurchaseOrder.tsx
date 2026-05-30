@@ -32,28 +32,6 @@ function SearchDrop({ options, value, onChange, placeholder, onAdd }:
 
   const filtered = options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()) || (o.sub||'').toLowerCase().includes(q.toLowerCase()));
   const selected = options.find(o => o.id === value);
-  const filteredSuppliers = suppliers.filter(sup => {
-    const poCount = poList.filter(p => p.supplier_id === sup.id || p.supplier_name === sup.name).length;
-
-    const q = supSearch.trim().toLowerCase();
-    const haystack = [
-      sup.name,
-      sup.tel || '',
-      sup.address || '',
-      sup.note || '',
-    ].join(' ').toLowerCase();
-
-    const matchText = !q || haystack.includes(q);
-    const matchPO =
-      supPOFilter === 'all'
-        ? true
-        : supPOFilter === 'has_po'
-          ? poCount > 0
-          : poCount === 0;
-
-    return matchText && matchPO;
-  });
-
 
 
   return (
@@ -829,6 +807,29 @@ export default function PurchaseOrder() {
   };
 
 
+
+
+  const filteredSuppliers = suppliers.filter(sup => {
+    const poCount = poList.filter(p => p.supplier_id === sup.id || p.supplier_name === sup.name).length;
+
+    const q = supSearch.trim().toLowerCase();
+    const haystack = [
+      sup.name,
+      sup.tel || '',
+      sup.address || '',
+      sup.note || '',
+    ].join(' ').toLowerCase();
+
+    const matchText = !q || haystack.includes(q);
+    const matchPO =
+      supPOFilter === 'all'
+        ? true
+        : supPOFilter === 'has_po'
+          ? poCount > 0
+          : poCount === 0;
+
+    return matchText && matchPO;
+  });
 
   return (
     <div className="flex flex-col h-screen p-6 pb-2">
