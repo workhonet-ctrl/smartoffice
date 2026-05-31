@@ -1890,7 +1890,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               </div>
               <h3 className="text-xl font-extrabold text-slate-800">ตรวจล็อตก่อนล็อกต้นทุน</h3>
               <p className="text-sm text-slate-500 mt-2 leading-6">
-                ระบบจะตรวจว่าล็อตต้นทุนพอหรือไม่ก่อนตัดล็อตจริง เพื่อกันการล็อกผิดพลาดหลายออเดอร์
+                ระบบจะตรวจว่าล็อตต้นทุนพอหรือไม่ และบอกชื่อสินค้าที่ขาดล็อตก่อนตัดล็อตจริง
               </p>
             </div>
 
@@ -1967,12 +1967,33 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                           {Array.isArray(r.items) && r.items.length > 0 && (
                             <div className="mt-2 space-y-1">
                               {r.items.map((it: any, idx: number) => (
-                                <div key={idx} className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2 flex justify-between gap-2">
+                                <div key={idx} className={`rounded-xl border px-3 py-2 flex justify-between gap-3 ${
+                                  it.can_lock ? 'bg-emerald-50/50 border-emerald-100' : 'bg-rose-50/70 border-rose-100'
+                                }`}>
                                   <div className="min-w-0">
-                                    <div className="font-bold text-slate-700 truncate">{it.promo_name || it.promo_id || '-'}</div>
-                                    <div className="text-slate-400">ต้องใช้ {Number(it.need_qty || 0).toLocaleString()} ชิ้น · มี {Number(it.available_qty || 0).toLocaleString()} ชิ้น</div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                        it.can_lock ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                                      }`}>
+                                        {it.can_lock ? 'พร้อม' : 'ขาดล็อต'}
+                                      </span>
+                                      <div className="font-extrabold text-slate-800 truncate">
+                                        {it.product_name || 'ไม่พบชื่อสินค้า'}
+                                      </div>
+                                    </div>
+                                    <div className="mt-1 text-[11px] text-slate-500 truncate">
+                                      โปร: {it.promo_name || it.promo_id || '-'}
+                                    </div>
+                                    <div className="text-[11px] text-slate-400">
+                                      ต้องใช้ {Number(it.need_qty || 0).toLocaleString()} ชิ้น · มี {Number(it.available_qty || 0).toLocaleString()} ชิ้น
+                                    </div>
+                                    {!it.can_lock && (
+                                      <div className="text-[11px] text-rose-600 font-bold mt-0.5">
+                                        เหตุผล: {it.reason || 'ล็อตไม่พอ'}
+                                      </div>
+                                    )}
                                   </div>
-                                  <div className={it.can_lock ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold'}>
+                                  <div className={`shrink-0 text-right ${it.can_lock ? 'text-emerald-600' : 'text-rose-600'} font-extrabold`}>
                                     {it.can_lock ? 'พอ' : `ขาด ${Number(it.missing_qty || 0).toLocaleString()}`}
                                   </div>
                                 </div>
