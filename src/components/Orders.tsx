@@ -1107,6 +1107,11 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
       return;
     }
 
+    if ((order as any).cost_locked) {
+      showToast('ลบไม่ได้: ออเดอร์นี้ล็อกต้นทุนแล้ว ต้องคืนล็อต/ปลดล็อกต้นทุนก่อนลบ', 'error');
+      return;
+    }
+
     const name = order.customers?.name || order.order_no;
     if (!confirm(`ลบออเดอร์ "${order.order_no}"\nลูกค้า: ${name}\n\nออเดอร์จะหายจากทุกหน้า (Flash Export, MyOrder Export)\nและยอดรวมลูกค้าจะอัพเดตอัตโนมัติ\n\nยืนยันลบ?`)) return;
     const { error } = await supabase.from('orders').delete().eq('id', order.id);
@@ -1807,8 +1812,13 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                       {isAdmin && (
                         <button
                           onClick={() => handleDeleteOrder(o)}
-                          className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                          title="ลบออเดอร์"
+                          disabled={(o as any).cost_locked}
+                          className={`p-1.5 rounded-lg transition ${
+                            (o as any).cost_locked
+                              ? 'text-slate-200 cursor-not-allowed opacity-40'
+                              : 'text-slate-300 hover:text-red-500 hover:bg-red-50'
+                          }`}
+                          title={(o as any).cost_locked ? 'ลบไม่ได้: ออเดอร์นี้ล็อกต้นทุนแล้ว' : 'ลบออเดอร์'}
                         >
                           🗑
                         </button>
