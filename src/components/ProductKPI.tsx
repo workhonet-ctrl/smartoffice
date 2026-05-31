@@ -119,19 +119,30 @@ export default function ProductKPI() {
   };
 
   // คำนวณ KPI ต่อแถว
-  const calcRow = (p: PromoKPI, shipMap: Record<string,number> = shipActualMap, source: 'master' | 'lot' = 'master') => {
+  const calcRow = (p: PromoKPI, shipMap: Record<string,number> = shipActualMap, source: 'effective' | 'master' | 'lot' = 'effective') => {
     const vatVal   = parseFloat(vatMap[p.promo_id] || '0') || 0;
     const com      = p.price * 0.015;
     const free2    = p.price * 0.02;
     // ขนส่ง: ใช้จริงเฉลี่ยถ้ามี ไม่งั้นใช้ประมาณ
     const actualShip = shipMap[p.promo_id];
     const shipUsed = (actualShip !== undefined && actualShip !== null) ? actualShip : p.ship_thb;
-    const goodsCost = source === 'lot' && p.lot_cost_goods !== null ? p.lot_cost_goods : p.cost_goods;
+
+    // ต้นทุนที่ใช้คำนวณจริง:
+    // มีล็อตล่าสุด → ใช้ต้นทุนล็อต
+    // ไม่มีล็อต → fallback ใช้ต้นทุน master
+    const goodsCost =
+      source === 'master'
+        ? p.cost_goods
+        : source === 'lot'
+          ? (p.lot_cost_goods !== null ? p.lot_cost_goods : p.cost_goods)
+          : (p.lot_cost_goods !== null ? p.lot_cost_goods : p.cost_goods);
+
+    const costSource = p.lot_cost_goods !== null && source !== 'master' ? 'lot' : 'master';
     const totalCost = goodsCost + p.box_price + p.bub_price + shipUsed + vatVal + com + free2;
     const profit   = p.price - totalCost;
     const margin   = profit - 20;                          // กำไร - 20
     const roas     = margin !== 0 ? p.price / margin : 0; // ราคาขาย ÷ Margin
-    return { vatVal, com, free2, shipUsed, totalCost, profit, margin, roas };
+    return { vatVal, com, free2, shipUsed, goodsCost, costSource, totalCost, profit, margin, roas };
   };
 
   const filtered = useMemo(() => {
@@ -160,7 +171,7 @@ export default function ProductKPI() {
   // Export Excel
   const exportExcel = () => {
     const rows = filtered.map(p => {
-      const { vatVal, com, free2, totalCost, profit, margin, roas } = calcRow(p);
+      const { vatVal, com, free2, goodsCost, costSource, totalCost, profit, margin, roas } = calcRow(p);
       const lotCalc = calcRow(p, shipActualMap, 'lot');
       return {
         'รหัส':            p.promo_id,
@@ -168,6 +179,8 @@ export default function ProductKPI() {
         'ชื่อโปร':          p.name,
         'จำนวน':           p.qty,
         'ราคาขาย':         p.price,
+        'ต้นทุนที่ใช้คำนวณ': goodsCost,
+        'แหล่งต้นทุนที่ใช้': costSource,
         'ต้นทุนสินค้า master': p.cost_goods,
         'ล็อตล่าสุด':       p.lot_no || '',
         'ต้นทุนสินค้า lot': p.lot_cost_goods ?? '',
@@ -253,7 +266,7 @@ export default function ProductKPI() {
         <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
           <div className="text-xs text-emerald-600 font-semibold">มีล็อตต้นทุนใช้งาน</div>
           <div className="text-xl font-bold text-emerald-700">{filtered.filter(p => p.lot_cost_goods !== null).length.toLocaleString()} โปร</div>
-          <div className="text-[11px] text-emerald-500 mt-0.5">ใช้ดูราคาจากล็อตล่าสุด</div>
+          <div className="text-[11px] text-emerald-500 mt-0.5">ต้นทุนรวมจะใช้ล็อตก่อน master</div>
         </div>
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
           <div className="text-xs text-amber-600 font-semibold">ยังไม่มีล็อตต้นทุน</div>
@@ -293,6 +306,7 @@ export default function ProductKPI() {
               <th className="p-3 text-right whitespace-nowrap">COM 1.5%</th>
               <th className="p-3 text-right whitespace-nowrap">FREE 2%</th>
               <th className="p-3 text-right whitespace-nowrap">ต้นทุนรวม</th>
+              <th className="p-3 text-center whitespace-nowrap">ใช้คำนวณ</th>
               <th className="p-3 text-right whitespace-nowrap text-teal-300">กำไร</th>
               <th className="p-3 text-right whitespace-nowrap text-teal-300">Margin (฿)</th>
               <th className="p-3 text-right whitespace-nowrap text-blue-300">ROAS%</th>
@@ -300,15 +314,15 @@ export default function ProductKPI() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={20} className="p-8 text-center text-slate-400">
+              <tr><td colSpan={21} className="p-8 text-center text-slate-400">
                 <RefreshCw size={16} className="animate-spin inline mr-2"/>กำลังโหลด...
               </td></tr>
             )}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={20} className="p-8 text-center text-slate-400">ไม่พบสินค้า</td></tr>
+              <tr><td colSpan={21} className="p-8 text-center text-slate-400">ไม่พบสินค้า</td></tr>
             )}
             {filtered.map(p => {
-              const { vatVal, com, free2, totalCost, profit, margin, roas } = calcRow(p);
+              const { vatVal, com, free2, goodsCost, costSource, totalCost, profit, margin, roas } = calcRow(p);
               const lotCalc = calcRow(p, shipActualMap, 'lot');
               const isSelected = selectedIds.has(p.promo_id);
               return (
@@ -383,7 +397,17 @@ export default function ProductKPI() {
                   </td>
                   <td className="p-3 text-right text-slate-500">฿{fmt(com)}</td>
                   <td className="p-3 text-right text-slate-500">฿{fmt(free2)}</td>
-                  <td className="p-3 text-right font-medium text-slate-700">฿{fmt(totalCost)}</td>
+                  <td className="p-3 text-right font-medium text-slate-700">
+                    <div>฿{fmt(totalCost)}</div>
+                    <div className="text-[9px] text-slate-400">สินค้า ฿{fmt(goodsCost)}</div>
+                  </td>
+                  <td className="p-3 text-center">
+                    {costSource === 'lot' ? (
+                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold">ใช้ lot</span>
+                    ) : (
+                      <span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-[10px] font-bold">ใช้ master</span>
+                    )}
+                  </td>
                   <td className={`p-3 text-right font-bold ${profit >= 0 ? 'text-teal-600' : 'text-red-500'}`}>
                     {profit < 0 ? '-' : ''}฿{fmt(Math.abs(profit))}
                   </td>
@@ -408,7 +432,7 @@ export default function ProductKPI() {
                 <tr>
                   <td colSpan={5} className="p-3 text-slate-500">รวม {filtered.length} โปร</td>
                   <td className="p-3 text-right text-emerald-600">฿{fmt(totPrice)}</td>
-                  <td colSpan={10}/>
+                  <td colSpan={11}/>
                   <td className={`p-3 text-right ${totProfit >= 0 ? 'text-teal-600' : 'text-red-500'}`}>
                     {totProfit < 0 ? '-' : ''}฿{fmt(Math.abs(totProfit))}
                   </td>
