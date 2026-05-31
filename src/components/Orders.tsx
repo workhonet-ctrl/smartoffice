@@ -269,6 +269,38 @@ function ParcelTrackingPanel() {
         ))}
       </div>
 
+      {/* Cost lock summary */}
+      <div className="shrink-0 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+        <button onClick={() => setFilterCostLock('all')}
+          className={`rounded-xl border p-3 text-left transition ${filterCostLock === 'all' ? 'bg-cyan-50 border-cyan-200 shadow-sm' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
+          <div className="text-[11px] font-bold text-slate-400">ออเดอร์ทั้งหมด</div>
+          <div className="text-xl font-extrabold text-slate-800 mt-0.5">{orders.length.toLocaleString()}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">แสดงตามตัวกรอง {filtered.length.toLocaleString()} รายการ</div>
+        </button>
+
+        <button onClick={() => setFilterCostLock('locked')}
+          className={`rounded-xl border p-3 text-left transition ${filterCostLock === 'locked' ? 'bg-emerald-50 border-emerald-200 shadow-sm' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
+          <div className="text-[11px] font-bold text-emerald-500">ล็อกต้นทุนแล้ว</div>
+          <div className="text-xl font-extrabold text-emerald-700 mt-0.5">{costLockedCount.toLocaleString()}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">ในผลลัพธ์นี้ {filteredCostLockedCount.toLocaleString()} รายการ</div>
+        </button>
+
+        <button onClick={() => setFilterCostLock('unlocked')}
+          className={`rounded-xl border p-3 text-left transition ${filterCostLock === 'unlocked' ? 'bg-amber-50 border-amber-200 shadow-sm' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
+          <div className="text-[11px] font-bold text-amber-500">ยังไม่ล็อกต้นทุน</div>
+          <div className="text-xl font-extrabold text-amber-700 mt-0.5">{costUnlockedCount.toLocaleString()}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">ในผลลัพธ์นี้ {filteredCostUnlockedCount.toLocaleString()} รายการ</div>
+        </button>
+
+        <div className="rounded-xl border border-fuchsia-100 bg-gradient-to-br from-fuchsia-50 to-indigo-50 p-3 text-left">
+          <div className="text-[11px] font-bold text-fuchsia-500">ต้นทุนรวมที่ล็อกแล้ว</div>
+          <div className="text-xl font-extrabold text-fuchsia-700 mt-0.5">
+            ฿{costLockedTotal.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5">รวมจากออเดอร์ที่ cost_locked = true</div>
+        </div>
+      </div>
+
       <div className="flex gap-3 flex-1 min-h-0">
         {/* Left: Table */}
         <div className="flex-1 flex flex-col min-w-0">
@@ -1194,6 +1226,12 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const dupCount = dupTrackingSet.size > 0
     ? orders.filter(o => dupTrackingSet.has((o.tracking_no||'').trim())).length
     : 0;
+
+  const costLockedCount = orders.filter(o => (o as any).cost_locked).length;
+  const costUnlockedCount = orders.filter(o => !(o as any).cost_locked).length;
+  const costLockedTotal = orders.reduce((sum, o) => sum + ((o as any).cost_locked ? Number((o as any).cost_total_thb || 0) : 0), 0);
+  const filteredCostLockedCount = filtered.filter(o => (o as any).cost_locked).length;
+  const filteredCostUnlockedCount = filtered.filter(o => !(o as any).cost_locked).length;
 
   return (
     <div className="flex flex-col h-screen p-3 sm:p-6 pb-2">
