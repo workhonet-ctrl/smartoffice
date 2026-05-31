@@ -118,6 +118,10 @@ export default function ProductCostFormula() {
   const [history, setHistory] = useState<CalculationHistory[]>([]);
   const [lots, setLots] = useState<ProductCostLot[]>([]);
   const [showLotConfirm, setShowLotConfirm] = useState(false);
+  const [lotDuplicateWarning, setLotDuplicateWarning] = useState<{
+    activeLots: ProductCostLot[];
+    sameLots24h: ProductCostLot[];
+  }>({ activeLots: [], sameLots24h: [] });
   const [lotNote, setLotNote] = useState('');
   const [tab, setTab] = useState<'form' | 'history' | 'lots'>('form');
 
@@ -198,6 +202,7 @@ export default function ProductCostFormula() {
     setHistory([]);
     setLots([]);
     setShowLotConfirm(false);
+    setLotDuplicateWarning({ activeLots: [], sameLots24h: [] });
     setLotNote('');
     setTab('form');
   };
@@ -415,6 +420,59 @@ export default function ProductCostFormula() {
     if (showSuccess) showToast('✓ บันทึกประวัติคำนวณแล้ว');
   };
 
+  const openCreateLotConfirm = async () => {
+    if (!selectedFormulaId) {
+      showToast('กรุณาบันทึกสูตรต้นทุนก่อนสร้างล็อต', 'error');
+      return;
+    }
+
+    if (Number(outputQty || 0) <= 0 || Number(costPerUnit || 0) <= 0) {
+      showToast('จำนวนผลผลิตและต้นทุนต่อหน่วยต้องมากกว่า 0', 'error');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+      const { data: activeRows, error: activeErr } = await supabase
+        .from('product_cost_lots')
+        .select('*')
+        .eq('product_id', productId || '')
+        .eq('status', 'active')
+        .gt('remaining_qty', 0)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (activeErr) throw activeErr;
+
+      const { data: sameRows, error: sameErr } = await supabase
+        .from('product_cost_lots')
+        .select('*')
+        .eq('formula_id', selectedFormulaId)
+        .eq('product_id', productId || '')
+        .eq('status', 'active')
+        .eq('initial_qty', Number(outputQty || 0))
+        .eq('unit_cost', Number(costPerUnit || 0))
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (sameErr) throw sameErr;
+
+      setLotDuplicateWarning({
+        activeLots: (activeRows || []) as ProductCostLot[],
+        sameLots24h: (sameRows || []) as ProductCostLot[],
+      });
+
+      setShowLotConfirm(true);
+    } catch (err: any) {
+      showToast('ตรวจล็อตซ้ำไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const generateLotNo = async () => {
     const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
     const prefix = `LOT-${dateStr}-`;
@@ -502,6 +560,7 @@ export default function ProductCostFormula() {
 
       setLots(prev => [lot as ProductCostLot, ...prev]);
       setShowLotConfirm(false);
+      setLotDuplicateWarning({ activeLots: [], sameLots24h: [] });
       showToast(`✓ สร้างล็อตต้นทุน ${lotNo} สำเร็จ`);
     } catch (err: any) {
       showToast('สร้างล็อตต้นทุนไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
@@ -780,7 +839,7 @@ export default function ProductCostFormula() {
                     </button>
                   )}
                   {selectedFormulaId && (
-                    <button onClick={() => setShowLotConfirm(true)} disabled={saving}
+                    <button onClick={openCreateLotConfirm} disabled={saving}
                       className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:from-emerald-600 hover:to-cyan-600 font-bold shadow disabled:opacity-50 flex items-center gap-2">
                       <PackageCheck size={16} />
                       สร้างล็อตต้นทุน
@@ -950,6 +1009,37 @@ export default function ProductCostFormula() {
                 <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ต้นทุนรวม</span><b>{money(totalCost)}</b></div>
               </div>
 
+              {(lotDuplicateWarning.activeLots.length > 0 || lotDuplicateWarning.sameLots24h.length > 0) && (
+                <div className={`rounded-2xl border px-3 py-3 text-xs leading-5 ${
+                  lotDuplicateWarning.sameLots24h.length > 0
+                    ? 'bg-rose-50 border-rose-100 text-rose-700'
+                    : 'bg-amber-50 border-amber-100 text-amber-700'
+                }`}>
+                  <div className="font-extrabold mb-2">
+                    {lotDuplicateWarning.sameLots24h.length > 0
+                      ? '⚠️ เตือนแรง: สูตร/จำนวน/ต้นทุนนี้เพิ่งสร้างล็อตใน 24 ชม.'
+                      : '⚠️ สินค้านี้มีล็อต active อยู่แล้ว'}
+                  </div>
+
+                  {lotDuplicateWarning.activeLots.slice(0, 3).map(lot => (
+                    <div key={lot.id} className="rounded-xl bg-white/80 border border-white px-3 py-2 mb-2">
+                      <div className="flex justify-between gap-2">
+                        <span className="font-mono font-bold">{lot.lot_no}</span>
+                        <span className="font-bold">{money(Number(lot.unit_cost || 0))}/ชิ้น</span>
+                      </div>
+                      <div className="mt-1 flex justify-between gap-2 text-slate-500">
+                        <span>คงเหลือ {Number(lot.remaining_qty || 0).toLocaleString()} / {Number(lot.initial_qty || 0).toLocaleString()} {lot.unit}</span>
+                        <span>{new Date(lot.created_at).toLocaleString('th-TH')}</span>
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="font-bold">
+                    ถ้ากดยืนยัน ระบบจะเพิ่มล็อตใหม่อีก {Number(outputQty || 0).toLocaleString()} {outputUnit}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="text-xs font-bold text-slate-500 block mb-1">หมายเหตุล็อต</label>
                 <input value={lotNote} onChange={e => setLotNote(e.target.value)}
@@ -970,7 +1060,7 @@ export default function ProductCostFormula() {
               <button onClick={createCostLot} disabled={saving}
                 className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:from-emerald-600 hover:to-cyan-600 font-bold shadow disabled:opacity-50 flex items-center gap-2">
                 <PackageCheck size={16} />
-                {saving ? 'กำลังสร้าง...' : 'ยืนยันสร้างล็อต'}
+                {saving ? 'กำลังสร้าง...' : lotDuplicateWarning.activeLots.length > 0 ? 'ยืนยันสร้างล็อตใหม่เพิ่ม' : 'ยืนยันสร้างล็อต'}
               </button>
             </div>
           </div>
