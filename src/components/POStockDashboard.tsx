@@ -594,9 +594,12 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">สรุปออเดอร์ที่ยังไม่ล็อกต้นทุน เพื่อรู้ว่ายังต้องจัดการอะไรต่อ</p>
             </div>
-            <button onClick={onGoToPO}
+            <button onClick={() => {
+              localStorage.setItem('smartoffice_orders_cost_filter', 'unlocked');
+              onGoToPO?.();
+            }}
               className="px-3 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-xs font-bold hover:bg-amber-100">
-              ไปหน้าออเดอร์
+              ไปหน้าออเดอร์ที่ยังไม่ล็อก
             </button>
           </div>
 
