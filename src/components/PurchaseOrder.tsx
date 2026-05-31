@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   ShoppingBag, Plus, Trash2, Search, X, ChevronDown,
-  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer, History, Download, PackageCheck
+  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer, History, Download, PackageCheck, AlertTriangle
 } from 'lucide-react';
 
 type Supplier = { id: string; name: string; tel: string | null; address: string | null; note: string | null };
@@ -10,10 +10,13 @@ type StockItem = { id: string; name: string; unit: string; type: string };
 type ProductMaster = { id: string; name: string; cost_thb?: number | null };
 type POCostLot = { id: string; lot_no: string; source_id: string | null; source_no: string | null; product_name: string; initial_qty: number; remaining_qty: number; unit: string; unit_cost: number; status: string; created_at: string };
 type POItem    = { key: string; stock_item_id: string | null; name: string; qty: number; unit: string; price: number };
+type POType = 'ready_to_sell' | 'cost_material' | 'expense';
+
 type PO        = {
   id: string; po_no: string; po_date: string;
   supplier_id: string | null; supplier_name: string | null;
   items: POItem[]; total_thb: number; status: string; note: string | null;
+  po_type?: POType | null;
   created_at?: string | null; updated_at?: string | null;
 };
 
@@ -103,6 +106,7 @@ export default function PurchaseOrder() {
   const [supplierId, setSupplierId] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [note, setNote]         = useState('');
+  const [poType, setPoType]     = useState<POType>('ready_to_sell');
   const [poItems, setPoItems]   = useState<POItem[]>([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
   const [saving, setSaving]     = useState(false);
 
@@ -297,6 +301,18 @@ export default function PurchaseOrder() {
     map[lot.source_id].push(lot);
     return map;
   }, {} as Record<string, POCostLot[]>);
+  const poTypeLabel = (type?: string | null) => {
+    if (type === 'expense') return 'ค่าใช้จ่ายทั่วไป';
+    if (type === 'cost_material') return 'วัตถุดิบ/วัสดุเข้าต้นทุน';
+    return 'สินค้าพร้อมขาย';
+  };
+
+  const poTypeBadgeClass = (type?: string | null) => {
+    if (type === 'expense') return 'bg-purple-100 text-purple-700 border-purple-200';
+    if (type === 'cost_material') return 'bg-amber-100 text-amber-700 border-amber-200';
+    return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+  };
+
 
   const addRow    = () => setPoItems(p => [...p, { key: String(Date.now()), stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
   const removeRow = (key: string) => setPoItems(p => p.filter(it => it.key !== key));
@@ -382,6 +398,7 @@ export default function PurchaseOrder() {
     setSupplierId(po.supplier_id || '');
     setSupplierName(po.supplier_name || '');
     setNote(po.note || '');
+    setPoType((po.po_type as POType) || 'ready_to_sell');
     const items = (po.items as POItem[]) || [];
     setPoItems(items.length > 0
       ? items.map((it, i) => ({ ...it, key: String(i+1) }))
@@ -393,7 +410,7 @@ export default function PurchaseOrder() {
   const cancelEditPO = () => {
     setEditingPO(null);
     setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
-    setSupplierId(''); setSupplierName(''); setNote('');
+    setSupplierId(''); setSupplierName(''); setNote(''); setPoType('ready_to_sell');
     setTab('list');
   };
 
@@ -431,6 +448,7 @@ export default function PurchaseOrder() {
         items:         validItems,
         total_thb:     total,
         note:          note || null,
+        po_type:       poType,
         status:        nextStatus,
       }).eq('id', editingPO.id);
       if (error) throw error;
@@ -841,6 +859,11 @@ export default function PurchaseOrder() {
     const existingLots = lotsByPOId[po.id] || [];
     if (existingLots.length > 0) {
       showToast(`PO นี้สร้าง Lot แล้ว: ${existingLots.map(l => l.lot_no).join(', ')}`, 'error');
+      return;
+    }
+
+    if ((po.po_type || 'ready_to_sell') !== 'ready_to_sell') {
+      showToast('PO นี้ไม่ใช่ประเภทสินค้าพร้อมขาย จึงไม่ควรสร้าง Lot จาก PO', 'error');
       return;
     }
 
@@ -1444,9 +1467,22 @@ export default function PurchaseOrder() {
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 text-indigo-600 font-medium"/>
               </div>
               <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1.5">ประเภท PO</label>
+                <select value={poType} onChange={e => setPoType(e.target.value as POType)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                  <option value="ready_to_sell">สินค้าพร้อมขาย → สร้าง Lot</option>
+                  <option value="cost_material">วัตถุดิบ/วัสดุเข้าต้นทุน → ใช้ในสูตร</option>
+                  <option value="expense">ค่าใช้จ่ายทั่วไป → บันทึกเป็นรายจ่าย</option>
+                </select>
+              </div>
+              <div className="md:col-span-3">
                 <label className="text-xs font-semibold text-slate-500 block mb-1.5">หมายเหตุ</label>
                 <input value={note} onChange={e => setNote(e.target.value)} placeholder="ระบุหมายเหตุ (ถ้ามี)"
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+                <div className="mt-2 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700 flex gap-2">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5"/>
+                  <span>เลือกประเภทให้ถูกเพื่อกันหักซ้ำ: สินค้าพร้อมขายสร้าง Lot, ค่าใช้จ่ายทั่วไปบันทึกเป็นรายจ่าย</span>
+                </div>
               </div>
             </div>
           </div>
@@ -1639,6 +1675,7 @@ export default function PurchaseOrder() {
                 <th className="p-3 text-left whitespace-nowrap">เลขที่</th>
                 <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                 <th className="p-3 text-left whitespace-nowrap">ผู้ขาย</th>
+                <th className="p-3 text-center whitespace-nowrap">ประเภท</th>
                 <th className="p-3 text-left">สินค้า</th>
                 <th className="p-3 text-right whitespace-nowrap">ยอดรวม</th>
                 <th className="p-3 text-center whitespace-nowrap">สถานะ</th>
@@ -1646,7 +1683,7 @@ export default function PurchaseOrder() {
               </tr>
             </thead>
             <tbody>
-              {filteredPOList.length===0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">ยังไม่มีใบสั่งซื้อตามตัวกรองนี้</td></tr>}
+              {filteredPOList.length===0 && <tr><td colSpan={8} className="p-8 text-center text-slate-400">ยังไม่มีใบสั่งซื้อตามตัวกรองนี้</td></tr>}
               {filteredPOList.map(po => (
                 <tr key={po.id} className={`border-b hover:bg-slate-50 ${po.status === 'received' ? 'bg-emerald-50/20' : ''}`}>
                   <td className="p-3 font-mono text-xs text-indigo-700 whitespace-nowrap">{po.po_no}</td>
@@ -1654,6 +1691,11 @@ export default function PurchaseOrder() {
                     {new Date(po.po_date).toLocaleDateString('th-TH')}
                   </td>
                   <td className="p-3 font-medium whitespace-nowrap">{po.supplier_name || <span className="text-slate-300">-</span>}</td>
+                  <td className="p-3 text-center whitespace-nowrap">
+                    <span className={`inline-block px-2 py-1 rounded-full text-[11px] font-bold border ${poTypeBadgeClass(po.po_type)}`}>
+                      {poTypeLabel(po.po_type)}
+                    </span>
+                  </td>
                   <td className="p-3 text-xs text-slate-500 max-w-[260px]">
                     <div className="space-y-0.5">
                       {po.status === 'received' && (
@@ -1715,6 +1757,8 @@ export default function PurchaseOrder() {
 
                       {po.status === 'received' && (() => {
                         const poLots = lotsByPOId[po.id] || [];
+                        const type = po.po_type || 'ready_to_sell';
+
                         if (poLots.length > 0) {
                           return (
                             <div className="px-3 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold border border-emerald-100 min-w-[118px]">
@@ -1724,6 +1768,24 @@ export default function PurchaseOrder() {
                               <div className="mt-1 text-[10px] font-mono text-emerald-600">
                                 {poLots.map(l => l.lot_no).join(', ')}
                               </div>
+                            </div>
+                          );
+                        }
+
+                        if (type === 'expense') {
+                          return (
+                            <div className="px-3 py-2 bg-purple-50 text-purple-700 rounded-xl text-xs font-bold border border-purple-100 min-w-[130px]">
+                              ค่าใช้จ่ายทั่วไป<br/>
+                              <span className="text-[10px] font-normal">ไปบันทึกที่รายจ่าย</span>
+                            </div>
+                          );
+                        }
+
+                        if (type === 'cost_material') {
+                          return (
+                            <div className="px-3 py-2 bg-amber-50 text-amber-700 rounded-xl text-xs font-bold border border-amber-100 min-w-[130px]">
+                              วัตถุดิบ/วัสดุ<br/>
+                              <span className="text-[10px] font-normal">ใช้ในสูตรต้นทุน</span>
                             </div>
                           );
                         }
