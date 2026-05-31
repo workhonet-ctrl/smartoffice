@@ -137,7 +137,7 @@ export default function ProductCostFormula() {
     sameLots24h: ProductCostLot[];
   }>({ activeLots: [], sameLots24h: [] });
   const [lotNote, setLotNote] = useState('');
-  const [tab, setTab] = useState<'form' | 'history' | 'lots'>('form');
+  const [tab, setTab] = useState<'form' | 'history' | 'lots'>('lots');
 
   const [productId, setProductId] = useState('');
   const [productName, setProductName] = useState('');
@@ -347,7 +347,7 @@ export default function ProductCostFormula() {
       setHistory((hist || []) as CalculationHistory[]);
       setLots((lotRows || []) as ProductCostLot[]);
       setLotNote(`ล็อตต้นทุนจาก ${formula.formula_name}`);
-      setTab('form');
+      setTab('lots');
     } catch (err: any) {
       showToast('โหลดสูตรไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
     } finally {
@@ -758,7 +758,7 @@ export default function ProductCostFormula() {
                 <div className="font-extrabold text-slate-800 truncate">{f.formula_name}</div>
                 <div className="text-xs text-slate-500 truncate mt-0.5">{f.product_name}</div>
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-slate-400">สร้างจากสูตร · ต่อ {f.output_unit}</span>
+                  <span className="text-xs text-slate-400">สูตรผลิตเอง · กดเพื่อดูล็อต</span>
                   <span className="text-sm font-extrabold text-fuchsia-700">{money(Number(f.cost_per_unit || 0))}</span>
                 </div>
               </button>
@@ -798,8 +798,8 @@ export default function ProductCostFormula() {
               <div className="text-xs text-slate-400">{outputUnit}</div>
             </div>
             <div className="rounded-3xl bg-white border border-slate-100 shadow-sm p-4">
-              <div className="text-xs font-bold text-slate-400">จำนวนรายการต้นทุน</div>
-              <div className="text-2xl font-extrabold text-slate-800 mt-1">{items.filter(i => i.item_name.trim()).length}</div>
+              <div className="text-xs font-bold text-slate-400">{tab === 'lots' ? 'จำนวนล็อต' : 'จำนวนรายการต้นทุน'}</div>
+              <div className="text-2xl font-extrabold text-slate-800 mt-1">{tab === 'lots' ? lots.length : items.filter(i => i.item_name.trim()).length}</div>
             </div>
           </div>
 
@@ -809,13 +809,25 @@ export default function ProductCostFormula() {
                 <Package size={18} className="text-fuchsia-500" />
                 ข้อมูลสูตร
               </h3>
-              <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
-                {(['form', 'history', 'lots'] as const).map(k => (
-                  <button key={k} onClick={() => setTab(k)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold ${tab === k ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}>
-                    {k === 'form' ? 'สูตรต้นทุน' : k === 'history' ? 'ประวัติคำนวณ' : 'ล็อตต้นทุน'}
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
+                  {(['lots', 'form'] as const).map(k => (
+                    <button key={k} onClick={() => setTab(k)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${tab === k ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}>
+                      {k === 'lots' ? 'ล็อตต้นทุน' : 'สูตรต้นทุน'}
+                    </button>
+                  ))}
+                </div>
+                {selectedFormulaId && (
+                  <button onClick={() => setTab('history')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${
+                      tab === 'history'
+                        ? 'bg-white text-fuchsia-700 border-fuchsia-200 shadow'
+                        : 'bg-white text-slate-400 border-slate-100 hover:text-slate-600'
+                    }`}>
+                    ประวัติ
                   </button>
-                ))}
+                )}
               </div>
             </div>
 
@@ -952,6 +964,13 @@ export default function ProductCostFormula() {
 
                 <div className="flex justify-end gap-2 flex-wrap">
                   {selectedFormulaId && (
+                    <button onClick={() => setTab('history')} disabled={saving}
+                      className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-500 hover:bg-slate-50 font-bold disabled:opacity-50 flex items-center gap-2">
+                      <History size={16} />
+                      ดูประวัติ
+                    </button>
+                  )}
+                  {selectedFormulaId && (
                     <button onClick={deactivateFormula} disabled={saving}
                       className="px-4 py-2.5 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 font-bold disabled:opacity-50">
                       ปิดใช้งานสูตร
@@ -975,6 +994,16 @@ export default function ProductCostFormula() {
 
             {tab === 'history' && (
               <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-extrabold text-slate-800">ประวัติคำนวณ</div>
+                    <div className="text-xs text-slate-400">ใช้ตรวจย้อนหลัง ไม่ใช่หน้าหลักสำหรับใช้งานประจำวัน</div>
+                  </div>
+                  <button onClick={() => setTab('lots')}
+                    className="px-3 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200">
+                    กลับไปล็อตต้นทุน
+                  </button>
+                </div>
                 {!selectedFormulaId && (
                   <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl">
                     เลือกสูตรทางซ้ายก่อน เพื่อดูประวัติคำนวณ
