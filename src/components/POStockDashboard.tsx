@@ -102,6 +102,7 @@ type CostWorkOrder = {
 type DashboardProps = {
   onGoToPO?: () => void;
   onGoToStock?: () => void;
+  onGoToOrders?: () => void;
 };
 
 type DateRangeKey = 'today' | '7d' | '30d' | 'month' | 'all';
@@ -168,7 +169,7 @@ const stockTypeText = (type: string) => {
   return 'อื่น ๆ';
 };
 
-export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardProps) {
+export default function POStockDashboard({ onGoToPO, onGoToStock, onGoToOrders }: DashboardProps) {
   const [poList, setPoList] = useState<PurchaseOrder[]>([]);
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [latestTxns, setLatestTxns] = useState<StockTransaction[]>([]);
@@ -596,7 +597,7 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
             </div>
             <button onClick={() => {
               localStorage.setItem('smartoffice_orders_cost_filter', 'unlocked');
-              onGoToPO?.();
+              onGoToOrders?.();
             }}
               className="px-3 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-xs font-bold hover:bg-amber-100">
               ไปหน้าออเดอร์ที่ยังไม่ล็อก
