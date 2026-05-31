@@ -529,6 +529,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [filterPay,    setFilterPay]    = useState('');
   const [filterTracking, setFilterTracking] = useState<'all' | 'has' | 'missing'>('all');
   const [filterShipCost, setFilterShipCost] = useState<'all' | 'has' | 'missing'>('all');
+  const [filterCostLock, setFilterCostLock] = useState<'all' | 'locked' | 'unlocked'>('all');
   const ORDER_PAGE_SIZE = 500;
   const [orderPage, setOrderPage] = useState<'all' | number>(0);
   const [importedOrders, setImportedOrders] = useState<Array<Record<string, unknown>>>([]);
@@ -561,7 +562,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [checkingDups, setCheckingDups] = useState(false);
 
   useEffect(() => { loadOrders(); loadPromoOptions(); }, []);
-  useEffect(() => { if (orderPage !== 'all') setOrderPage(0); }, [search, dateFrom, dateTo, dateField, filterRoute, filterStatus, filterPay, filterTracking, filterShipCost]);
+  useEffect(() => { if (orderPage !== 'all') setOrderPage(0); }, [search, dateFrom, dateTo, dateField, filterRoute, filterStatus, filterPay, filterTracking, filterShipCost, filterCostLock]);
 
   // refresh เมื่อ switch กลับมาแท็บ orders
   useEffect(() => {
@@ -1157,6 +1158,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     if (filterTracking === 'missing' && hasTrackingNo(o)) return false;
     if (filterShipCost === 'has' && !hasRealShipCost(o)) return false;
     if (filterShipCost === 'missing' && hasRealShipCost(o)) return false;
+    if (filterCostLock === 'locked' && !(o as any).cost_locked) return false;
+    if (filterCostLock === 'unlocked' && (o as any).cost_locked) return false;
     return true;
   });
 
@@ -1340,6 +1343,13 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               <option value="has">มีค่าส่งจริง</option>
               <option value="missing">ไม่มีค่าส่งจริง</option>
             </select>
+            {/* Cost lock filter */}
+            <select value={filterCostLock} onChange={e => setFilterCostLock(e.target.value as 'all' | 'locked' | 'unlocked')}
+              className="border rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white">
+              <option value="all">ต้นทุน: ทั้งหมด</option>
+              <option value="unlocked">ยังไม่ล็อก</option>
+              <option value="locked">ล็อกแล้ว</option>
+            </select>
             {/* ข้อ 3: ปุ่ม scroll ไปยัง tracking ซ้ำ */}
             {dupCount > 0 && (
               <div className="flex items-center gap-1.5">
@@ -1405,8 +1415,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               </div>
             )}
             {/* Clear filters */}
-            {(filterRoute || filterStatus || filterPay || filterTracking !== 'all' || filterShipCost !== 'all' || dateFrom || dateTo || search) && (
-              <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setFilterRoute(''); setFilterStatus(''); setFilterPay(''); setFilterTracking('all'); setFilterShipCost('all'); }}
+            {(filterRoute || filterStatus || filterPay || filterTracking !== 'all' || filterShipCost !== 'all' || filterCostLock !== 'all' || dateFrom || dateTo || search) && (
+              <button onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setFilterRoute(''); setFilterStatus(''); setFilterPay(''); setFilterTracking('all'); setFilterShipCost('all'); setFilterCostLock('all'); }}
                 className="px-2.5 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs hover:bg-slate-200">
                 ล้างตัวกรอง ✕
               </button>
