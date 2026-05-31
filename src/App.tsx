@@ -79,7 +79,13 @@ export default function App() {
       case 'packaging':       return <PackingMaterials />;
       case 'pack-products':   return <Packaging orderIds={packagingOrderIds} onDone={() => { setPackagingOrderIds([]); setActivePage('orders'); }} onCreateRequisition={goToRequisition}/>;
       case 'requisition':     return <Requisition packHistoryId={packHistoryId} />;
-      case 'po-stock-dashboard': return <POStockDashboard onGoToPO={() => setActivePage('purchase-order')} onGoToStock={() => setActivePage('stock')} />;
+      case 'po-stock-dashboard': return (
+        <POStockDashboard
+          onGoToPO={() => setActivePage('purchase-order')}
+          onGoToStock={() => setActivePage('stock')}
+          onGoToOrders={() => setActivePage('orders')}
+        />
+      );
       case 'stock':           return <Stock onGoToPO={() => setActivePage('purchase-order')} />;
       case 'purchase-order':  return <PurchaseOrder />;
       case 'suppliers':       return <Suppliers />;
