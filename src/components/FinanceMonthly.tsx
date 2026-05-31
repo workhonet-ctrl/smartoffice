@@ -9,6 +9,7 @@ type MonthRow = {
   cost_goods: number; cost_ship: number;
   cost_box: number; cost_bubble: number;
   cost_ad: number; cost_other: number;
+  cost_snapshot_orders: number; cost_master_orders: number;
   profit: number;
 };
 
@@ -55,7 +56,7 @@ export default function FinanceMonthly() {
     const [{ data: orders }, { data: expenses }, promoMap] = await Promise.all([
       supabase
         .from('orders')
-        .select('id, order_date, total_thb, promo_ids, quantities, quantity')
+        .select('id, order_date, total_thb, promo_ids, quantities, quantity, cost_locked, cost_total_thb')
         .gte('order_date', from).lte('order_date', to)
         .not('order_status', 'in', '(รอคีย์ออเดอร์)'),
       supabase
@@ -78,16 +79,31 @@ export default function FinanceMonthly() {
       const costOther = mExp.filter((e: any) => e.category !== 'ค่าโฆษณา').reduce((s: number, e: any) => s + Number(e.amount_thb), 0);
 
       let costShip = 0, costGoods = 0, costBox = 0, costBub = 0;
+      let costSnapshotOrders = 0, costMasterOrders = 0;
 
-      // คำนวณต้นทุนจาก promoMap (ไม่มี await ใน loop แล้ว)
+      // คำนวณต้นทุนจาก cost snapshot ก่อน ถ้าออเดอร์ล็อกต้นทุนแล้ว
+      // ถ้ายังไม่ล็อก จึง fallback ไปใช้ products_master.cost_thb แบบเดิม
       for (const o of mOrders) {
         const pids: string[] = (o as any).promo_ids || [];
         const qtys = String((o as any).quantities || (o as any).quantity || '1').split('|');
+
+        if ((o as any).cost_locked && Number((o as any).cost_total_thb || 0) > 0) {
+          costGoods += Number((o as any).cost_total_thb || 0);
+          costSnapshotOrders++;
+        } else {
+          costMasterOrders++;
+        }
+
         for (let i = 0; i < pids.length; i++) {
           const pm = promoMap[pids[i]];
           if (!pm) continue;
           const qty = Number(qtys[i]?.trim()) || 1;
-          costGoods += pm.cost_thb  * qty;
+
+          // ใช้ต้นทุน master เฉพาะออเดอร์ที่ยังไม่ล็อกต้นทุน
+          if (!((o as any).cost_locked && Number((o as any).cost_total_thb || 0) > 0)) {
+            costGoods += pm.cost_thb * qty;
+          }
+
           costShip  += pm.ship_thb  * qty;
           if (i === 0) {
             costBox += pm.box_price;
@@ -103,7 +119,10 @@ export default function FinanceMonthly() {
         orders: mOrders.length, revenue,
         cost_goods: costGoods, cost_ship: costShip,
         cost_box: costBox, cost_bubble: costBub,
-        cost_ad: costAd, cost_other: costOther, profit,
+        cost_ad: costAd, cost_other: costOther,
+        cost_snapshot_orders: costSnapshotOrders,
+        cost_master_orders: costMasterOrders,
+        profit,
       });
     }
 
@@ -115,16 +134,23 @@ export default function FinanceMonthly() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.map(r => ({
       เดือน: r.label, ออเดอร์: r.orders, รายรับ: r.revenue,
-      ต้นทุนสินค้า: r.cost_goods, ขนส่ง: r.cost_ship,
-      'กล่อง+บั้บ': r.cost_box + r.cost_bubble, โฆษณา: r.cost_ad,
+      ต้นทุนสินค้า: r.cost_goods, ใช้_snapshot: r.cost_snapshot_orders, ยังไม่ล็อก: r.cost_master_orders,
+      ขนส่ง: r.cost_ship, 'กล่อง+บั้บ': r.cost_box + r.cost_bubble, โฆษณา: r.cost_ad,
       อื่นๆ: r.cost_other, กำไร: r.profit,
     }))), `${year}`);
     XLSX.writeFile(wb, `Finance_Monthly_${year}.xlsx`);
   };
 
   const totals = rows.reduce(
-    (s, r) => ({ orders: s.orders + r.orders, revenue: s.revenue + r.revenue, profit: s.profit + r.profit, cost: s.cost + (r.revenue - r.profit) }),
-    { orders: 0, revenue: 0, profit: 0, cost: 0 }
+    (s, r) => ({
+      orders: s.orders + r.orders,
+      revenue: s.revenue + r.revenue,
+      profit: s.profit + r.profit,
+      cost: s.cost + (r.revenue - r.profit),
+      snapshot: s.snapshot + r.cost_snapshot_orders,
+      master: s.master + r.cost_master_orders,
+    }),
+    { orders: 0, revenue: 0, profit: 0, cost: 0, snapshot: 0, master: 0 }
   );
   const maxRev = Math.max(...rows.map(r => r.revenue), 1);
 
@@ -147,6 +173,25 @@ export default function FinanceMonthly() {
         {loading && (
           <span className="text-xs text-slate-400">กำลังคำนวณ... (เร็วกว่าเดิมมาก ✓)</span>
         )}
+      </div>
+
+      {/* Cost source summary */}
+      <div className="shrink-0 grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+        <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+          <div className="text-xs text-emerald-600 font-semibold">ใช้ต้นทุน snapshot</div>
+          <div className="text-xl font-bold text-emerald-700">{totals.snapshot.toLocaleString()} ออเดอร์</div>
+          <div className="text-[11px] text-emerald-500 mt-0.5">กำไรย้อนหลังไม่เปลี่ยน</div>
+        </div>
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+          <div className="text-xs text-amber-600 font-semibold">ยังไม่ล็อกต้นทุน</div>
+          <div className="text-xl font-bold text-amber-700">{totals.master.toLocaleString()} ออเดอร์</div>
+          <div className="text-[11px] text-amber-500 mt-0.5">ยังใช้ต้นทุน master เดิม</div>
+        </div>
+        <div className="bg-white border border-slate-100 rounded-xl p-3">
+          <div className="text-xs text-slate-500 font-semibold">ต้นทุนรวมทั้งปี</div>
+          <div className="text-xl font-bold text-slate-700">฿{fmt(totals.cost)}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">รวมสินค้า/ขนส่ง/กล่อง/ค่าใช้จ่าย</div>
+        </div>
       </div>
 
       {/* Bar chart */}
@@ -183,6 +228,7 @@ export default function FinanceMonthly() {
                 <th className="p-3 text-center">ออเดอร์</th>
                 <th className="p-3 text-right">รายรับ</th>
                 <th className="p-3 text-right">ต้นทุนสินค้า</th>
+                <th className="p-3 text-center">แหล่งต้นทุน</th>
                 <th className="p-3 text-right">ขนส่ง+กล่อง</th>
                 <th className="p-3 text-right">โฆษณา</th>
                 <th className="p-3 text-right">อื่นๆ</th>
@@ -197,6 +243,12 @@ export default function FinanceMonthly() {
                   <td className="p-3 text-center text-slate-500">{r.orders}</td>
                   <td className="p-3 text-right font-bold text-emerald-600">฿{fmt(r.revenue)}</td>
                   <td className="p-3 text-right text-slate-600">฿{fmt(r.cost_goods)}</td>
+                  <td className="p-3 text-center">
+                    <div className="flex flex-col items-center gap-0.5">
+                      {r.cost_snapshot_orders > 0 && <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-bold">snapshot {r.cost_snapshot_orders}</span>}
+                      {r.cost_master_orders > 0 && <span className="px-2 py-0.5 bg-amber-50 text-amber-600 rounded-full text-[10px] font-bold">master {r.cost_master_orders}</span>}
+                    </div>
+                  </td>
                   <td className="p-3 text-right text-slate-600">฿{fmt(r.cost_ship + r.cost_box + r.cost_bubble)}</td>
                   <td className="p-3 text-right text-orange-600">฿{fmt(r.cost_ad)}</td>
                   <td className="p-3 text-right text-slate-500">฿{fmt(r.cost_other)}</td>
@@ -214,7 +266,7 @@ export default function FinanceMonthly() {
                 <td className="p-3 font-bold">รวมปี {year}</td>
                 <td className="p-3 text-center font-bold">{totals.orders}</td>
                 <td className="p-3 text-right font-bold text-emerald-600">฿{fmt(totals.revenue)}</td>
-                <td colSpan={4} className="p-3 text-right text-slate-500">ต้นทุนรวม ฿{fmt(totals.cost)}</td>
+                <td colSpan={5} className="p-3 text-right text-slate-500">ต้นทุนรวม ฿{fmt(totals.cost)} · snapshot {totals.snapshot} / master {totals.master}</td>
                 <td className={`p-3 text-right font-bold text-lg ${totals.profit >= 0 ? 'text-teal-600' : 'text-red-500'}`}>
                   {totals.profit < 0 ? '-' : ''}฿{fmt(Math.abs(totals.profit))}
                 </td>
