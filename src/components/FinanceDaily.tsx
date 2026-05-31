@@ -10,8 +10,9 @@ type DailyOrder = {
   id: string; order_no: string;
   total_thb: number; shipping_thb: number | null; raw_prod: string | null;
   promo_ids: string[] | null; quantities: string | null; quantity: number | null;
+  cost_locked?: boolean | null; cost_total_thb?: number | null; cost_lot_nos?: any;
   customers: { name: string } | null;
-  _cost_goods?: number; _cost_box?: number; _cost_bubble?: number;
+  _cost_goods?: number; _cost_box?: number; _cost_bubble?: number; _cost_source?: 'snapshot' | 'master';
   _vat?: number; _com?: number; _ship?: number;
 };
 
@@ -48,7 +49,7 @@ export default function FinanceDaily() {
       const PAGE = 1000;
       while (true) {
         const { data: chunk, error } = await supabase.from('orders')
-          .select('id, order_no, order_date, total_thb, shipping_thb, raw_prod, promo_ids, quantities, quantity, tracking_no, box_id, bubble_id_pack, customers(name), boxes(price_thb), bubbles_pack:bubble_id_pack(price_thb, length_cm)')
+          .select('id, order_no, order_date, total_thb, shipping_thb, raw_prod, promo_ids, quantities, quantity, tracking_no, box_id, bubble_id_pack, cost_locked, cost_total_thb, cost_lot_nos, customers(name), boxes(price_thb), bubbles_pack:bubble_id_pack(price_thb, length_cm)')
           .gte('order_date', dateFrom).lte('order_date', dateTo)
           .order('order_date')
           .range(page * PAGE, (page + 1) * PAGE - 1);
@@ -114,13 +115,28 @@ export default function FinanceDaily() {
           if (o.promo_ids?.length) {
             const qtys = String(o.quantities||o.quantity||'1').split('|');
             let oGoods = 0, oBox = 0, oBubble = 0, oShipFromPromo = 0;
+
+            // ถ้าออเดอร์ล็อกต้นทุนแล้ว ให้ใช้ cost snapshot ของออเดอร์ทันที
+            // เพื่อกันกำไรย้อนหลังเปลี่ยนเมื่อ products_master.cost_thb เปลี่ยน
+            if ((o as any).cost_locked && Number((o as any).cost_total_thb || 0) > 0) {
+              oGoods = Number((o as any).cost_total_thb || 0);
+              o._cost_source = 'snapshot';
+            } else {
+              o._cost_source = 'master';
+            }
+
             for (let i = 0; i < o.promo_ids.length; i++) {
               const promo = promoMap[o.promo_ids[i]]; if (!promo) continue;
               const qty = Number(qtys[i]?.trim())||1;
               const pieces = extractQty(promo.name) * qty;
               const master = promo.products_master;
               const box = promo.boxes; const bub = promo.bubbles;
-              oGoods += master?.cost_thb ? Number(master.cost_thb)*pieces : 0;
+
+              // ใช้ต้นทุน master เฉพาะออเดอร์ที่ยังไม่ล็อกต้นทุน
+              if (o._cost_source !== 'snapshot') {
+                oGoods += master?.cost_thb ? Number(master.cost_thb)*pieces : 0;
+              }
+
               // ค่ากล่อง: ใช้จาก promo แรกที่มีกล่องจริง (price > 0)
               if (oBox === 0 && box?.price_thb && Number(box.price_thb) > 0) oBox = Number(box.price_thb);
               if (oBubble === 0 && bub?.price_thb && Number(bub.price_thb) > 0 && bub?.length_cm > 0) oBubble = Number(bub.price_thb);
@@ -155,6 +171,8 @@ export default function FinanceDaily() {
 
   const totRevenue   = summaries.reduce((s,d) => s+d.revenue, 0);
   const totCostGoods = summaries.reduce((s,d) => s+d.cost_goods, 0);
+  const totCostSnapshotOrders = summaries.reduce((s,d) => s + d.orders.filter(o => o._cost_source === 'snapshot').length, 0);
+  const totCostMasterOrders = summaries.reduce((s,d) => s + d.orders.filter(o => o._cost_source === 'master').length, 0);
   const totCostBox   = summaries.reduce((s,d) => s+d.cost_box, 0);
   const totCostBubble= summaries.reduce((s,d) => s+d.cost_bubble, 0);
   const totVat       = summaries.reduce((s,d) => s+d.vat, 0);
@@ -221,6 +239,12 @@ export default function FinanceDaily() {
           <div className="bg-slate-50 border rounded-xl p-4 space-y-1">
             <div className="text-xs text-slate-500 font-semibold mb-1.5">ต้นทุนรวม</div>
             <div className="flex justify-between text-[11px]"><span className="text-slate-400">สินค้า</span><span className="font-medium">฿{fmt(totCostGoods)}</span></div>
+            {totCostSnapshotOrders > 0 && (
+              <div className="flex justify-between text-[11px]"><span className="text-emerald-500">ใช้ snapshot</span><span className="font-medium text-emerald-600">{totCostSnapshotOrders} ออเดอร์</span></div>
+            )}
+            {totCostMasterOrders > 0 && (
+              <div className="flex justify-between text-[11px]"><span className="text-amber-500">ยังไม่ล็อก</span><span className="font-medium text-amber-600">{totCostMasterOrders} ออเดอร์</span></div>
+            )}
             <div className="flex justify-between text-[11px]"><span className="text-slate-400">VAT 5%</span><span className="font-medium">฿{fmt(totVat)}</span></div>
             <div className="flex justify-between text-[11px]"><span className="text-slate-400">COM 1.5%</span><span className="font-medium">฿{fmt(totCom)}</span></div>
             <div className="flex justify-between text-[11px]"><span className="text-slate-400">ขนส่ง</span><span className="font-medium">฿{fmt(totShip)}</span></div>
@@ -339,7 +363,11 @@ export default function FinanceDaily() {
                               })}
                             </td>
                             <td className={`${colClass} text-emerald-600 font-medium`}>฿{fmt(Number(o.total_thb))}</td>
-                            <td className={`${colClass} text-slate-500`}>฿{fmt(o._cost_goods||0)}</td>
+                            <td className={`${colClass} ${o._cost_source === 'snapshot' ? 'text-emerald-600 font-bold' : 'text-slate-500'}`}>
+                              <div>฿{fmt(o._cost_goods||0)}</div>
+                              {o._cost_source === 'snapshot' && <div className="text-[9px] text-emerald-500">snapshot</div>}
+                              {o._cost_source === 'master' && <div className="text-[9px] text-amber-500">master</div>}
+                            </td>
                             <td className={`${colClass} text-slate-500`}>฿{fmt(vat)}</td>
                             <td className={`${colClass} text-slate-500`}>฿{fmt(com)}</td>
                             <td className={`${colClass} text-slate-500`}>฿{fmt(ship)}</td>
