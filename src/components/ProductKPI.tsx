@@ -14,7 +14,12 @@ type PromoKPI = {
   name:       string;
   qty:        number;          // จำนวนชิ้นต่อแพ็ค
   price:      number;          // ราคาขาย
-  cost_goods: number;          // ต้นทุนสินค้า (cost_thb × qty)
+  cost_goods: number;          // ต้นทุนสินค้า master (cost_thb × qty)
+  master_cost_per_unit: number;
+  lot_unit_cost: number | null;
+  lot_cost_goods: number | null;
+  lot_no: string | null;
+  lot_remaining_qty: number | null;
   box_price:  number;          // ราคากล่อง
   bub_price:  number;          // ราคาบั้บเบิ้ล
   ship_thb:   number;          // ค่าขนส่ง
@@ -58,9 +63,28 @@ export default function ProductKPI() {
       .eq('active', true)
       .order('id');
 
+    const masterIds = [...new Set((promosData || []).map((p: any) => String(p.master_id || '')).filter(Boolean))];
+    const lotMap: Record<string, any> = {};
+    if (masterIds.length > 0) {
+      const { data: lotsData } = await supabase
+        .from('product_cost_lots')
+        .select('id, lot_no, product_id, product_name, remaining_qty, unit_cost, status, created_at')
+        .in('product_id', masterIds)
+        .eq('status', 'active')
+        .gt('remaining_qty', 0)
+        .order('created_at', { ascending: false });
+
+      (lotsData || []).forEach((lot: any) => {
+        const pid = String(lot.product_id || '');
+        if (pid && !lotMap[pid]) lotMap[pid] = lot;
+      });
+    }
+
     const rows: PromoKPI[] = (promosData || []).map((p: any) => {
       const qty       = extractQty(p.name);
       const costPer   = Number(p.products_master?.cost_thb || 0);
+      const latestLot = lotMap[String(p.master_id || '')];
+      const lotUnitCost = latestLot ? Number(latestLot.unit_cost || 0) : null;
       const boxPrice  = Number(p.boxes?.price_thb || 0);
       const bubLen    = Number(p.bubbles?.length_cm || 0);
       const bubPrice  = bubLen > 0 ? Number(p.bubbles?.price_thb || 0) : 0;
@@ -72,6 +96,11 @@ export default function ProductKPI() {
         qty,
         price:      Number(p.price_thb || 0),
         cost_goods: costPer * qty,
+        master_cost_per_unit: costPer,
+        lot_unit_cost: lotUnitCost,
+        lot_cost_goods: lotUnitCost !== null ? lotUnitCost * qty : null,
+        lot_no: latestLot?.lot_no || null,
+        lot_remaining_qty: latestLot ? Number(latestLot.remaining_qty || 0) : null,
         box_price:  boxPrice,
         bub_price:  bubPrice,
         ship_thb:   Number(p.ship_thb || 0),
@@ -90,14 +119,15 @@ export default function ProductKPI() {
   };
 
   // คำนวณ KPI ต่อแถว
-  const calcRow = (p: PromoKPI, shipMap: Record<string,number> = shipActualMap) => {
+  const calcRow = (p: PromoKPI, shipMap: Record<string,number> = shipActualMap, source: 'master' | 'lot' = 'master') => {
     const vatVal   = parseFloat(vatMap[p.promo_id] || '0') || 0;
     const com      = p.price * 0.015;
     const free2    = p.price * 0.02;
     // ขนส่ง: ใช้จริงเฉลี่ยถ้ามี ไม่งั้นใช้ประมาณ
     const actualShip = shipMap[p.promo_id];
     const shipUsed = (actualShip !== undefined && actualShip !== null) ? actualShip : p.ship_thb;
-    const totalCost = p.cost_goods + p.box_price + p.bub_price + shipUsed + vatVal + com + free2;
+    const goodsCost = source === 'lot' && p.lot_cost_goods !== null ? p.lot_cost_goods : p.cost_goods;
+    const totalCost = goodsCost + p.box_price + p.bub_price + shipUsed + vatVal + com + free2;
     const profit   = p.price - totalCost;
     const margin   = profit - 20;                          // กำไร - 20
     const roas     = margin !== 0 ? p.price / margin : 0; // ราคาขาย ÷ Margin
@@ -131,13 +161,18 @@ export default function ProductKPI() {
   const exportExcel = () => {
     const rows = filtered.map(p => {
       const { vatVal, com, free2, totalCost, profit, margin, roas } = calcRow(p);
+      const lotCalc = calcRow(p, shipActualMap, 'lot');
       return {
         'รหัส':            p.promo_id,
         'ชื่อสั้น':         p.short_name || '-',
         'ชื่อโปร':          p.name,
         'จำนวน':           p.qty,
         'ราคาขาย':         p.price,
-        'ต้นทุนสินค้า':    p.cost_goods,
+        'ต้นทุนสินค้า master': p.cost_goods,
+        'ล็อตล่าสุด':       p.lot_no || '',
+        'ต้นทุนสินค้า lot': p.lot_cost_goods ?? '',
+        'คงเหลือล็อต':     p.lot_remaining_qty ?? '',
+        'กำไรจาก lot':      p.lot_cost_goods !== null ? lotCalc.profit : '',
         'กล่อง (฿)':       p.box_price,
         'บั้บเบิ้ล (฿)':   p.bub_price,
         'ค่าขนส่ง (฿)':    p.ship_thb,
@@ -213,9 +248,28 @@ export default function ProductKPI() {
         </div>
       </div>
 
+      {/* Lot cost summary */}
+      <div className="shrink-0 grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+          <div className="text-xs text-emerald-600 font-semibold">มีล็อตต้นทุนใช้งาน</div>
+          <div className="text-xl font-bold text-emerald-700">{filtered.filter(p => p.lot_cost_goods !== null).length.toLocaleString()} โปร</div>
+          <div className="text-[11px] text-emerald-500 mt-0.5">ใช้ดูราคาจากล็อตล่าสุด</div>
+        </div>
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+          <div className="text-xs text-amber-600 font-semibold">ยังไม่มีล็อตต้นทุน</div>
+          <div className="text-xl font-bold text-amber-700">{filtered.filter(p => p.lot_cost_goods === null).length.toLocaleString()} โปร</div>
+          <div className="text-[11px] text-amber-500 mt-0.5">ยังอิงต้นทุน master เท่านั้น</div>
+        </div>
+        <div className="bg-white border border-slate-100 rounded-xl p-3">
+          <div className="text-xs text-slate-500 font-semibold">ล็อตคงเหลือรวม</div>
+          <div className="text-xl font-bold text-slate-700">{filtered.reduce((sum, p) => sum + Number(p.lot_remaining_qty || 0), 0).toLocaleString()} ชิ้น</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">นับจากล็อต active ล่าสุดของแต่ละสินค้า</div>
+        </div>
+      </div>
+
       {/* Table */}
       <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-        <table className="text-xs w-full" style={{ minWidth: '1300px' }}>
+        <table className="text-xs w-full" style={{ minWidth: '1550px' }}>
           <thead className="bg-slate-800 text-slate-200 sticky top-0 z-10">
             <tr>
               <th className="p-3 w-8">
@@ -228,7 +282,9 @@ export default function ProductKPI() {
               <th className="p-3 text-left whitespace-nowrap">ชื่อโปร</th>
               <th className="p-3 text-center whitespace-nowrap">จำนวน</th>
               <th className="p-3 text-right whitespace-nowrap text-emerald-300">ราคาขาย</th>
-              <th className="p-3 text-right whitespace-nowrap">ต้นทุนสินค้า</th>
+              <th className="p-3 text-right whitespace-nowrap">ต้นทุน master</th>
+              <th className="p-3 text-right whitespace-nowrap text-emerald-300">ต้นทุนล็อตล่าสุด</th>
+              <th className="p-3 text-center whitespace-nowrap text-emerald-300">ล็อตคงเหลือ</th>
               <th className="p-3 text-right whitespace-nowrap">กล่อง (฿)</th>
               <th className="p-3 text-right whitespace-nowrap">บั้บเบิ้ล (฿)</th>
               <th className="p-3 text-right whitespace-nowrap">ขนส่งประมาณ</th>
@@ -244,15 +300,16 @@ export default function ProductKPI() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={17} className="p-8 text-center text-slate-400">
+              <tr><td colSpan={20} className="p-8 text-center text-slate-400">
                 <RefreshCw size={16} className="animate-spin inline mr-2"/>กำลังโหลด...
               </td></tr>
             )}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={17} className="p-8 text-center text-slate-400">ไม่พบสินค้า</td></tr>
+              <tr><td colSpan={20} className="p-8 text-center text-slate-400">ไม่พบสินค้า</td></tr>
             )}
             {filtered.map(p => {
               const { vatVal, com, free2, totalCost, profit, margin, roas } = calcRow(p);
+              const lotCalc = calcRow(p, shipActualMap, 'lot');
               const isSelected = selectedIds.has(p.promo_id);
               return (
                 <tr key={p.promo_id}
@@ -275,7 +332,27 @@ export default function ProductKPI() {
                     <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-bold">{p.qty}</span>
                   </td>
                   <td className="p-3 text-right font-bold text-emerald-600">฿{fmt(p.price)}</td>
-                  <td className="p-3 text-right text-slate-500">฿{fmt(p.cost_goods)}</td>
+                  <td className="p-3 text-right text-slate-500">
+                    <div>฿{fmt(p.cost_goods)}</div>
+                    <div className="text-[9px] text-slate-400">฿{fmt(p.master_cost_per_unit)} × {p.qty}</div>
+                  </td>
+                  <td className="p-3 text-right">
+                    {p.lot_cost_goods !== null ? (
+                      <div>
+                        <div className="font-bold text-emerald-600">฿{fmt(p.lot_cost_goods)}</div>
+                        <div className="text-[9px] text-emerald-500">฿{fmt(p.lot_unit_cost || 0)} × {p.qty}</div>
+                        <div className={`text-[9px] ${lotCalc.profit >= 0 ? 'text-teal-500' : 'text-red-500'}`}>กำไรล็อต ฿{fmt(lotCalc.profit)}</div>
+                      </div>
+                    ) : <span className="text-slate-300">-</span>}
+                  </td>
+                  <td className="p-3 text-center">
+                    {p.lot_no ? (
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold">{Number(p.lot_remaining_qty || 0).toLocaleString()} ชิ้น</span>
+                        <span className="text-[9px] text-slate-400 font-mono">{p.lot_no}</span>
+                      </div>
+                    ) : <span className="text-slate-300">-</span>}
+                  </td>
                   <td className="p-3 text-right text-slate-500">
                     {p.box_price > 0 ? `฿${fmt(p.box_price)}` : <span className="text-slate-300">-</span>}
                   </td>
@@ -331,7 +408,7 @@ export default function ProductKPI() {
                 <tr>
                   <td colSpan={5} className="p-3 text-slate-500">รวม {filtered.length} โปร</td>
                   <td className="p-3 text-right text-emerald-600">฿{fmt(totPrice)}</td>
-                  <td colSpan={7}/>
+                  <td colSpan={10}/>
                   <td className={`p-3 text-right ${totProfit >= 0 ? 'text-teal-600' : 'text-red-500'}`}>
                     {totProfit < 0 ? '-' : ''}฿{fmt(Math.abs(totProfit))}
                   </td>
