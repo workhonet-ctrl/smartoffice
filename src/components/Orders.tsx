@@ -597,7 +597,16 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [dupTrackings, setDupTrackings] = useState<DupTracking[]>([]);
   const [checkingDups, setCheckingDups] = useState(false);
 
-  useEffect(() => { loadOrders(); loadPromoOptions(); }, []);
+  useEffect(() => {
+    const pendingFilter = localStorage.getItem('smartoffice_orders_cost_filter');
+    if (pendingFilter === 'unlocked') {
+      setFilterCostLock('unlocked');
+      localStorage.removeItem('smartoffice_orders_cost_filter');
+    }
+
+    loadOrders();
+    loadPromoOptions();
+  }, []);
   useEffect(() => { if (orderPage !== 'all') setOrderPage(0); }, [search, dateFrom, dateTo, dateField, filterRoute, filterStatus, filterPay, filterTracking, filterShipCost, filterCostLock]);
 
   // refresh เมื่อ switch กลับมาแท็บ orders
