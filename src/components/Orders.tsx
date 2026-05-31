@@ -574,6 +574,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [costLockTarget, setCostLockTarget] = useState<Order | null>(null);
   const [costLocking, setCostLocking] = useState(false);
+  const [showBulkCostLockConfirm, setShowBulkCostLockConfirm] = useState(false);
+  const [bulkCostLocking, setBulkCostLocking] = useState(false);
   // ข้อ 3: ref map สำหรับ scroll-to row
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -1145,6 +1147,57 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     }
   };
 
+  const handleBulkLockOrderCost = async () => {
+    if (bulkCostLocking || selectedOrders.size === 0) return;
+
+    const targets = orders.filter(o => selectedOrders.has(o.id) && !(o as any).cost_locked);
+
+    if (targets.length === 0) {
+      showToast('ไม่มีออเดอร์ที่ต้องล็อกต้นทุนในรายการที่เลือก', 'error');
+      setShowBulkCostLockConfirm(false);
+      return;
+    }
+
+    setBulkCostLocking(true);
+
+    let ok = 0;
+    let already = 0;
+    let fail = 0;
+    const errors: string[] = [];
+
+    try {
+      for (const order of targets) {
+        try {
+          const { data, error } = await supabase.rpc('lock_order_cost_fifo', {
+            p_order_id: order.id,
+          });
+
+          if (error) throw error;
+
+          const result: any = data || {};
+          if (result.already_locked) already++;
+          else ok++;
+        } catch (err: any) {
+          fail++;
+          errors.push(`${order.order_no}: ${err.message || 'unknown'}`);
+        }
+      }
+
+      const msg = `ล็อกต้นทุนเสร็จแล้ว ✓ สำเร็จ ${ok} ใบ${already ? ` · ล็อกไว้แล้ว ${already} ใบ` : ''}${fail ? ` · ล้มเหลว ${fail} ใบ` : ''}`;
+      showToast(msg, fail ? 'error' : 'success');
+
+      if (errors.length > 0) {
+        console.warn('Bulk cost lock errors:', errors);
+      }
+
+      setShowBulkCostLockConfirm(false);
+      setSelectedOrders(new Set());
+      await loadOrders();
+    } finally {
+      setBulkCostLocking(false);
+    }
+  };
+
   const uniqueRawProds = [...new Set(importedOrders.flatMap(o =>
     String(o.raw_prod).split('|').map((s: string) => s.trim()).filter(Boolean)
   ))];
@@ -1232,6 +1285,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const costLockedTotal = orders.reduce((sum, o) => sum + ((o as any).cost_locked ? Number((o as any).cost_total_thb || 0) : 0), 0);
   const filteredCostLockedCount = filtered.filter(o => (o as any).cost_locked).length;
   const filteredCostUnlockedCount = filtered.filter(o => !(o as any).cost_locked).length;
+  const selectedUnlockedOrders = orders.filter(o => selectedOrders.has(o.id) && !(o as any).cost_locked);
+  const selectedLockedOrders = orders.filter(o => selectedOrders.has(o.id) && (o as any).cost_locked);
 
   return (
     <div className="flex flex-col h-screen p-3 sm:p-6 pb-2">
@@ -1451,6 +1506,14 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
                   </button>
                 )}
               </div>
+            )}
+            {/* Bulk cost lock */}
+            {selectedOrders.size > 0 && (
+              <button onClick={() => setShowBulkCostLockConfirm(true)}
+                disabled={bulkCostLocking || selectedUnlockedOrders.length === 0}
+                className="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-bold hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
+                🔐 ล็อกต้นทุนที่เลือก ({selectedUnlockedOrders.length})
+              </button>
             )}
             {/* Clear filters */}
             {(filterRoute || filterStatus || filterPay || filterTracking !== 'all' || filterShipCost !== 'all' || filterCostLock !== 'all' || dateFrom || dateTo || search) && (
@@ -1756,6 +1819,59 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Modal: ยืนยันล็อกต้นทุนหลายออเดอร์ */}
+      {showBulkCostLockConfirm && (
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[2rem] w-full max-w-lg shadow-2xl border border-emerald-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-emerald-50 via-cyan-50 to-amber-50 px-6 py-6 border-b border-emerald-100 relative">
+              <button onClick={() => setShowBulkCostLockConfirm(false)} disabled={bulkCostLocking}
+                className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 disabled:opacity-50">
+                ✕
+              </button>
+              <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-emerald-500 to-cyan-500 text-white flex items-center justify-center text-3xl shadow-lg mb-3">
+                🔐
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-800">ล็อกต้นทุนหลายออเดอร์ใช่ไหม?</h3>
+              <p className="text-sm text-slate-500 mt-2 leading-6">
+                ระบบจะล็อกต้นทุนเฉพาะออเดอร์ที่เลือกและยังไม่ล็อก โดยตัดล็อตต้นทุนแบบ FIFO ทีละใบ
+              </p>
+            </div>
+
+            <div className="px-6 py-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-center">
+                  <div className="text-xs text-slate-400">เลือกทั้งหมด</div>
+                  <div className="text-xl font-extrabold text-slate-800">{selectedOrders.size.toLocaleString()}</div>
+                </div>
+                <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3 text-center">
+                  <div className="text-xs text-emerald-500">จะล็อก</div>
+                  <div className="text-xl font-extrabold text-emerald-700">{selectedUnlockedOrders.length.toLocaleString()}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-center">
+                  <div className="text-xs text-slate-400">ล็อกแล้ว</div>
+                  <div className="text-xl font-extrabold text-slate-600">{selectedLockedOrders.length.toLocaleString()}</div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700 leading-5">
+                ⚠️ ถ้าล็อตต้นทุนไม่พอ บางออเดอร์อาจล็อกไม่สำเร็จ ระบบจะแจ้งจำนวนสำเร็จ/ล้มเหลวหลังทำงานเสร็จ
+              </div>
+            </div>
+
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setShowBulkCostLockConfirm(false)} disabled={bulkCostLocking}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button onClick={handleBulkLockOrderCost} disabled={bulkCostLocking || selectedUnlockedOrders.length === 0}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:from-emerald-600 hover:to-cyan-600 font-bold shadow disabled:opacity-50">
+                {bulkCostLocking ? 'กำลังล็อก...' : `ยืนยันล็อก ${selectedUnlockedOrders.length} ใบ`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
