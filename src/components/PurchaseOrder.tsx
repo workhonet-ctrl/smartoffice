@@ -8,6 +8,7 @@ import {
 type Supplier = { id: string; name: string; tel: string | null; address: string | null; note: string | null };
 type StockItem = { id: string; name: string; unit: string; type: string };
 type ProductMaster = { id: string; name: string; cost_thb?: number | null };
+type POCostLot = { id: string; lot_no: string; source_id: string | null; source_no: string | null; product_name: string; initial_qty: number; remaining_qty: number; unit: string; unit_cost: number; status: string; created_at: string };
 type POItem    = { key: string; stock_item_id: string | null; name: string; qty: number; unit: string; price: number };
 type PO        = {
   id: string; po_no: string; po_date: string;
@@ -93,6 +94,7 @@ export default function PurchaseOrder() {
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [products, setProducts] = useState<ProductMaster[]>([]);
   const [poList, setPoList] = useState<PO[]>([]);
+  const [poCostLots, setPOCostLots] = useState<POCostLot[]>([]);
   const [loading, setLoading] = useState(false);
 
   // Form state
@@ -242,16 +244,24 @@ export default function PurchaseOrder() {
 
   const loadData = async () => {
     setLoading(true);
-    const [{ data: s }, { data: si }, { data: prod }, { data: po }] = await Promise.all([
+    const [{ data: s }, { data: si }, { data: prod }, { data: po }, { data: lots }] = await Promise.all([
       supabase.from('suppliers').select('*').eq('active', true).order('name'),
       supabase.from('stock_items').select('id,name,unit,type').eq('active', true).order('name'),
       supabase.from('products_master').select('id,name,cost_thb').order('name'),
       supabase.from('purchase_orders').select('*').order('created_at', { ascending: false }).limit(50),
+      supabase
+        .from('product_cost_lots')
+        .select('id, lot_no, source_id, source_no, product_name, initial_qty, remaining_qty, unit, unit_cost, status, created_at')
+        .eq('source_type', 'purchase_order')
+        .in('status', ['active', 'depleted'])
+        .order('created_at', { ascending: false })
+        .limit(300),
     ]);
     if (s) setSuppliers(s);
     if (si) setStockItems(si);
     if (prod) setProducts(prod as ProductMaster[]);
     if (po) setPoList(po as PO[]);
+    if (lots) setPOCostLots(lots as POCostLot[]);
     setLoading(false);
   };
 
@@ -281,6 +291,12 @@ export default function PurchaseOrder() {
   const supplierOpts = suppliers.map(s => ({ id: s.id, label: s.name, sub: s.tel || '' }));
   const stockOpts    = stockItems.map(s => ({ id: s.id, label: s.name, sub: s.unit }));
   const productOpts  = products.map(p => ({ id: p.id, label: p.name, sub: p.cost_thb ? `ต้นทุนเดิม ฿${Number(p.cost_thb).toFixed(2)}` : '' }));
+  const lotsByPOId = poCostLots.reduce((map, lot) => {
+    if (!lot.source_id) return map;
+    if (!map[lot.source_id]) map[lot.source_id] = [];
+    map[lot.source_id].push(lot);
+    return map;
+  }, {} as Record<string, POCostLot[]>);
 
   const addRow    = () => setPoItems(p => [...p, { key: String(Date.now()), stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
   const removeRow = (key: string) => setPoItems(p => p.filter(it => it.key !== key));
@@ -822,6 +838,12 @@ export default function PurchaseOrder() {
   const poItemKey = (it: POItem, idx: number) => it.key || `${idx}`;
 
   const openCreateLotFromPO = async (po: PO) => {
+    const existingLots = lotsByPOId[po.id] || [];
+    if (existingLots.length > 0) {
+      showToast(`PO นี้สร้าง Lot แล้ว: ${existingLots.map(l => l.lot_no).join(', ')}`, 'error');
+      return;
+    }
+
     if (po.status !== 'received') {
       showToast('ต้องรับเข้า/ปิดงาน PO ก่อน จึงสร้างล็อตต้นทุนจาก PO ได้', 'error');
       return;
@@ -998,6 +1020,19 @@ export default function PurchaseOrder() {
       if (txnErr) throw txnErr;
 
       showToast(`✓ สร้างล็อต ${lotNo} จาก PO สำเร็จ · ต้นทุน/หน่วย ฿${unitCost.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+      setPOCostLots(prev => [{
+        id: lot.id,
+        lot_no: lotNo,
+        source_id: lotFromPOTarget.id,
+        source_no: lotFromPOTarget.po_no,
+        product_name: product.name,
+        initial_qty: Number(lotOutputQty || 0),
+        remaining_qty: Number(lotOutputQty || 0),
+        unit: lotOutputUnit || 'ชิ้น',
+        unit_cost: unitCost,
+        status: 'active',
+        created_at: lot.created_at,
+      }, ...prev]);
       setLotFromPOTarget(null);
       setLotIncludedKeys(new Set());
       await loadData();
@@ -1678,12 +1713,28 @@ export default function PurchaseOrder() {
                         </button>
                       )}
 
-                      {po.status === 'received' && (
-                        <button onClick={() => openCreateLotFromPO(po)}
-                          className="flex items-center gap-1 px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs hover:bg-emerald-200 font-bold">
-                          <PackageCheck size={11}/> สร้าง Lot
-                        </button>
-                      )}
+                      {po.status === 'received' && (() => {
+                        const poLots = lotsByPOId[po.id] || [];
+                        if (poLots.length > 0) {
+                          return (
+                            <div className="px-3 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold border border-emerald-100 min-w-[118px]">
+                              <div className="flex items-center gap-1">
+                                <PackageCheck size={12}/> สร้าง Lot แล้ว
+                              </div>
+                              <div className="mt-1 text-[10px] font-mono text-emerald-600">
+                                {poLots.map(l => l.lot_no).join(', ')}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <button onClick={() => openCreateLotFromPO(po)}
+                            className="flex items-center gap-1 px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs hover:bg-emerald-200 font-bold">
+                            <PackageCheck size={11}/> สร้าง Lot
+                          </button>
+                        );
+                      })()}
 
                       {canDeletePO(po.status) && (
                         <button onClick={() => setDeleteTarget(po)}
