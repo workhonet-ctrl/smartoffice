@@ -1,16 +1,29 @@
 import { useState, useEffect, type ChangeEvent } from 'react';
 import { supabase } from '../lib/supabase';
-import { Plus, Search, Trash2, X, Upload, Download, Truck } from 'lucide-react';
+import { Plus, Search, Trash2, X, Upload, Download, Truck, PackageCheck, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 type ExpRecord = {
   id: string; doc_no: string | null; expense_date: string;
   description: string; category: string; amount_thb: number;
   note: string | null; created_at: string;
+  ref_po_id?: string | null;
 };
 type PO = {
   id: string; po_no: string; po_date: string; supplier_name: string;
   total_thb: number; status: string; items: any[];
+};
+type POCostLot = {
+  id: string;
+  lot_no: string;
+  source_id: string | null;
+  source_no: string | null;
+  product_name: string;
+  initial_qty: number;
+  remaining_qty: number;
+  unit: string;
+  unit_cost: number;
+  status: string;
 };
 type SubTab = 'records' | 'po' | 'ads' | 'shipping' | 'all';
 const EXP_CATS = ['ค่าวัตถุดิบ/สินค้า','ค่าจัดส่ง','ค่าบรรจุภัณฑ์','ค่าเงินเดือน','ค่าโฆษณา','ค่าสาธารณูปโภค','ค่าเช่า','อื่นๆ'];
@@ -34,6 +47,7 @@ export default function FinanceExpenses({
   }, [initialSubTab]);
   const [records, setRecords] = useState<ExpRecord[]>([]);
   const [pos, setPOs]         = useState<PO[]>([]);
+  const [poCostLots, setPOCostLots] = useState<POCostLot[]>([]);
   const [shippingRows, setShippingRows] = useState<Array<{
     id: string; tracking: string; date: string; source: 'flash' | 'myorder'; amount: number;
   }>>([]);
@@ -62,10 +76,20 @@ export default function FinanceExpenses({
   };
 
   const loadPOs = async () => {
-    const { data } = await supabase.from('purchase_orders').select('*')
-      .gte('po_date', dateFrom).lte('po_date', dateTo)
-      .order('po_date', { ascending:false });
+    const [{ data }, { data: lots }] = await Promise.all([
+      supabase.from('purchase_orders').select('*')
+        .gte('po_date', dateFrom).lte('po_date', dateTo)
+        .order('po_date', { ascending:false }),
+      supabase
+        .from('product_cost_lots')
+        .select('id, lot_no, source_id, source_no, product_name, initial_qty, remaining_qty, unit, unit_cost, status')
+        .eq('source_type', 'purchase_order')
+        .in('status', ['active', 'depleted'])
+        .order('created_at', { ascending:false })
+        .limit(500),
+    ]);
     if (data) setPOs(data);
+    if (lots) setPOCostLots(lots as POCostLot[]);
   };
 
   const loadShipping = async () => {
@@ -113,6 +137,15 @@ export default function FinanceExpenses({
   };
 
   const importFromPO = async (po: PO) => {
+    if ((lotsByPOId[po.id] || []).length > 0) {
+      showToast('PO นี้สร้าง Lot แล้ว ไม่ควรบันทึกเป็นรายจ่ายซ้ำ');
+      return;
+    }
+    if (records.some(r => r.ref_po_id === po.id)) {
+      showToast('PO นี้นำเข้าเป็นรายจ่ายแล้ว');
+      return;
+    }
+
     const dateStr = po.po_date.replace(/-/g,'');
     const { count } = await supabase.from('expense_records').select('*',{count:'exact',head:true}).like('doc_no',`EXP-${dateStr}%`);
     const docNo = `EXP-${dateStr}-${String((count||0)+1).padStart(3,'0')}`;
@@ -124,7 +157,7 @@ export default function FinanceExpenses({
       ref_po_id: po.id,
       note: `นำเข้าจาก PO ${po.po_no}`,
     }]);
-    showToast(`✓ นำเข้า PO ${po.po_no} สำเร็จ`);
+    showToast(`✓ บันทึก PO ${po.po_no} เป็นรายจ่ายสำเร็จ`);
     loadRecords();
   };
 
@@ -192,6 +225,14 @@ export default function FinanceExpenses({
   });
   const total = filtered.reduce((s,r)=>s+Number(r.amount_thb),0);
   const poTotal = pos.reduce((s,p)=>s+Number(p.total_thb),0);
+  const importedPOIds = new Set(records.map(r => r.ref_po_id).filter(Boolean));
+  const lotsByPOId = poCostLots.reduce((map, lot) => {
+    if (!lot.source_id) return map;
+    if (!map[lot.source_id]) map[lot.source_id] = [];
+    map[lot.source_id].push(lot);
+    return map;
+  }, {} as Record<string, POCostLot[]>);
+  const poCanImport = pos.filter(p => !(lotsByPOId[p.id]?.length) && !importedPOIds.has(p.id)).length;
 
   return (
     <div className="flex flex-col h-full">
@@ -293,7 +334,26 @@ export default function FinanceExpenses({
       {subTab === 'po' && (
         <>
           <div className="shrink-0 bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3 text-sm text-amber-700">
-            ใบสั่งซื้อจากฝ่ายคลังสินค้า — กด "นำเข้าใบบันทึกรายจ่าย" เพื่อบันทึกเป็นรายจ่าย
+            <div className="font-bold flex items-center gap-2">
+              <AlertTriangle size={16}/> ระวังหักซ้ำ: PO ใช้ได้ 2 ทาง
+            </div>
+            <div className="mt-1 leading-6">
+              PO ที่สร้าง Lot แล้ว = ต้นทุนจะถูกหักตอนขาย จึงไม่ควรบันทึกเป็นรายจ่ายซ้ำ ส่วน PO ที่เป็นค่าใช้จ่ายทั่วไปและยังไม่ได้สร้าง Lot ให้กด “บันทึกเป็นรายจ่าย”
+            </div>
+          </div>
+          <div className="shrink-0 grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+            <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
+              <div className="text-xs text-emerald-600 font-bold">PO สร้าง Lot แล้ว</div>
+              <div className="text-xl font-extrabold text-emerald-700">{Object.keys(lotsByPOId).length.toLocaleString()}</div>
+            </div>
+            <div className="rounded-xl bg-purple-50 border border-purple-100 px-4 py-3">
+              <div className="text-xs text-purple-600 font-bold">บันทึกเป็นรายจ่ายได้</div>
+              <div className="text-xl font-extrabold text-purple-700">{poCanImport.toLocaleString()}</div>
+            </div>
+            <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
+              <div className="text-xs text-slate-500 font-bold">PO บันทึกแล้ว</div>
+              <div className="text-xl font-extrabold text-slate-700">{importedPOIds.size.toLocaleString()}</div>
+            </div>
           </div>
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
             <table className="text-sm w-full" style={{minWidth:'650px'}}>
@@ -304,13 +364,16 @@ export default function FinanceExpenses({
                   <th className="p-3 text-left">ผู้ขาย</th>
                   <th className="p-3 text-right whitespace-nowrap">ยอด (฿)</th>
                   <th className="p-3 text-center">สถานะ</th>
-                  <th className="p-3 text-center whitespace-nowrap">นำเข้า</th>
+                  <th className="p-3 text-center whitespace-nowrap">การบันทึก</th>
                 </tr>
               </thead>
               <tbody>
                 {pos.length===0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">ไม่มี PO ในช่วงนี้</td></tr>}
-                {pos.map(p=>(
-                  <tr key={p.id} className="border-b hover:bg-purple-50">
+                {pos.map(p => {
+                  const poLots = lotsByPOId[p.id] || [];
+                  const imported = importedPOIds.has(p.id);
+                  return (
+                  <tr key={p.id} className={`border-b ${poLots.length ? 'bg-emerald-50/40 hover:bg-emerald-50' : imported ? 'bg-slate-50 hover:bg-slate-100' : 'hover:bg-purple-50'}`}>
                     <td className="p-3 font-mono text-xs text-purple-700">{p.po_no}</td>
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{fmtDate(p.po_date)}</td>
                     <td className="p-3 font-medium">{p.supplier_name}</td>
@@ -319,10 +382,32 @@ export default function FinanceExpenses({
                       <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${p.status==='approved'?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}`}>{p.status}</span>
                     </td>
                     <td className="p-3 text-center">
-                      <button onClick={()=>importFromPO(p)} className="px-3 py-1 bg-purple-500 text-white rounded-lg text-xs hover:bg-purple-600">นำเข้า</button>
+                      {poLots.length > 0 ? (
+                        <div className="inline-flex flex-col items-center gap-1 px-3 py-2 rounded-xl bg-emerald-100 text-emerald-700 border border-emerald-200 min-w-[150px]">
+                          <div className="flex items-center gap-1 text-xs font-extrabold">
+                            <PackageCheck size={13}/> สร้าง Lot แล้ว
+                          </div>
+                          <div className="text-[10px] font-mono leading-4">
+                            {poLots.map(l => l.lot_no).join(', ')}
+                          </div>
+                          <div className="text-[10px] text-emerald-600">
+                            ไม่บันทึกเป็นรายจ่ายซ้ำ
+                          </div>
+                        </div>
+                      ) : imported ? (
+                        <span className="inline-block px-3 py-1 rounded-lg bg-slate-100 text-slate-500 text-xs font-bold">
+                          บันทึกแล้ว
+                        </span>
+                      ) : (
+                        <button onClick={()=>importFromPO(p)}
+                          className="px-3 py-1 bg-purple-500 text-white rounded-lg text-xs hover:bg-purple-600">
+                          บันทึกเป็นรายจ่าย
+                        </button>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
               <tfoot className="bg-slate-50 border-t-2 sticky bottom-0">
                 <tr>
