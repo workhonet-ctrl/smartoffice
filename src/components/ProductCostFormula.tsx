@@ -12,6 +12,8 @@ import {
   Sparkles,
   FileText,
   Layers,
+  PackageCheck,
+  X,
 } from 'lucide-react';
 
 type ProductMaster = {
@@ -70,6 +72,23 @@ type CalculationHistory = {
   created_at: string;
 };
 
+type ProductCostLot = {
+  id: string;
+  lot_no: string;
+  product_id: string | null;
+  product_name: string;
+  formula_id: string | null;
+  calculation_history_id: string | null;
+  initial_qty: number;
+  remaining_qty: number;
+  unit: string;
+  unit_cost: number;
+  total_cost: number;
+  status: string;
+  note: string | null;
+  created_at: string;
+};
+
 const emptyItem = (): FormulaItem => ({
   local_key: `${Date.now()}-${Math.random()}`,
   cost_type: 'material',
@@ -97,7 +116,10 @@ export default function ProductCostFormula() {
   const [formulas, setFormulas] = useState<Formula[]>([]);
   const [selectedFormulaId, setSelectedFormulaId] = useState('');
   const [history, setHistory] = useState<CalculationHistory[]>([]);
-  const [tab, setTab] = useState<'form' | 'history'>('form');
+  const [lots, setLots] = useState<ProductCostLot[]>([]);
+  const [showLotConfirm, setShowLotConfirm] = useState(false);
+  const [lotNote, setLotNote] = useState('');
+  const [tab, setTab] = useState<'form' | 'history' | 'lots'>('form');
 
   const [productId, setProductId] = useState('');
   const [productName, setProductName] = useState('');
@@ -174,6 +196,9 @@ export default function ProductCostFormula() {
     setNote('');
     setItems([emptyItem()]);
     setHistory([]);
+    setLots([]);
+    setShowLotConfirm(false);
+    setLotNote('');
     setTab('form');
   };
 
@@ -218,13 +243,15 @@ export default function ProductCostFormula() {
   const loadFormula = async (formula: Formula) => {
     setLoading(true);
     try {
-      const [{ data: rows, error: rowsErr }, { data: hist, error: histErr }] = await Promise.all([
+      const [{ data: rows, error: rowsErr }, { data: hist, error: histErr }, { data: lotRows, error: lotErr }] = await Promise.all([
         supabase.from('product_cost_formula_items').select('*').eq('formula_id', formula.id).order('created_at'),
         supabase.from('product_cost_calculation_history').select('*').eq('formula_id', formula.id).order('created_at', { ascending: false }).limit(20),
+        supabase.from('product_cost_lots').select('*').eq('formula_id', formula.id).order('created_at', { ascending: false }).limit(30),
       ]);
 
       if (rowsErr) throw rowsErr;
       if (histErr) throw histErr;
+      if (lotErr) throw lotErr;
 
       setSelectedFormulaId(formula.id);
       setProductId(formula.product_id || '');
@@ -241,6 +268,8 @@ export default function ProductCostFormula() {
         local_key: r.id,
       })).concat((rows || []).length ? [] : [emptyItem()]));
       setHistory((hist || []) as CalculationHistory[]);
+      setLots((lotRows || []) as ProductCostLot[]);
+      setLotNote(`ล็อตต้นทุนจาก ${formula.formula_name}`);
       setTab('form');
     } catch (err: any) {
       showToast('โหลดสูตรไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
@@ -386,6 +415,101 @@ export default function ProductCostFormula() {
     if (showSuccess) showToast('✓ บันทึกประวัติคำนวณแล้ว');
   };
 
+  const generateLotNo = async () => {
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+    const prefix = `LOT-${dateStr}-`;
+
+    const { data, error } = await supabase
+      .from('product_cost_lots')
+      .select('lot_no')
+      .like('lot_no', `${prefix}%`)
+      .order('lot_no', { ascending: false })
+      .limit(1);
+
+    if (error) throw error;
+
+    const lastNo = data?.[0]?.lot_no || '';
+    const lastSeq = Number(lastNo.replace(prefix, '')) || 0;
+    return `${prefix}${String(lastSeq + 1).padStart(3, '0')}`;
+  };
+
+  const createCostLot = async () => {
+    if (saving) return;
+
+    if (!selectedFormulaId) {
+      showToast('กรุณาบันทึกสูตรต้นทุนก่อนสร้างล็อต', 'error');
+      return;
+    }
+
+    if (Number(outputQty || 0) <= 0 || Number(costPerUnit || 0) <= 0) {
+      showToast('จำนวนผลผลิตและต้นทุนต่อหน่วยต้องมากกว่า 0', 'error');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const lotNo = await generateLotNo();
+
+      // ใช้ประวัติคำนวณล่าสุดของสูตรนี้เพื่ออ้างอิง snapshot
+      const { data: latestHistory } = await supabase
+        .from('product_cost_calculation_history')
+        .select('id')
+        .eq('formula_id', selectedFormulaId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const total = Number(outputQty || 0) * Number(costPerUnit || 0);
+
+      const { data: lot, error: lotErr } = await supabase
+        .from('product_cost_lots')
+        .insert([{
+          lot_no: lotNo,
+          product_id: productId || null,
+          product_name: productName.trim(),
+          formula_id: selectedFormulaId,
+          calculation_history_id: latestHistory?.id || null,
+          initial_qty: Number(outputQty || 0),
+          remaining_qty: Number(outputQty || 0),
+          unit: outputUnit || 'ชิ้น',
+          unit_cost: Number(costPerUnit || 0),
+          total_cost: total,
+          status: 'active',
+          note: lotNote || null,
+        }])
+        .select()
+        .single();
+
+      if (lotErr) throw lotErr;
+
+      const { error: txnErr } = await supabase
+        .from('product_cost_lot_transactions')
+        .insert([{
+          lot_id: lot.id,
+          lot_no: lotNo,
+          product_id: productId || null,
+          product_name: productName.trim(),
+          txn_type: 'in',
+          qty: Number(outputQty || 0),
+          unit_cost: Number(costPerUnit || 0),
+          total_cost: total,
+          ref_type: 'cost_formula',
+          ref_id: selectedFormulaId,
+          note: `สร้างล็อตจากสูตรต้นทุน ${formulaName}`,
+        }]);
+
+      if (txnErr) throw txnErr;
+
+      setLots(prev => [lot as ProductCostLot, ...prev]);
+      setShowLotConfirm(false);
+      showToast(`✓ สร้างล็อตต้นทุน ${lotNo} สำเร็จ`);
+    } catch (err: any) {
+      showToast('สร้างล็อตต้นทุนไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const deactivateFormula = async () => {
     if (!selectedFormulaId) return;
     if (!confirm('ปิดใช้งานสูตรต้นทุนนี้?')) return;
@@ -508,10 +632,10 @@ export default function ProductCostFormula() {
                 ข้อมูลสูตร
               </h3>
               <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
-                {(['form', 'history'] as const).map(k => (
+                {(['form', 'history', 'lots'] as const).map(k => (
                   <button key={k} onClick={() => setTab(k)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold ${tab === k ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}>
-                    {k === 'form' ? 'สูตรต้นทุน' : 'ประวัติคำนวณ'}
+                    {k === 'form' ? 'สูตรต้นทุน' : k === 'history' ? 'ประวัติคำนวณ' : 'ล็อตต้นทุน'}
                   </button>
                 ))}
               </div>
@@ -655,6 +779,13 @@ export default function ProductCostFormula() {
                       ปิดใช้งานสูตร
                     </button>
                   )}
+                  {selectedFormulaId && (
+                    <button onClick={() => setShowLotConfirm(true)} disabled={saving}
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:from-emerald-600 hover:to-cyan-600 font-bold shadow disabled:opacity-50 flex items-center gap-2">
+                      <PackageCheck size={16} />
+                      สร้างล็อตต้นทุน
+                    </button>
+                  )}
                   <button onClick={saveFormula} disabled={saving}
                     className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-fuchsia-500 to-indigo-500 text-white hover:from-fuchsia-600 hover:to-indigo-600 font-bold shadow disabled:opacity-50 flex items-center gap-2">
                     <Save size={16} />
@@ -714,6 +845,72 @@ export default function ProductCostFormula() {
                 ))}
               </div>
             )}
+
+            {tab === 'lots' && (
+              <div className="space-y-3">
+                {!selectedFormulaId && (
+                  <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl">
+                    เลือกสูตรทางซ้ายก่อน เพื่อดูล็อตต้นทุน
+                  </div>
+                )}
+
+                {selectedFormulaId && lots.length === 0 && (
+                  <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl">
+                    ยังไม่มีล็อตต้นทุนของสูตรนี้
+                  </div>
+                )}
+
+                {lots.map(lot => (
+                  <div key={lot.id} className="rounded-3xl border border-emerald-100 bg-gradient-to-br from-white to-emerald-50 shadow-sm p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-extrabold text-slate-800 flex items-center gap-2">
+                          <PackageCheck size={16} className="text-emerald-500" />
+                          {lot.lot_no}
+                        </div>
+                        <div className="text-xs text-slate-400 mt-0.5">
+                          {new Date(lot.created_at).toLocaleString('th-TH')}
+                        </div>
+                      </div>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        lot.status === 'active'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : lot.status === 'depleted'
+                            ? 'bg-slate-100 text-slate-500'
+                            : 'bg-rose-100 text-rose-600'
+                      }`}>
+                        {lot.status === 'active' ? 'ใช้งานอยู่' : lot.status === 'depleted' ? 'หมดแล้ว' : 'ปิดล็อต'}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-4 gap-2 text-sm">
+                      <div className="rounded-2xl bg-white/80 border border-white p-3">
+                        <div className="text-xs text-slate-400">จำนวนเริ่มต้น</div>
+                        <div className="font-extrabold text-slate-800">{Number(lot.initial_qty).toLocaleString()} {lot.unit}</div>
+                      </div>
+                      <div className="rounded-2xl bg-white/80 border border-white p-3">
+                        <div className="text-xs text-slate-400">คงเหลือ</div>
+                        <div className="font-extrabold text-emerald-700">{Number(lot.remaining_qty).toLocaleString()} {lot.unit}</div>
+                      </div>
+                      <div className="rounded-2xl bg-white/80 border border-white p-3">
+                        <div className="text-xs text-slate-400">ต้นทุนต่อหน่วย</div>
+                        <div className="font-extrabold text-fuchsia-700">{money(Number(lot.unit_cost || 0))}</div>
+                      </div>
+                      <div className="rounded-2xl bg-white/80 border border-white p-3">
+                        <div className="text-xs text-slate-400">ต้นทุนรวม</div>
+                        <div className="font-extrabold text-slate-800">{money(Number(lot.total_cost || 0))}</div>
+                      </div>
+                    </div>
+
+                    {lot.note && (
+                      <div className="mt-3 rounded-2xl bg-white/70 border border-white px-3 py-2 text-xs text-slate-500">
+                        {lot.note}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="rounded-3xl bg-gradient-to-br from-fuchsia-50 to-indigo-50 border border-fuchsia-100 p-4 text-sm text-slate-600 flex items-start gap-3">
@@ -727,6 +924,58 @@ export default function ProductCostFormula() {
           </div>
         </div>
       </div>
+
+      {showLotConfirm && (
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[2rem] w-full max-w-md shadow-2xl border border-emerald-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-emerald-50 via-cyan-50 to-fuchsia-50 px-6 py-6 border-b border-emerald-100 relative">
+              <button onClick={() => setShowLotConfirm(false)}
+                className="absolute right-4 top-4 text-slate-400 hover:text-slate-600">
+                <X size={20} />
+              </button>
+              <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-emerald-500 to-cyan-500 text-white flex items-center justify-center text-3xl shadow-lg mb-3">
+                📦
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-800">สร้างล็อตต้นทุนใช่ไหม?</h3>
+              <p className="text-sm text-slate-500 mt-2 leading-6">
+                ระบบจะล็อกต้นทุนสูตรนี้เป็นล็อตใหม่ เพื่อไม่ให้ต้นทุนรอบถัดไปทับออเดอร์เก่า
+              </p>
+            </div>
+
+            <div className="px-6 py-4 space-y-3">
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-sm">
+                <div className="flex justify-between gap-3"><span className="text-slate-400">สินค้า</span><b>{productName || '-'}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">จำนวนล็อต</span><b>{Number(outputQty || 0).toLocaleString()} {outputUnit}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ต้นทุนต่อหน่วย</span><b className="text-fuchsia-700">{money(costPerUnit)}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">ต้นทุนรวม</span><b>{money(totalCost)}</b></div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">หมายเหตุล็อต</label>
+                <input value={lotNote} onChange={e => setLotNote(e.target.value)}
+                  placeholder="เช่น ล็อตผลิตครีม Secret Rose รอบเดือนนี้"
+                  className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200" />
+              </div>
+
+              <div className="rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700">
+                หลังสร้างล็อตแล้ว ล็อตนี้จะเป็นต้นทุนอ้างอิงของสินค้ารอบนี้ เช่น ฿27 ต่อชิ้น
+              </div>
+            </div>
+
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setShowLotConfirm(false)} disabled={saving}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button onClick={createCostLot} disabled={saving}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:from-emerald-600 hover:to-cyan-600 font-bold shadow disabled:opacity-50 flex items-center gap-2">
+                <PackageCheck size={16} />
+                {saving ? 'กำลังสร้าง...' : 'ยืนยันสร้างล็อต'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className={`fixed bottom-6 right-6 z-[100] px-5 py-4 rounded-xl shadow-2xl text-white text-sm font-medium ${
