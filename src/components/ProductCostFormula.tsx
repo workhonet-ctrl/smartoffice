@@ -93,6 +93,15 @@ type ProductCostLot = {
   source_snapshot?: any;
 };
 
+type LotProduct = {
+  product_id: string;
+  product_name: string;
+  latest_unit_cost: number;
+  active_lots: number;
+  remaining_qty: number;
+  latest_created_at: string;
+};
+
 const emptyItem = (): FormulaItem => ({
   local_key: `${Date.now()}-${Math.random()}`,
   cost_type: 'material',
@@ -121,6 +130,7 @@ export default function ProductCostFormula() {
   const [selectedFormulaId, setSelectedFormulaId] = useState('');
   const [history, setHistory] = useState<CalculationHistory[]>([]);
   const [lots, setLots] = useState<ProductCostLot[]>([]);
+  const [allCostLots, setAllCostLots] = useState<ProductCostLot[]>([]);
   const [showLotConfirm, setShowLotConfirm] = useState(false);
   const [lotDuplicateWarning, setLotDuplicateWarning] = useState<{
     activeLots: ProductCostLot[];
@@ -151,19 +161,27 @@ export default function ProductCostFormula() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [{ data: prod, error: prodErr }, { data: stock, error: stockErr }, { data: formula, error: formulaErr }] = await Promise.all([
+      const [
+        { data: prod, error: prodErr },
+        { data: stock, error: stockErr },
+        { data: formula, error: formulaErr },
+        { data: lotRows, error: lotRowsErr },
+      ] = await Promise.all([
         supabase.from('products_master').select('id, name, cost_thb').order('name'),
         supabase.from('stock_items').select('id, name, unit, type, ref_id').eq('active', true).order('type').order('name'),
         supabase.from('product_cost_formulas').select('*').eq('active', true).order('created_at', { ascending: false }),
+        supabase.from('product_cost_lots').select('*').order('created_at', { ascending: false }).limit(500),
       ]);
 
       if (prodErr) throw prodErr;
       if (stockErr) throw stockErr;
       if (formulaErr) throw formulaErr;
+      if (lotRowsErr) throw lotRowsErr;
 
       setProducts((prod || []) as ProductMaster[]);
       setStockItems((stock || []) as StockItem[]);
       setFormulas((formula || []) as Formula[]);
+      setAllCostLots((lotRows || []) as ProductCostLot[]);
     } catch (err: any) {
       showToast('โหลดข้อมูลสูตรต้นทุนไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
     } finally {
@@ -185,6 +203,45 @@ export default function ProductCostFormula() {
     [totalCost, outputQty]
   );
 
+  const lotProducts = useMemo<LotProduct[]>(() => {
+    const map = new Map<string, LotProduct>();
+
+    allCostLots
+      .filter(lot => lot.product_id)
+      .forEach(lot => {
+        const key = String(lot.product_id);
+        const remaining = Number(lot.remaining_qty || 0);
+        const active = lot.status === 'active' && remaining > 0 ? 1 : 0;
+        const cur = map.get(key);
+
+        if (!cur) {
+          map.set(key, {
+            product_id: key,
+            product_name: lot.product_name,
+            latest_unit_cost: Number(lot.unit_cost || 0),
+            active_lots: active,
+            remaining_qty: remaining,
+            latest_created_at: lot.created_at,
+          });
+        } else {
+          cur.active_lots += active;
+          cur.remaining_qty += remaining;
+          if (String(lot.created_at || '').localeCompare(String(cur.latest_created_at || '')) > 0) {
+            cur.latest_unit_cost = Number(lot.unit_cost || 0);
+            cur.latest_created_at = lot.created_at;
+            cur.product_name = lot.product_name || cur.product_name;
+          }
+        }
+      });
+
+    return Array.from(map.values()).sort((a, b) => a.product_name.localeCompare(b.product_name, 'th'));
+  }, [allCostLots]);
+
+  const lotOnlyProducts = useMemo(() => {
+    const formulaProductIds = new Set(formulas.map(f => String(f.product_id || '')).filter(Boolean));
+    return lotProducts.filter(p => !formulaProductIds.has(String(p.product_id)));
+  }, [formulas, lotProducts]);
+
   const filteredFormulas = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return formulas;
@@ -193,6 +250,12 @@ export default function ProductCostFormula() {
       f.formula_name.toLowerCase().includes(q)
     );
   }, [formulas, search]);
+
+  const filteredLotOnlyProducts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return lotOnlyProducts;
+    return lotOnlyProducts.filter(p => p.product_name.toLowerCase().includes(q));
+  }, [lotOnlyProducts, search]);
 
   const resetForm = () => {
     setSelectedFormulaId('');
@@ -287,6 +350,37 @@ export default function ProductCostFormula() {
       setTab('form');
     } catch (err: any) {
       showToast('โหลดสูตรไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadProductLots = async (product: LotProduct) => {
+    setLoading(true);
+    try {
+      const { data: lotRows, error: lotErr } = await supabase
+        .from('product_cost_lots')
+        .select('*')
+        .eq('product_id', product.product_id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (lotErr) throw lotErr;
+
+      setSelectedFormulaId('');
+      setProductId(product.product_id);
+      setProductName(product.product_name || '');
+      setFormulaName(`ล็อตต้นทุน ${product.product_name}`);
+      setOutputQty(1);
+      setOutputUnit('ชิ้น');
+      setNote('');
+      setItems([emptyItem()]);
+      setHistory([]);
+      setLots((lotRows || []) as ProductCostLot[]);
+      setLotNote(`ล็อตต้นทุนจาก PO ${product.product_name}`);
+      setTab('lots');
+    } catch (err: any) {
+      showToast('โหลดล็อตสินค้าไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
     } finally {
       setLoading(false);
     }
@@ -650,12 +744,12 @@ export default function ProductCostFormula() {
           </div>
 
           <div className="flex-1 overflow-auto p-3 space-y-2">
-            {filteredFormulas.length === 0 && (
-              <div className="p-6 text-center text-slate-400 text-sm">ยังไม่มีสูตรต้นทุน</div>
+            {filteredFormulas.length === 0 && filteredLotOnlyProducts.length === 0 && (
+              <div className="p-6 text-center text-slate-400 text-sm">ยังไม่มีสูตรหรือล็อตต้นทุน</div>
             )}
 
             {filteredFormulas.map(f => (
-              <button key={f.id} onClick={() => loadFormula(f)}
+              <button key={`formula-${f.id}`} onClick={() => loadFormula(f)}
                 className={`w-full text-left rounded-2xl border p-3 transition ${
                   selectedFormulaId === f.id
                     ? 'bg-fuchsia-50 border-fuchsia-200 shadow-sm'
@@ -664,8 +758,24 @@ export default function ProductCostFormula() {
                 <div className="font-extrabold text-slate-800 truncate">{f.formula_name}</div>
                 <div className="text-xs text-slate-500 truncate mt-0.5">{f.product_name}</div>
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-slate-400">ต่อ {f.output_unit}</span>
+                  <span className="text-xs text-slate-400">สร้างจากสูตร · ต่อ {f.output_unit}</span>
                   <span className="text-sm font-extrabold text-fuchsia-700">{money(Number(f.cost_per_unit || 0))}</span>
+                </div>
+              </button>
+            ))}
+
+            {filteredLotOnlyProducts.map(p => (
+              <button key={`lot-product-${p.product_id}`} onClick={() => loadProductLots(p)}
+                className={`w-full text-left rounded-2xl border p-3 transition ${
+                  productId === p.product_id && !selectedFormulaId
+                    ? 'bg-cyan-50 border-cyan-200 shadow-sm'
+                    : 'bg-white border-slate-100 hover:bg-slate-50'
+                }`}>
+                <div className="font-extrabold text-slate-800 truncate">{p.product_name}</div>
+                <div className="text-xs text-cyan-600 truncate mt-0.5">มีล็อตจาก PO / ไม่มีสูตรต้นทุน</div>
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="text-xs text-slate-400">{p.active_lots} ล็อต · คงเหลือ {Number(p.remaining_qty || 0).toLocaleString()}</span>
+                  <span className="text-sm font-extrabold text-cyan-700">{money(Number(p.latest_unit_cost || 0))}</span>
                 </div>
               </button>
             ))}
@@ -916,13 +1026,13 @@ export default function ProductCostFormula() {
 
             {tab === 'lots' && (
               <div className="space-y-3">
-                {!selectedFormulaId && (
+                {!productId && (
                   <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl">
                     เลือกสูตร/สินค้าทางซ้ายก่อน เพื่อดูล็อตต้นทุนของสินค้านั้น
                   </div>
                 )}
 
-                {selectedFormulaId && lots.length === 0 && (
+                {productId && lots.length === 0 && (
                   <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl">
                     ยังไม่มีล็อตต้นทุนของสินค้านี้
                   </div>
