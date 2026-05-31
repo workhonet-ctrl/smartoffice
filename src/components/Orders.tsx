@@ -269,41 +269,41 @@ function ParcelTrackingPanel() {
         ))}
       </div>
 
-      {/* Cost lock summary */}
-      <div className="shrink-0 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
-        <button onClick={() => setFilterCostLock('all')}
-          className={`rounded-xl border p-3 text-left transition ${filterCostLock === 'all' ? 'bg-cyan-50 border-cyan-200 shadow-sm' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
-          <div className="text-[11px] font-bold text-slate-400">ออเดอร์ทั้งหมด</div>
-          <div className="text-xl font-extrabold text-slate-800 mt-0.5">{orders.length.toLocaleString()}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">แสดงตามตัวกรอง {filtered.length.toLocaleString()} รายการ</div>
-        </button>
-
-        <button onClick={() => setFilterCostLock('locked')}
-          className={`rounded-xl border p-3 text-left transition ${filterCostLock === 'locked' ? 'bg-emerald-50 border-emerald-200 shadow-sm' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
-          <div className="text-[11px] font-bold text-emerald-500">ล็อกต้นทุนแล้ว</div>
-          <div className="text-xl font-extrabold text-emerald-700 mt-0.5">{costLockedCount.toLocaleString()}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">ในผลลัพธ์นี้ {filteredCostLockedCount.toLocaleString()} รายการ</div>
-        </button>
-
-        <button onClick={() => setFilterCostLock('unlocked')}
-          className={`rounded-xl border p-3 text-left transition ${filterCostLock === 'unlocked' ? 'bg-amber-50 border-amber-200 shadow-sm' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
-          <div className="text-[11px] font-bold text-amber-500">ยังไม่ล็อกต้นทุน</div>
-          <div className="text-xl font-extrabold text-amber-700 mt-0.5">{costUnlockedCount.toLocaleString()}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">ในผลลัพธ์นี้ {filteredCostUnlockedCount.toLocaleString()} รายการ</div>
-        </button>
-
-        <div className="rounded-xl border border-fuchsia-100 bg-gradient-to-br from-fuchsia-50 to-indigo-50 p-3 text-left">
-          <div className="text-[11px] font-bold text-fuchsia-500">ต้นทุนรวมที่ล็อกแล้ว</div>
-          <div className="text-xl font-extrabold text-fuchsia-700 mt-0.5">
-            ฿{costLockedTotal.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">รวมจากออเดอร์ที่ cost_locked = true</div>
-        </div>
-      </div>
-
       <div className="flex gap-3 flex-1 min-h-0">
         {/* Left: Table */}
         <div className="flex-1 flex flex-col min-w-0">
+          {/* Cost lock summary */}
+          <div className="shrink-0 grid grid-cols-2 xl:grid-cols-4 gap-2 mb-2">
+            <button onClick={() => setFilterCostLock('all')}
+              className={`rounded-xl border px-3 py-2 text-left transition ${filterCostLock === 'all' ? 'bg-cyan-50 border-cyan-200 shadow-sm' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
+              <div className="text-[10px] font-bold text-slate-400">ออเดอร์ทั้งหมด</div>
+              <div className="text-lg font-extrabold text-slate-800 leading-tight">{orders.length.toLocaleString()}</div>
+              <div className="text-[10px] text-slate-400">แสดง {filtered.length.toLocaleString()}</div>
+            </button>
+
+            <button onClick={() => setFilterCostLock('locked')}
+              className={`rounded-xl border px-3 py-2 text-left transition ${filterCostLock === 'locked' ? 'bg-emerald-50 border-emerald-200 shadow-sm' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
+              <div className="text-[10px] font-bold text-emerald-500">ล็อกต้นทุนแล้ว</div>
+              <div className="text-lg font-extrabold text-emerald-700 leading-tight">{costLockedCount.toLocaleString()}</div>
+              <div className="text-[10px] text-slate-400">ในผลลัพธ์ {filteredCostLockedCount.toLocaleString()}</div>
+            </button>
+
+            <button onClick={() => setFilterCostLock('unlocked')}
+              className={`rounded-xl border px-3 py-2 text-left transition ${filterCostLock === 'unlocked' ? 'bg-amber-50 border-amber-200 shadow-sm' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
+              <div className="text-[10px] font-bold text-amber-500">ยังไม่ล็อกต้นทุน</div>
+              <div className="text-lg font-extrabold text-amber-700 leading-tight">{costUnlockedCount.toLocaleString()}</div>
+              <div className="text-[10px] text-slate-400">ในผลลัพธ์ {filteredCostUnlockedCount.toLocaleString()}</div>
+            </button>
+
+            <div className="rounded-xl border border-fuchsia-100 bg-gradient-to-br from-fuchsia-50 to-indigo-50 px-3 py-2 text-left">
+              <div className="text-[10px] font-bold text-fuchsia-500">ต้นทุนรวมที่ล็อกแล้ว</div>
+              <div className="text-lg font-extrabold text-fuchsia-700 leading-tight">
+                ฿{costLockedTotal.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-[10px] text-slate-400">cost_locked = true</div>
+            </div>
+          </div>
+
           {/* Toolbar */}
           <div className="shrink-0 flex gap-2 mb-2 flex-wrap items-center">
             <select value={filterRoute} onChange={e => { setFilterRoute(e.target.value); setSelected(new Set()); }}
