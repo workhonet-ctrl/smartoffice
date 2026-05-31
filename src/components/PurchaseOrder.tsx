@@ -2,11 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   ShoppingBag, Plus, Trash2, Search, X, ChevronDown,
-  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer, History, Download
+  CheckCircle, FileText, RefreshCw, User, Save, Pencil, Printer, History, Download, PackageCheck
 } from 'lucide-react';
 
 type Supplier = { id: string; name: string; tel: string | null; address: string | null; note: string | null };
 type StockItem = { id: string; name: string; unit: string; type: string };
+type ProductMaster = { id: string; name: string; cost_thb?: number | null };
 type POItem    = { key: string; stock_item_id: string | null; name: string; qty: number; unit: string; price: number };
 type PO        = {
   id: string; po_no: string; po_date: string;
@@ -90,6 +91,7 @@ export default function PurchaseOrder() {
   const [tab, setTab]       = useState<'create'|'list'>('create');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
+  const [products, setProducts] = useState<ProductMaster[]>([]);
   const [poList, setPoList] = useState<PO[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -125,6 +127,12 @@ export default function PurchaseOrder() {
   const [showEditConfirm, setShowEditConfirm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PO | null>(null);
   const [receiveTarget, setReceiveTarget] = useState<PO | null>(null);
+  const [lotFromPOTarget, setLotFromPOTarget] = useState<PO | null>(null);
+  const [lotProductId, setLotProductId] = useState('');
+  const [lotOutputQty, setLotOutputQty] = useState(1);
+  const [lotOutputUnit, setLotOutputUnit] = useState('ชิ้น');
+  const [lotIncludedKeys, setLotIncludedKeys] = useState<Set<string>>(new Set());
+  const [lotFromPONote, setLotFromPONote] = useState('');
   const [blockedDeleteTarget, setBlockedDeleteTarget] = useState<PO | null>(null);
   const [historyTarget, setHistoryTarget] = useState<PO | null>(null);
   const [auditTarget, setAuditTarget] = useState<PO | null>(null);
@@ -234,13 +242,15 @@ export default function PurchaseOrder() {
 
   const loadData = async () => {
     setLoading(true);
-    const [{ data: s }, { data: si }, { data: po }] = await Promise.all([
+    const [{ data: s }, { data: si }, { data: prod }, { data: po }] = await Promise.all([
       supabase.from('suppliers').select('*').eq('active', true).order('name'),
       supabase.from('stock_items').select('id,name,unit,type').eq('active', true).order('name'),
+      supabase.from('products_master').select('id,name,cost_thb').order('name'),
       supabase.from('purchase_orders').select('*').order('created_at', { ascending: false }).limit(50),
     ]);
     if (s) setSuppliers(s);
     if (si) setStockItems(si);
+    if (prod) setProducts(prod as ProductMaster[]);
     if (po) setPoList(po as PO[]);
     setLoading(false);
   };
@@ -270,6 +280,7 @@ export default function PurchaseOrder() {
 
   const supplierOpts = suppliers.map(s => ({ id: s.id, label: s.name, sub: s.tel || '' }));
   const stockOpts    = stockItems.map(s => ({ id: s.id, label: s.name, sub: s.unit }));
+  const productOpts  = products.map(p => ({ id: p.id, label: p.name, sub: p.cost_thb ? `ต้นทุนเดิม ฿${Number(p.cost_thb).toFixed(2)}` : '' }));
 
   const addRow    = () => setPoItems(p => [...p, { key: String(Date.now()), stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
   const removeRow = (key: string) => setPoItems(p => p.filter(it => it.key !== key));
@@ -806,6 +817,196 @@ export default function PurchaseOrder() {
 
     const w = window.open('', '_blank', 'width=1000,height=700');
     if (w) { w.document.write(html); w.document.close(); }
+  };
+
+  const poItemKey = (it: POItem, idx: number) => it.key || `${idx}`;
+
+  const openCreateLotFromPO = async (po: PO) => {
+    if (po.status !== 'received') {
+      showToast('ต้องรับเข้า/ปิดงาน PO ก่อน จึงสร้างล็อตต้นทุนจาก PO ได้', 'error');
+      return;
+    }
+
+    const items = (po.items || []) as POItem[];
+    const selectable = items
+      .map((it, idx) => ({ it, idx, key: poItemKey(it, idx) }))
+      .filter(row => row.it.name && Number(row.it.qty || 0) > 0 && Number(row.it.price || 0) >= 0);
+
+    if (selectable.length === 0) {
+      showToast('PO นี้ไม่มีรายการที่ใช้สร้างล็อตได้', 'error');
+      return;
+    }
+
+    const mainRow = selectable.find(row => {
+      const name = String(row.it.name || '');
+      return !/(ขนส่ง|ค่าส่ง|shipping|บริการ|ค่า)/i.test(name);
+    }) || selectable[0];
+
+    const foundProduct = products.find(p => p.name === mainRow.it.name || mainRow.it.name.includes(p.name) || p.name.includes(mainRow.it.name));
+
+    setLotFromPOTarget(po);
+    setLotProductId(foundProduct?.id || '');
+    setLotOutputQty(Number(mainRow.it.qty || 1));
+    setLotOutputUnit(mainRow.it.unit || 'ชิ้น');
+    setLotIncludedKeys(new Set(selectable.map(row => row.key)));
+    setLotFromPONote(`สร้างล็อตจาก PO ${po.po_no}`);
+  };
+
+  const selectedLotPOItems = () => {
+    if (!lotFromPOTarget) return [];
+    return ((lotFromPOTarget.items || []) as POItem[])
+      .map((it, idx) => ({ ...it, _key: poItemKey(it, idx), _idx: idx }))
+      .filter((it: any) => lotIncludedKeys.has(it._key));
+  };
+
+  const lotFromPOTotalCost = () =>
+    selectedLotPOItems().reduce((sum: number, it: any) => sum + Number(it.qty || 0) * Number(it.price || 0), 0);
+
+  const lotFromPOUnitCost = () =>
+    Number(lotOutputQty || 0) > 0 ? lotFromPOTotalCost() / Number(lotOutputQty || 1) : 0;
+
+  const generateCostLotNo = async () => {
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+    const prefix = `LOT-${dateStr}-`;
+
+    const { data } = await supabase
+      .from('product_cost_lots')
+      .select('lot_no')
+      .like('lot_no', `${prefix}%`)
+      .order('lot_no', { ascending: false })
+      .limit(1);
+
+    const lastNo = data?.[0]?.lot_no || '';
+    const lastSeq = Number(lastNo.replace(prefix, '')) || 0;
+    return `${prefix}${String(lastSeq + 1).padStart(3, '0')}`;
+  };
+
+  const createCostLotFromPO = async () => {
+    if (!lotFromPOTarget || saving || actionLockRef.current) return;
+
+    const product = products.find(p => p.id === lotProductId);
+    if (!product) {
+      showToast('กรุณาเลือกสินค้าที่จะสร้างล็อต', 'error');
+      return;
+    }
+
+    if (Number(lotOutputQty || 0) <= 0) {
+      showToast('จำนวนเข้าล็อตต้องมากกว่า 0', 'error');
+      return;
+    }
+
+    const selectedItems = selectedLotPOItems();
+    if (selectedItems.length === 0) {
+      showToast('กรุณาเลือกรายการใน PO ที่จะรวมเป็นต้นทุนล็อต', 'error');
+      return;
+    }
+
+    const totalCost = lotFromPOTotalCost();
+    const unitCost = lotFromPOUnitCost();
+
+    if (totalCost <= 0 || unitCost <= 0) {
+      showToast('ต้นทุนรวมและต้นทุนต่อหน่วยต้องมากกว่า 0', 'error');
+      return;
+    }
+
+    actionLockRef.current = true;
+    setSaving(true);
+
+    try {
+      // กันสร้างล็อตซ้ำจาก PO เดียวกัน + สินค้าเดียวกัน
+      const { data: existing, error: existErr } = await supabase
+        .from('product_cost_lots')
+        .select('id, lot_no, remaining_qty, unit_cost')
+        .eq('source_type', 'purchase_order')
+        .eq('source_id', lotFromPOTarget.id)
+        .eq('product_id', product.id)
+        .in('status', ['active', 'depleted'])
+        .limit(1);
+
+      if (existErr) throw existErr;
+
+      if ((existing || []).length > 0) {
+        showToast(`PO นี้สร้างล็อตของสินค้านี้ไปแล้ว: ${(existing as any[])[0].lot_no}`, 'error');
+        return;
+      }
+
+      const lotNo = await generateCostLotNo();
+
+      const sourceSnapshot = {
+        po_id: lotFromPOTarget.id,
+        po_no: lotFromPOTarget.po_no,
+        po_date: lotFromPOTarget.po_date,
+        supplier_id: lotFromPOTarget.supplier_id,
+        supplier_name: lotFromPOTarget.supplier_name,
+        product_id: product.id,
+        product_name: product.name,
+        output_qty: Number(lotOutputQty || 0),
+        output_unit: lotOutputUnit || 'ชิ้น',
+        total_cost: totalCost,
+        unit_cost: unitCost,
+        included_items: selectedItems.map((it: any) => ({
+          name: it.name,
+          qty: Number(it.qty || 0),
+          unit: it.unit,
+          price: Number(it.price || 0),
+          subtotal: Number(it.qty || 0) * Number(it.price || 0),
+          stock_item_id: it.stock_item_id || null,
+        })),
+      };
+
+      const { data: lot, error: lotErr } = await supabase
+        .from('product_cost_lots')
+        .insert([{
+          lot_no: lotNo,
+          product_id: product.id,
+          product_name: product.name,
+          formula_id: null,
+          calculation_history_id: null,
+          initial_qty: Number(lotOutputQty || 0),
+          remaining_qty: Number(lotOutputQty || 0),
+          unit: lotOutputUnit || 'ชิ้น',
+          unit_cost: unitCost,
+          total_cost: totalCost,
+          status: 'active',
+          note: lotFromPONote || `สร้างล็อตจาก PO ${lotFromPOTarget.po_no}`,
+          source_type: 'purchase_order',
+          source_id: lotFromPOTarget.id,
+          source_no: lotFromPOTarget.po_no,
+          source_snapshot: sourceSnapshot,
+        }])
+        .select()
+        .single();
+
+      if (lotErr) throw lotErr;
+
+      const { error: txnErr } = await supabase
+        .from('product_cost_lot_transactions')
+        .insert([{
+          lot_id: lot.id,
+          lot_no: lotNo,
+          product_id: product.id,
+          product_name: product.name,
+          txn_type: 'in',
+          qty: Number(lotOutputQty || 0),
+          unit_cost: unitCost,
+          total_cost: totalCost,
+          ref_type: 'purchase_order',
+          ref_id: lotFromPOTarget.id,
+          note: `สร้างล็อตจาก PO ${lotFromPOTarget.po_no}`,
+        }]);
+
+      if (txnErr) throw txnErr;
+
+      showToast(`✓ สร้างล็อต ${lotNo} จาก PO สำเร็จ · ต้นทุน/หน่วย ฿${unitCost.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+      setLotFromPOTarget(null);
+      setLotIncludedKeys(new Set());
+      await loadData();
+    } catch (err: any) {
+      showToast('สร้างล็อตจาก PO ไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      actionLockRef.current = false;
+      setSaving(false);
+    }
   };
 
   const handleReceivePO = async () => {
@@ -1477,6 +1678,13 @@ export default function PurchaseOrder() {
                         </button>
                       )}
 
+                      {po.status === 'received' && (
+                        <button onClick={() => openCreateLotFromPO(po)}
+                          className="flex items-center gap-1 px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs hover:bg-emerald-200 font-bold">
+                          <PackageCheck size={11}/> สร้าง Lot
+                        </button>
+                      )}
+
                       {canDeletePO(po.status) && (
                         <button onClick={() => setDeleteTarget(po)}
                           className="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-600 rounded-lg text-xs hover:bg-red-200 font-medium">
@@ -1489,6 +1697,130 @@ export default function PurchaseOrder() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Popup: สร้างล็อตต้นทุนจาก PO */}
+      {lotFromPOTarget && (
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[2rem] w-full max-w-3xl shadow-2xl border border-emerald-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-emerald-50 via-cyan-50 to-indigo-50 px-6 py-6 border-b border-emerald-100 relative">
+              <button onClick={() => setLotFromPOTarget(null)} disabled={saving}
+                className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 disabled:opacity-50">
+                <X size={20} />
+              </button>
+              <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-emerald-500 to-cyan-500 text-white flex items-center justify-center text-3xl shadow-lg mb-3">
+                📦
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-800">สร้างล็อตต้นทุนจาก PO</h3>
+              <p className="text-sm text-slate-500 mt-1">
+                {lotFromPOTarget.po_no} · ใช้กับสินค้าพร้อมขาย เช่น นม กาแฟ อาหารเสริม
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 block mb-1">สินค้าที่จะสร้างล็อต</label>
+                  <SearchDrop
+                    options={productOpts}
+                    value={lotProductId}
+                    onChange={(id) => setLotProductId(id)}
+                    placeholder="เลือกสินค้าจากระบบ..."
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 block mb-1">จำนวนเข้าล็อต</label>
+                    <input type="number" value={lotOutputQty}
+                      onChange={e => setLotOutputQty(Number(e.target.value || 0))}
+                      className="w-full border rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-200" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 block mb-1">หน่วย</label>
+                    <input value={lotOutputUnit}
+                      onChange={e => setLotOutputUnit(e.target.value)}
+                      className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-100 overflow-hidden">
+                <div className="bg-slate-800 text-white px-4 py-3 text-sm font-bold flex justify-between">
+                  <span>เลือกรายการใน PO ที่รวมเป็นต้นทุนล็อต</span>
+                  <span>{lotIncludedKeys.size} รายการ</span>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {((lotFromPOTarget.items || []) as POItem[]).map((it, idx) => {
+                    const key = poItemKey(it, idx);
+                    const checked = lotIncludedKeys.has(key);
+                    const subtotal = Number(it.qty || 0) * Number(it.price || 0);
+                    return (
+                      <label key={key} className={`flex items-center gap-3 p-3 cursor-pointer ${checked ? 'bg-emerald-50/50' : 'hover:bg-slate-50'}`}>
+                        <input type="checkbox" checked={checked}
+                          onChange={e => {
+                            const next = new Set(lotIncludedKeys);
+                            e.target.checked ? next.add(key) : next.delete(key);
+                            setLotIncludedKeys(next);
+                          }}
+                          className="rounded" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-slate-800 truncate">{it.name || '-'}</div>
+                          <div className="text-xs text-slate-400">
+                            {Number(it.qty || 0).toLocaleString()} {it.unit} × ฿{Number(it.price || 0).toLocaleString()}
+                          </div>
+                        </div>
+                        <div className="font-extrabold text-slate-800">฿{subtotal.toLocaleString()}</div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="rounded-2xl bg-fuchsia-50 border border-fuchsia-100 p-3">
+                  <div className="text-xs text-fuchsia-500 font-bold">ต้นทุนรวมที่เลือก</div>
+                  <div className="text-2xl font-extrabold text-fuchsia-700">
+                    ฿{lotFromPOTotalCost().toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3">
+                  <div className="text-xs text-emerald-500 font-bold">ต้นทุนต่อหน่วย</div>
+                  <div className="text-2xl font-extrabold text-emerald-700">
+                    ฿{lotFromPOUnitCost().toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="text-xs text-slate-400 font-bold">สร้างล็อตจำนวน</div>
+                  <div className="text-2xl font-extrabold text-slate-800">
+                    {Number(lotOutputQty || 0).toLocaleString()} {lotOutputUnit}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">หมายเหตุล็อต</label>
+                <input value={lotFromPONote} onChange={e => setLotFromPONote(e.target.value)}
+                  className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200" />
+              </div>
+
+              <div className="rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700 leading-5">
+                หลังสร้างล็อตแล้ว ยอด PO นี้จะเป็นแหล่งที่มาของต้นทุนล็อต ไม่ควรนำยอด PO ไปหักเป็นรายจ่าย P&L ซ้ำกับต้นทุนขาย
+              </div>
+            </div>
+
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setLotFromPOTarget(null)} disabled={saving}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button onClick={createCostLotFromPO} disabled={saving}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:from-emerald-600 hover:to-cyan-600 font-bold shadow disabled:opacity-50 flex items-center gap-2">
+                <PackageCheck size={16} />
+                {saving ? 'กำลังสร้าง...' : 'ยืนยันสร้าง Lot จาก PO'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
