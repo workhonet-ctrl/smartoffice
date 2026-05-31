@@ -576,6 +576,8 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
   const [costLocking, setCostLocking] = useState(false);
   const [showBulkCostLockConfirm, setShowBulkCostLockConfirm] = useState(false);
   const [bulkCostLocking, setBulkCostLocking] = useState(false);
+  const [bulkCostPreviewLoading, setBulkCostPreviewLoading] = useState(false);
+  const [bulkCostPreview, setBulkCostPreview] = useState<any | null>(null);
   // ข้อ 3: ref map สำหรับ scroll-to row
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -1152,13 +1154,54 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
     }
   };
 
-  const handleBulkLockOrderCost = async () => {
-    if (bulkCostLocking || selectedOrders.size === 0) return;
+  const openBulkCostLockPreview = async () => {
+    if (selectedOrders.size === 0 || bulkCostPreviewLoading) return;
 
     const targets = orders.filter(o => selectedOrders.has(o.id) && !(o as any).cost_locked);
 
     if (targets.length === 0) {
       showToast('ไม่มีออเดอร์ที่ต้องล็อกต้นทุนในรายการที่เลือก', 'error');
+      return;
+    }
+
+    setShowBulkCostLockConfirm(true);
+    setBulkCostPreview(null);
+    setBulkCostPreviewLoading(true);
+
+    try {
+      const { data, error } = await supabase.rpc('preview_order_cost_lock_fifo', {
+        p_order_ids: targets.map(o => o.id),
+      });
+
+      if (error) throw error;
+
+      setBulkCostPreview(data || null);
+    } catch (err: any) {
+      setShowBulkCostLockConfirm(false);
+      showToast('ตรวจล็อตก่อนล็อกไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      setBulkCostPreviewLoading(false);
+    }
+  };
+
+  const handleBulkLockOrderCost = async () => {
+    if (bulkCostLocking || selectedOrders.size === 0) return;
+
+    const previewOrders: any[] = Array.isArray(bulkCostPreview?.orders) ? bulkCostPreview.orders : [];
+    const canLockIds = new Set(
+      previewOrders
+        .filter((r: any) => r.can_lock === true && r.status === 'can_lock')
+        .map((r: any) => String(r.order_id))
+    );
+
+    const targets = orders.filter(o =>
+      selectedOrders.has(o.id) &&
+      !(o as any).cost_locked &&
+      (canLockIds.size === 0 || canLockIds.has(String(o.id)))
+    );
+
+    if (targets.length === 0) {
+      showToast('ไม่มีออเดอร์ที่พร้อมล็อกต้นทุน', 'error');
       setShowBulkCostLockConfirm(false);
       return;
     }
@@ -1196,6 +1239,7 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
       }
 
       setShowBulkCostLockConfirm(false);
+      setBulkCostPreview(null);
       setSelectedOrders(new Set());
       await loadOrders();
     } finally {
@@ -1514,10 +1558,10 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
             )}
             {/* Bulk cost lock */}
             {selectedOrders.size > 0 && (
-              <button onClick={() => setShowBulkCostLockConfirm(true)}
-                disabled={bulkCostLocking || selectedUnlockedOrders.length === 0}
+              <button onClick={openBulkCostLockPreview}
+                disabled={bulkCostLocking || bulkCostPreviewLoading || selectedUnlockedOrders.length === 0}
                 className="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs font-bold hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
-                🔐 ล็อกต้นทุนที่เลือก ({selectedUnlockedOrders.length})
+                {bulkCostPreviewLoading ? 'กำลังตรวจล็อต...' : `🔐 ล็อกต้นทุนที่เลือก (${selectedUnlockedOrders.length})`}
               </button>
             )}
             {/* Clear filters */}
@@ -1832,53 +1876,136 @@ export default function Orders({ onImportDone }: { onImportDone?: (ids: string[]
         </div>
       )}
 
-      {/* Modal: ยืนยันล็อกต้นทุนหลายออเดอร์ */}
+      {/* Modal: ตรวจล็อตและยืนยันล็อกต้นทุนหลายออเดอร์ */}
       {showBulkCostLockConfirm && (
         <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[2rem] w-full max-w-lg shadow-2xl border border-emerald-100 overflow-hidden">
+          <div className="bg-white rounded-[2rem] w-full max-w-3xl shadow-2xl border border-emerald-100 overflow-hidden">
             <div className="bg-gradient-to-br from-emerald-50 via-cyan-50 to-amber-50 px-6 py-6 border-b border-emerald-100 relative">
-              <button onClick={() => setShowBulkCostLockConfirm(false)} disabled={bulkCostLocking}
+              <button onClick={() => { setShowBulkCostLockConfirm(false); setBulkCostPreview(null); }} disabled={bulkCostLocking || bulkCostPreviewLoading}
                 className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 disabled:opacity-50">
                 ✕
               </button>
               <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-emerald-500 to-cyan-500 text-white flex items-center justify-center text-3xl shadow-lg mb-3">
-                🔐
+                🔍
               </div>
-              <h3 className="text-xl font-extrabold text-slate-800">ล็อกต้นทุนหลายออเดอร์ใช่ไหม?</h3>
+              <h3 className="text-xl font-extrabold text-slate-800">ตรวจล็อตก่อนล็อกต้นทุน</h3>
               <p className="text-sm text-slate-500 mt-2 leading-6">
-                ระบบจะล็อกต้นทุนเฉพาะออเดอร์ที่เลือกและยังไม่ล็อก โดยตัดล็อตต้นทุนแบบ FIFO ทีละใบ
+                ระบบจะตรวจว่าล็อตต้นทุนพอหรือไม่ก่อนตัดล็อตจริง เพื่อกันการล็อกผิดพลาดหลายออเดอร์
               </p>
             </div>
 
-            <div className="px-6 py-4 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
-                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-center">
-                  <div className="text-xs text-slate-400">เลือกทั้งหมด</div>
-                  <div className="text-xl font-extrabold text-slate-800">{selectedOrders.size.toLocaleString()}</div>
+            <div className="px-6 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
+              {bulkCostPreviewLoading && (
+                <div className="p-8 text-center text-slate-400">
+                  <RefreshCw size={18} className="animate-spin inline mr-2" />
+                  กำลังตรวจล็อตต้นทุน...
                 </div>
-                <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3 text-center">
-                  <div className="text-xs text-emerald-500">จะล็อก</div>
-                  <div className="text-xl font-extrabold text-emerald-700">{selectedUnlockedOrders.length.toLocaleString()}</div>
-                </div>
-                <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-center">
-                  <div className="text-xs text-slate-400">ล็อกแล้ว</div>
-                  <div className="text-xl font-extrabold text-slate-600">{selectedLockedOrders.length.toLocaleString()}</div>
-                </div>
-              </div>
+              )}
 
-              <div className="rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700 leading-5">
-                ⚠️ ถ้าล็อตต้นทุนไม่พอ บางออเดอร์อาจล็อกไม่สำเร็จ ระบบจะแจ้งจำนวนสำเร็จ/ล้มเหลวหลังทำงานเสร็จ
-              </div>
+              {!bulkCostPreviewLoading && bulkCostPreview && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 text-sm">
+                    <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-center">
+                      <div className="text-xs text-slate-400">เลือกทั้งหมด</div>
+                      <div className="text-xl font-extrabold text-slate-800">{Number(bulkCostPreview.selected_count || selectedOrders.size).toLocaleString()}</div>
+                    </div>
+                    <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3 text-center">
+                      <div className="text-xs text-emerald-500">ล็อกได้</div>
+                      <div className="text-xl font-extrabold text-emerald-700">{Number(bulkCostPreview.can_lock_count || 0).toLocaleString()}</div>
+                    </div>
+                    <div className="rounded-2xl bg-rose-50 border border-rose-100 p-3 text-center">
+                      <div className="text-xs text-rose-500">ล็อกไม่ได้</div>
+                      <div className="text-xl font-extrabold text-rose-700">{Number(bulkCostPreview.cannot_lock_count || 0).toLocaleString()}</div>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-center">
+                      <div className="text-xs text-slate-400">ล็อกแล้ว</div>
+                      <div className="text-xl font-extrabold text-slate-600">{Number(bulkCostPreview.already_locked_count || 0).toLocaleString()}</div>
+                    </div>
+                    <div className="rounded-2xl bg-fuchsia-50 border border-fuchsia-100 p-3 text-center">
+                      <div className="text-xs text-fuchsia-500">ต้นทุนประมาณการ</div>
+                      <div className="text-xl font-extrabold text-fuchsia-700">
+                        ฿{Number(bulkCostPreview.estimated_total_cost || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {Number(bulkCostPreview.cannot_lock_count || 0) > 0 && (
+                    <div className="rounded-2xl bg-rose-50 border border-rose-100 p-3 text-xs text-rose-700 leading-5">
+                      ⚠️ มีบางออเดอร์ล็อกไม่ได้ ระบบจะล็อกเฉพาะรายการที่ “พร้อมล็อก” เท่านั้น
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-slate-100 overflow-hidden">
+                    <div className="px-4 py-3 bg-slate-800 text-white text-xs font-bold flex justify-between">
+                      <span>ผลตรวจรายการที่เลือก</span>
+                      <span>แสดงสูงสุด 30 รายการ</span>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 bg-white">
+                      {(Array.isArray(bulkCostPreview.orders) ? bulkCostPreview.orders.slice(0, 30) : []).map((r: any) => (
+                        <div key={r.order_id} className="p-3 text-xs">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-mono font-bold text-blue-600">{r.order_no}</div>
+                              <div className={`mt-1 ${r.can_lock ? 'text-emerald-600' : r.status === 'already_locked' ? 'text-slate-500' : 'text-rose-600'}`}>
+                                {r.reason || '-'}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              {r.can_lock ? (
+                                <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100">พร้อมล็อก</span>
+                              ) : r.status === 'already_locked' ? (
+                                <span className="px-2 py-1 rounded-full bg-slate-50 text-slate-500 font-bold border border-slate-100">ล็อกแล้ว</span>
+                              ) : (
+                                <span className="px-2 py-1 rounded-full bg-rose-50 text-rose-700 font-bold border border-rose-100">ล็อกไม่ได้</span>
+                              )}
+                              <div className="mt-1 font-bold text-slate-700">
+                                ฿{Number(r.estimated_cost || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                            </div>
+                          </div>
+
+                          {Array.isArray(r.items) && r.items.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              {r.items.map((it: any, idx: number) => (
+                                <div key={idx} className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2 flex justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="font-bold text-slate-700 truncate">{it.promo_name || it.promo_id || '-'}</div>
+                                    <div className="text-slate-400">ต้องใช้ {Number(it.need_qty || 0).toLocaleString()} ชิ้น · มี {Number(it.available_qty || 0).toLocaleString()} ชิ้น</div>
+                                  </div>
+                                  <div className={it.can_lock ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold'}>
+                                    {it.can_lock ? 'พอ' : `ขาด ${Number(it.missing_qty || 0).toLocaleString()}`}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+
+                      {Array.isArray(bulkCostPreview.orders) && bulkCostPreview.orders.length > 30 && (
+                        <div className="p-3 text-center text-slate-400 text-xs">
+                          ยังมีอีก {bulkCostPreview.orders.length - 30} รายการ
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {!bulkCostPreviewLoading && !bulkCostPreview && (
+                <div className="p-8 text-center text-slate-400">ยังไม่มีผลตรวจล็อต</div>
+              )}
             </div>
 
             <div className="px-6 pb-6 flex justify-end gap-2">
-              <button onClick={() => setShowBulkCostLockConfirm(false)} disabled={bulkCostLocking}
+              <button onClick={() => { setShowBulkCostLockConfirm(false); setBulkCostPreview(null); }} disabled={bulkCostLocking || bulkCostPreviewLoading}
                 className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
                 ยกเลิก
               </button>
-              <button onClick={handleBulkLockOrderCost} disabled={bulkCostLocking || selectedUnlockedOrders.length === 0}
+              <button onClick={handleBulkLockOrderCost}
+                disabled={bulkCostLocking || bulkCostPreviewLoading || Number(bulkCostPreview?.can_lock_count || 0) === 0}
                 className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:from-emerald-600 hover:to-cyan-600 font-bold shadow disabled:opacity-50">
-                {bulkCostLocking ? 'กำลังล็อก...' : `ยืนยันล็อก ${selectedUnlockedOrders.length} ใบ`}
+                {bulkCostLocking ? 'กำลังล็อก...' : `ยืนยันล็อก ${Number(bulkCostPreview?.can_lock_count || 0)} ใบ`}
               </button>
             </div>
           </div>
