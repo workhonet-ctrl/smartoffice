@@ -84,6 +84,21 @@ type ProductCostLot = {
   updated_at?: string | null;
 };
 
+type CostWorkOrder = {
+  id: string;
+  order_no: string;
+  order_date: string | null;
+  total_thb: number | null;
+  raw_prod: string | null;
+  promo_ids: string[] | null;
+  quantities: string | null;
+  quantity: number | null;
+  cost_locked: boolean | null;
+  order_status: string | null;
+  created_at?: string | null;
+};
+
+
 type DashboardProps = {
   onGoToPO?: () => void;
   onGoToStock?: () => void;
@@ -158,6 +173,7 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [latestTxns, setLatestTxns] = useState<StockTransaction[]>([]);
   const [costLots, setCostLots] = useState<ProductCostLot[]>([]);
+  const [costWorkOrders, setCostWorkOrders] = useState<CostWorkOrder[]>([]);
   const [range, setRange] = useState<DateRangeKey>('month');
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -170,7 +186,7 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
   const loadDashboard = async () => {
     setLoading(true);
     try {
-      const [{ data: po }, { data: stock }, { data: txns }, { data: lots }] = await Promise.all([
+      const [{ data: po }, { data: stock }, { data: txns }, { data: lots }, { data: costOrders }] = await Promise.all([
         supabase
           .from('purchase_orders')
           .select('*')
@@ -191,12 +207,19 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
           .select('*')
           .order('created_at', { ascending: false })
           .limit(200),
+        supabase
+          .from('orders')
+          .select('id, order_no, order_date, total_thb, raw_prod, promo_ids, quantities, quantity, cost_locked, order_status, created_at')
+          .not('order_status', 'in', '(รอคีย์ออเดอร์)')
+          .order('order_date', { ascending: false })
+          .limit(1000),
       ]);
 
       setPoList((po || []) as PurchaseOrder[]);
       setStockItems((stock || []) as StockItem[]);
       setLatestTxns((txns || []) as StockTransaction[]);
       setCostLots((lots || []) as ProductCostLot[]);
+      setCostWorkOrders((costOrders || []) as CostWorkOrder[]);
     } catch (err: any) {
       showToast('โหลด Dashboard ไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
     } finally {
@@ -332,6 +355,47 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
       .slice(0, 5),
     [lotSummary.lowLots]
   );
+
+  const parseRawProductName = (raw: string | null | undefined) => {
+    const first = String(raw || '').split('|').map(v => v.trim()).filter(Boolean)[0] || '-';
+    return first
+      .replace(/\s*x\s*\d+$/i, '')
+      .replace(/\s*×\s*\d+$/i, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim() || '-';
+  };
+
+  const costWorkSummary = useMemo(() => {
+    const unlocked = costWorkOrders.filter(o => !o.cost_locked);
+    const locked = costWorkOrders.filter(o => o.cost_locked);
+    const value = unlocked.reduce((sum, o) => sum + Number(o.total_thb || 0), 0);
+
+    const productMap = new Map<string, { name: string; orders: number; value: number }>();
+    unlocked.forEach(o => {
+      const name = parseRawProductName(o.raw_prod);
+      const cur = productMap.get(name) || { name, orders: 0, value: 0 };
+      cur.orders += 1;
+      cur.value += Number(o.total_thb || 0);
+      productMap.set(name, cur);
+    });
+
+    const topProducts = Array.from(productMap.values())
+      .sort((a, b) => b.orders - a.orders || b.value - a.value)
+      .slice(0, 6);
+
+    const recentUnlocked = unlocked
+      .slice()
+      .sort((a, b) => String(b.order_date || b.created_at || '').localeCompare(String(a.order_date || a.created_at || '')))
+      .slice(0, 6);
+
+    return {
+      unlockedCount: unlocked.length,
+      lockedCount: locked.length,
+      unlockedValue: value,
+      topProducts,
+      recentUnlocked,
+    };
+  }, [costWorkOrders]);
 
   const statCards = [
     {
@@ -517,6 +581,102 @@ export default function POStockDashboard({ onGoToPO, onGoToStock }: DashboardPro
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* งานต้นทุนที่ต้องจัดการ */}
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
+                <ClipboardCheck size={18} className="text-amber-500" />
+                งานต้นทุนที่ต้องจัดการ
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">สรุปออเดอร์ที่ยังไม่ล็อกต้นทุน เพื่อรู้ว่ายังต้องจัดการอะไรต่อ</p>
+            </div>
+            <button onClick={onGoToPO}
+              className="px-3 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 text-xs font-bold hover:bg-amber-100">
+              ไปหน้าออเดอร์
+            </button>
+          </div>
+
+          <div className="p-5 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-3xl bg-amber-50 border border-amber-100 p-4">
+                <div className="text-xs font-bold text-amber-600">ยังไม่ล็อกต้นทุน</div>
+                <div className="text-3xl font-extrabold text-amber-700 mt-1">{costWorkSummary.unlockedCount.toLocaleString()}</div>
+                <div className="text-xs text-slate-500 mt-1">จากออเดอร์ล่าสุดที่โหลดมา 1,000 ใบ</div>
+              </div>
+              <div className="rounded-3xl bg-emerald-50 border border-emerald-100 p-4">
+                <div className="text-xs font-bold text-emerald-600">ล็อกต้นทุนแล้ว</div>
+                <div className="text-3xl font-extrabold text-emerald-700 mt-1">{costWorkSummary.lockedCount.toLocaleString()}</div>
+                <div className="text-xs text-slate-500 mt-1">ใช้ snapshot แล้ว</div>
+              </div>
+              <div className="rounded-3xl bg-fuchsia-50 border border-fuchsia-100 p-4">
+                <div className="text-xs font-bold text-fuchsia-600">ยอดขายที่ยังไม่ล็อก</div>
+                <div className="text-3xl font-extrabold text-fuchsia-700 mt-1">{money(costWorkSummary.unlockedValue)}</div>
+                <div className="text-xs text-slate-500 mt-1">ควรล็อกก่อนปิดบัญชี</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div className="rounded-3xl border border-slate-100 overflow-hidden">
+                <div className="px-4 py-3 bg-slate-800 text-white flex justify-between items-center">
+                  <div className="font-bold text-sm">สินค้าที่ยังไม่ล็อกต้นทุนมากสุด</div>
+                  <div className="text-xs text-slate-300">Top 6</div>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {costWorkSummary.topProducts.length === 0 && (
+                    <div className="p-6 text-center text-emerald-700 font-bold">✅ ไม่มีงานค้างล็อกต้นทุน</div>
+                  )}
+                  {costWorkSummary.topProducts.map((p, idx) => (
+                    <div key={p.name} className="px-4 py-3 flex items-center justify-between gap-3 hover:bg-slate-50">
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-800 truncate">{idx + 1}. {p.name}</div>
+                        <div className="text-xs text-slate-400">{p.orders.toLocaleString()} ออเดอร์</div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-extrabold text-amber-700">{p.orders.toLocaleString()}</div>
+                        <div className="text-xs text-slate-400">{money(p.value)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-slate-100 overflow-hidden">
+                <div className="px-4 py-3 bg-slate-800 text-white flex justify-between items-center">
+                  <div className="font-bold text-sm">ออเดอร์ค้างล็อกล่าสุด</div>
+                  <div className="text-xs text-slate-300">แสดง 6 รายการ</div>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {costWorkSummary.recentUnlocked.length === 0 && (
+                    <div className="p-6 text-center text-emerald-700 font-bold">✅ ไม่มีออเดอร์ค้างล็อก</div>
+                  )}
+                  {costWorkSummary.recentUnlocked.map(o => (
+                    <div key={o.id} className="px-4 py-3 flex items-center justify-between gap-3 hover:bg-slate-50">
+                      <div className="min-w-0">
+                        <div className="font-mono text-xs font-bold text-blue-600 truncate">{o.order_no}</div>
+                        <div className="font-bold text-slate-800 truncate mt-0.5">{parseRawProductName(o.raw_prod)}</div>
+                        <div className="text-xs text-slate-400">{o.order_date ? new Date(o.order_date).toLocaleDateString('th-TH') : '-'}</div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-extrabold text-emerald-700">{money(Number(o.total_thb || 0))}</div>
+                        <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[11px] font-bold border border-amber-100">
+                          ยังไม่ล็อก
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {costWorkSummary.unlockedCount > 0 && (
+              <div className="rounded-2xl bg-amber-50 border border-amber-100 px-4 py-3 text-xs text-amber-700 leading-5">
+                แนวทางใช้งาน: ไปหน้าออเดอร์ → กรอง “ต้นทุน: ยังไม่ล็อก” → เลือกออเดอร์ → กดล็อกต้นทุนที่เลือก → ระบบจะ Preview ว่าสินค้าไหนล็อตพอ/ไม่พอ ก่อนตัดล็อตจริง
+              </div>
+            )}
           </div>
         </div>
 
