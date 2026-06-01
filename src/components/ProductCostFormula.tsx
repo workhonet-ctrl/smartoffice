@@ -704,42 +704,58 @@ export default function ProductCostFormula() {
   }, [items]);
 
   return (
-    <div className="flex flex-col h-screen p-3 sm:p-6 pb-2 bg-slate-50">
-      <div className="shrink-0 mb-4 flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-fuchsia-500 to-indigo-500 flex items-center justify-center shadow">
-            <Calculator size={22} className="text-white" />
+    <div className="flex flex-col h-screen bg-slate-50 p-4 sm:p-6 overflow-hidden">
+      <div className="shrink-0 mb-5 rounded-3xl bg-white border border-slate-200 shadow-sm px-5 py-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-slate-900 flex items-center justify-center shadow-sm shrink-0">
+              <Calculator size={21} className="text-white" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">ต้นทุนสินค้าและล็อต</h2>
+                <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-100">
+                  PO + สูตรต้นทุน
+                </span>
+              </div>
+              <p className="text-sm text-slate-500 mt-0.5">
+                ดูล็อตเป็นหลัก · ใช้สูตรเฉพาะสินค้าที่ผลิตเอง · กันหักต้นทุนซ้ำ
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-2xl font-extrabold text-slate-800">ต้นทุนสินค้าและล็อต</h2>
-            <p className="text-sm text-slate-500">
-              จัดการสูตรต้นทุนและล็อตต้นทุน ทั้งจากสูตรผลิตเองและจาก PO
-            </p>
-          </div>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <button onClick={loadData} disabled={loading}
-            className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold disabled:opacity-50">
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            รีเฟรช
-          </button>
-          <button onClick={resetForm}
-            className="px-3 py-2 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 flex items-center gap-2 text-sm font-semibold shadow-sm">
-            <Plus size={14} />
-            สูตรใหม่
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={loadData} disabled={loading}
+              className="px-3 py-2 bg-slate-50 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold disabled:opacity-50">
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+              รีเฟรช
+            </button>
+            <button onClick={resetForm}
+              className="px-3 py-2 bg-slate-900 text-white rounded-xl hover:bg-slate-800 flex items-center gap-2 text-sm font-semibold shadow-sm">
+              <Plus size={14} />
+              สูตรใหม่
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-4">
-        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden flex flex-col min-h-[260px]">
-          <div className="p-4 border-b border-slate-100">
+      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[340px_1fr] gap-5">
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[260px]">
+          <div className="p-4 border-b border-slate-100 bg-white">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-extrabold text-slate-800">รายการสินค้า</div>
+                <div className="text-xs text-slate-400">เลือกสินค้าเพื่อดูล็อตและสูตร</div>
+              </div>
+              <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-500 text-xs font-bold">
+                {filteredFormulas.length + filteredLotOnlyProducts.length}
+              </span>
+            </div>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="ค้นหาสูตร / สินค้า..."
-                className="w-full pl-8 pr-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-fuchsia-200" />
+                className="w-full pl-8 pr-3 py-2.5 border border-slate-200 bg-slate-50 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-slate-200 focus:bg-white" />
             </div>
           </div>
 
@@ -750,29 +766,29 @@ export default function ProductCostFormula() {
 
             {filteredFormulas.map(f => (
               <button key={`formula-${f.id}`} onClick={() => loadFormula(f)}
-                className={`w-full text-left rounded-2xl border p-3 transition ${
+                className={`w-full text-left rounded-2xl border p-3.5 transition ${
                   selectedFormulaId === f.id
-                    ? 'bg-fuchsia-50 border-fuchsia-200 shadow-sm'
-                    : 'bg-white border-slate-100 hover:bg-slate-50'
+                    ? 'bg-slate-900 border-slate-900 shadow-sm text-white'
+                    : 'bg-white border-slate-200 hover:bg-slate-50'
                 }`}>
-                <div className="font-extrabold text-slate-800 truncate">{f.formula_name}</div>
-                <div className="text-xs text-slate-500 truncate mt-0.5">{f.product_name}</div>
+                <div className={`font-extrabold truncate ${selectedFormulaId === f.id ? "text-white" : "text-slate-800"}`}>{f.formula_name}</div>
+                <div className={`text-xs truncate mt-0.5 ${selectedFormulaId === f.id ? "text-slate-300" : "text-slate-500"}`}>{f.product_name}</div>
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-slate-400">สูตรผลิตเอง · กดเพื่อดูล็อต</span>
-                  <span className="text-sm font-extrabold text-fuchsia-700">{money(Number(f.cost_per_unit || 0))}</span>
+                  <span className={`text-xs ${selectedFormulaId === f.id ? "text-slate-300" : "text-slate-400"}`}>สูตรผลิตเอง · กดเพื่อดูล็อต</span>
+                  <span className={`text-sm font-extrabold ${selectedFormulaId === f.id ? "text-white" : "text-slate-900"}`}>{money(Number(f.cost_per_unit || 0))}</span>
                 </div>
               </button>
             ))}
 
             {filteredLotOnlyProducts.map(p => (
               <button key={`lot-product-${p.product_id}`} onClick={() => loadProductLots(p)}
-                className={`w-full text-left rounded-2xl border p-3 transition ${
+                className={`w-full text-left rounded-2xl border p-3.5 transition ${
                   productId === p.product_id && !selectedFormulaId
                     ? 'bg-cyan-50 border-cyan-200 shadow-sm'
-                    : 'bg-white border-slate-100 hover:bg-slate-50'
+                    : 'bg-white border-slate-200 hover:bg-slate-50'
                 }`}>
                 <div className="font-extrabold text-slate-800 truncate">{p.product_name}</div>
-                <div className="text-xs text-cyan-600 truncate mt-0.5">มีล็อตจาก PO / ไม่มีสูตรต้นทุน</div>
+                <div className="text-xs text-cyan-600 truncate mt-0.5">ล็อตจาก PO · ไม่มีสูตรต้นทุน</div>
                 <div className="mt-2 flex items-center justify-between">
                   <span className="text-xs text-slate-400">{p.active_lots} ล็อต · คงเหลือ {Number(p.remaining_qty || 0).toLocaleString()}</span>
                   <span className="text-sm font-extrabold text-cyan-700">{money(Number(p.latest_unit_cost || 0))}</span>
@@ -783,37 +799,42 @@ export default function ProductCostFormula() {
         </div>
 
         <div className="min-h-0 flex flex-col gap-4 overflow-auto">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 shrink-0">
-            <div className="rounded-3xl bg-white border border-slate-100 shadow-sm p-4">
-              <div className="text-xs font-bold text-slate-400">ต้นทุนรวม</div>
-              <div className="text-2xl font-extrabold text-slate-800 mt-1">{money(totalCost)}</div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4">
+              <div className="text-xs font-bold text-slate-400">ต้นทุนรวมสูตร</div>
+              <div className="text-xl font-extrabold text-slate-900 mt-1">{money(totalCost)}</div>
             </div>
-            <div className="rounded-3xl bg-gradient-to-br from-fuchsia-50 to-indigo-50 border border-fuchsia-100 shadow-sm p-4">
-              <div className="text-xs font-bold text-fuchsia-600">ต้นทุนต่อหน่วย</div>
-              <div className="text-2xl font-extrabold text-fuchsia-700 mt-1">{money(costPerUnit)}</div>
+            <div className="rounded-2xl bg-white border border-indigo-100 shadow-sm p-4">
+              <div className="text-xs font-bold text-indigo-500">ต้นทุนต่อหน่วย</div>
+              <div className="text-xl font-extrabold text-indigo-700 mt-1">{money(costPerUnit)}</div>
             </div>
-            <div className="rounded-3xl bg-white border border-slate-100 shadow-sm p-4">
+            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4">
               <div className="text-xs font-bold text-slate-400">ผลผลิต</div>
-              <div className="text-2xl font-extrabold text-slate-800 mt-1">{Number(outputQty || 0).toLocaleString()}</div>
+              <div className="text-xl font-extrabold text-slate-900 mt-1">{Number(outputQty || 0).toLocaleString()}</div>
               <div className="text-xs text-slate-400">{outputUnit}</div>
             </div>
-            <div className="rounded-3xl bg-white border border-slate-100 shadow-sm p-4">
-              <div className="text-xs font-bold text-slate-400">{tab === 'lots' ? 'จำนวนล็อต' : 'จำนวนรายการต้นทุน'}</div>
-              <div className="text-2xl font-extrabold text-slate-800 mt-1">{tab === 'lots' ? lots.length : items.filter(i => i.item_name.trim()).length}</div>
+            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4">
+              <div className="text-xs font-bold text-slate-400">{tab === 'lots' ? 'ล็อตที่แสดง' : 'รายการต้นทุน'}</div>
+              <div className="text-xl font-extrabold text-slate-900 mt-1">{tab === 'lots' ? lots.length : items.filter(i => i.item_name.trim()).length}</div>
             </div>
           </div>
 
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5">
             <div className="flex items-center justify-between gap-3 mb-4">
-              <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
-                <Package size={18} className="text-fuchsia-500" />
-                ข้อมูลสูตร
-              </h3>
+              <div>
+                <h3 className="font-extrabold text-slate-900 flex items-center gap-2">
+                  <Package size={18} className={tab === 'lots' ? 'text-emerald-500' : 'text-indigo-500'} />
+                  {tab === 'lots' ? 'ล็อตต้นทุน' : tab === 'form' ? 'สูตรต้นทุน' : 'ประวัติคำนวณ'}
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {productName ? productName : 'เลือกสินค้าทางซ้ายเพื่อเริ่มใช้งาน'}
+                </p>
+              </div>
               <div className="flex items-center gap-2">
-                <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
+                <div className="flex gap-1 bg-slate-100 p-1 rounded-2xl">
                   {(['lots', 'form'] as const).map(k => (
                     <button key={k} onClick={() => setTab(k)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${tab === k ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}>
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition ${tab === k ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
                       {k === 'lots' ? 'ล็อตต้นทุน' : 'สูตรต้นทุน'}
                     </button>
                   ))}
@@ -833,11 +854,11 @@ export default function ProductCostFormula() {
 
             {tab === 'form' && (
               <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 rounded-2xl bg-slate-50 border border-slate-100 p-4">
                   <div>
                     <label className="text-xs font-bold text-slate-500 block mb-1">สินค้าสำเร็จรูป</label>
                     <select value={productId} onChange={e => selectProduct(e.target.value)}
-                      className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-fuchsia-200">
+                      className="w-full border border-slate-200 bg-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-200">
                       <option value="">เลือกสินค้า...</option>
                       {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
@@ -846,24 +867,24 @@ export default function ProductCostFormula() {
                     <label className="text-xs font-bold text-slate-500 block mb-1">หรือระบุชื่อเอง</label>
                     <input value={productName} onChange={e => setProductName(e.target.value)}
                       placeholder="เช่น ครีม Secret Rose"
-                      className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-fuchsia-200" />
+                      className="w-full border border-slate-200 bg-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-200" />
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-500 block mb-1">ชื่อสูตร</label>
                     <input value={formulaName} onChange={e => setFormulaName(e.target.value)}
                       placeholder="เช่น สูตรครีม 10g"
-                      className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-fuchsia-200" />
+                      className="w-full border border-slate-200 bg-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-200" />
                   </div>
                   <div className="grid grid-cols-[1fr_90px] gap-2">
                     <div>
                       <label className="text-xs font-bold text-slate-500 block mb-1">จำนวนผลผลิต</label>
                       <input type="number" value={outputQty} onChange={e => setOutputQty(Number(e.target.value))}
-                        className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-fuchsia-200" />
+                        className="w-full border border-slate-200 bg-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-200" />
                     </div>
                     <div>
                       <label className="text-xs font-bold text-slate-500 block mb-1">หน่วย</label>
                       <input value={outputUnit} onChange={e => setOutputUnit(e.target.value)}
-                        className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-fuchsia-200" />
+                        className="w-full border border-slate-200 bg-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-200" />
                     </div>
                   </div>
                 </div>
@@ -872,11 +893,11 @@ export default function ProductCostFormula() {
                   <label className="text-xs font-bold text-slate-500 block mb-1">หมายเหตุ</label>
                   <input value={note} onChange={e => setNote(e.target.value)}
                     placeholder="เช่น สูตรรอบผลิตเดือนนี้ / ใช้ราคาวัตถุดิบล่าสุด"
-                    className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-fuchsia-200" />
+                    className="w-full border border-slate-200 bg-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-200" />
                 </div>
 
-                <div className="rounded-3xl border border-slate-100 overflow-hidden">
-                  <div className="px-4 py-3 bg-slate-800 text-white flex items-center justify-between">
+                <div className="rounded-3xl border border-slate-200 overflow-hidden bg-white">
+                  <div className="px-4 py-3 bg-slate-900 text-white flex items-center justify-between">
                     <div className="font-bold flex items-center gap-2">
                       <Layers size={16} />
                       รายการต้นทุน
@@ -1070,10 +1091,10 @@ export default function ProductCostFormula() {
                 {lots.map(lot => {
                   const isPO = lot.source_type === 'purchase_order';
                   return (
-                  <div key={lot.id} className={`rounded-3xl border shadow-sm p-4 ${
+                  <div key={lot.id} className={`rounded-3xl border p-4 ${
                     isPO
-                      ? 'border-cyan-100 bg-gradient-to-br from-white to-cyan-50'
-                      : 'border-emerald-100 bg-gradient-to-br from-white to-emerald-50'
+                      ? 'border-cyan-100 bg-cyan-50/40'
+                      : 'border-emerald-100 bg-emerald-50/40'
                   }`}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -1108,27 +1129,27 @@ export default function ProductCostFormula() {
                       </span>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-4 gap-2 text-sm">
-                      <div className="rounded-2xl bg-white/80 border border-white p-3">
+                    <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-2 text-sm">
+                      <div className="rounded-2xl bg-white border border-slate-100 p-3">
                         <div className="text-xs text-slate-400">จำนวนเริ่มต้น</div>
                         <div className="font-extrabold text-slate-800">{Number(lot.initial_qty).toLocaleString()} {lot.unit}</div>
                       </div>
-                      <div className="rounded-2xl bg-white/80 border border-white p-3">
+                      <div className="rounded-2xl bg-white border border-slate-100 p-3">
                         <div className="text-xs text-slate-400">คงเหลือ</div>
                         <div className="font-extrabold text-emerald-700">{Number(lot.remaining_qty).toLocaleString()} {lot.unit}</div>
                       </div>
-                      <div className="rounded-2xl bg-white/80 border border-white p-3">
+                      <div className="rounded-2xl bg-white border border-slate-100 p-3">
                         <div className="text-xs text-slate-400">ต้นทุนต่อหน่วย</div>
                         <div className="font-extrabold text-fuchsia-700">{money(Number(lot.unit_cost || 0))}</div>
                       </div>
-                      <div className="rounded-2xl bg-white/80 border border-white p-3">
+                      <div className="rounded-2xl bg-white border border-slate-100 p-3">
                         <div className="text-xs text-slate-400">ต้นทุนรวม</div>
                         <div className="font-extrabold text-slate-800">{money(Number(lot.total_cost || 0))}</div>
                       </div>
                     </div>
 
                     {isPO && Array.isArray(lot.source_snapshot?.included_items) && (
-                      <div className="mt-3 rounded-2xl bg-white/80 border border-white p-3">
+                      <div className="mt-3 rounded-2xl bg-white border border-slate-100 p-3">
                         <div className="text-xs font-extrabold text-cyan-700 mb-2">รายการจาก PO ที่รวมเป็นต้นทุน</div>
                         <div className="space-y-1">
                           {lot.source_snapshot.included_items.slice(0, 5).map((it: any, idx: number) => (
@@ -1155,14 +1176,10 @@ export default function ProductCostFormula() {
             )}
           </div>
 
-          <div className="rounded-3xl bg-gradient-to-br from-fuchsia-50 to-indigo-50 border border-fuchsia-100 p-4 text-sm text-slate-600 flex items-start gap-3">
-            <Sparkles size={20} className="text-fuchsia-500 shrink-0 mt-0.5" />
-            <div>
-              <div className="font-extrabold text-slate-800">แนวทางใช้งาน</div>
-              <div className="mt-1 leading-6">
-                PO ใช้บันทึกสิ่งที่ซื้อจริง และสามารถสร้างล็อตต้นทุนจาก PO ได้สำหรับสินค้าพร้อมขาย ส่วนสูตรต้นทุนใช้รวมต้นทุนหลายรายการสำหรับสินค้าผลิตเอง เช่น ครีม 1 กระปุก = เนื้อครีม + กระปุก + กล่อง + ค่าบรรจุ
-              </div>
-            </div>
+          <div className="rounded-2xl bg-amber-50/70 border border-amber-100 px-4 py-3 text-xs text-amber-700 flex items-center gap-2">
+            <Sparkles size={16} className="text-amber-500 shrink-0" />
+            <span className="font-bold">แนวทาง:</span>
+            <span>สินค้าพร้อมขายสร้าง Lot จาก PO · สินค้าผลิตเองใช้สูตรต้นทุน · ออเดอร์จะหักต้นทุนจาก Lot เท่านั้น</span>
           </div>
         </div>
       </div>
