@@ -352,26 +352,22 @@ export default function FinanceExpenses({
       {/* ── Tab: PO ── */}
       {subTab === 'po' && (
         <>
-          <div className="shrink-0 bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3 text-sm text-amber-700">
-            <div className="font-bold flex items-center gap-2">
-              <AlertTriangle size={16}/> ระวังหักซ้ำ: PO ใช้ได้ 2 ทาง
-            </div>
-            <div className="mt-1 leading-6">
-              ระบบจะดู “ประเภท PO” เพื่อแนะนำทางที่ถูกต้อง: ค่าใช้จ่ายทั่วไป = บันทึกเป็นรายจ่าย, สินค้าพร้อมขาย = สร้าง Lot, วัตถุดิบ/วัสดุ = ใช้ในสูตรต้นทุน
-            </div>
-          </div>
-          <div className="shrink-0 grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
-            <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
-              <div className="text-xs text-emerald-600 font-bold">PO สร้าง Lot แล้ว</div>
-              <div className="text-xl font-extrabold text-emerald-700">{Object.keys(lotsByPOId).length.toLocaleString()}</div>
-            </div>
-            <div className="rounded-xl bg-purple-50 border border-purple-100 px-4 py-3">
-              <div className="text-xs text-purple-600 font-bold">บันทึกเป็นรายจ่ายได้</div>
-              <div className="text-xl font-extrabold text-purple-700">{poCanImport.toLocaleString()}</div>
-            </div>
-            <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3">
-              <div className="text-xs text-slate-500 font-bold">PO บันทึกแล้ว</div>
-              <div className="text-xl font-extrabold text-slate-700">{importedPOIds.size.toLocaleString()}</div>
+          <div className="shrink-0 mb-3">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl bg-amber-50/70 border border-amber-100 px-3 py-2 text-xs text-amber-700">
+              <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+              <span className="font-bold">กันหักซ้ำ:</span>
+              <span className="text-amber-700/90">ค่าใช้จ่ายทั่วไป = บันทึกรายจ่าย · สินค้าพร้อมขาย = สร้าง Lot · วัตถุดิบ = ใช้ในสูตร</span>
+              <span className="ml-auto inline-flex flex-wrap items-center gap-1.5">
+                <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold">
+                  Lot {Object.keys(lotsByPOId).length.toLocaleString()}
+                </span>
+                <span className="px-2 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-100 font-bold">
+                  ลงรายจ่ายได้ {poCanImport.toLocaleString()}
+                </span>
+                <span className="px-2 py-1 rounded-lg bg-slate-50 text-slate-600 border border-slate-100 font-bold">
+                  บันทึกแล้ว {importedPOIds.size.toLocaleString()}
+                </span>
+              </span>
             </div>
           </div>
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
@@ -398,7 +394,7 @@ export default function FinanceExpenses({
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">{fmtDate(p.po_date)}</td>
                     <td className="p-3 font-medium">{p.supplier_name}</td>
                     <td className="p-3 text-center whitespace-nowrap">
-                      <span className={`inline-block px-2 py-1 rounded-full text-[11px] font-bold border ${poTypeBadgeClass(p.po_type)}`}>
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold border ${poTypeBadgeClass(p.po_type)}`}>
                         {poTypeLabel(p.po_type)}
                       </span>
                     </td>
@@ -408,15 +404,12 @@ export default function FinanceExpenses({
                     </td>
                     <td className="p-3 text-center">
                       {poLots.length > 0 ? (
-                        <div className="inline-flex flex-col items-center gap-1 px-3 py-2 rounded-xl bg-emerald-100 text-emerald-700 border border-emerald-200 min-w-[150px]">
+                        <div className="inline-flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 min-w-[128px]">
                           <div className="flex items-center gap-1 text-xs font-extrabold">
-                            <PackageCheck size={13}/> สร้าง Lot แล้ว
+                            <PackageCheck size={12}/> สร้าง Lot แล้ว
                           </div>
-                          <div className="text-[10px] font-mono leading-4">
+                          <div className="text-[10px] font-mono leading-4 text-emerald-600">
                             {poLots.map(l => l.lot_no).join(', ')}
-                          </div>
-                          <div className="text-[10px] text-emerald-600">
-                            ไม่บันทึกเป็นรายจ่ายซ้ำ
                           </div>
                         </div>
                       ) : imported ? (
@@ -429,15 +422,13 @@ export default function FinanceExpenses({
                           บันทึกเป็นรายจ่าย
                         </button>
                       ) : p.po_type === 'cost_material' ? (
-                        <div className="inline-block px-3 py-2 rounded-xl bg-amber-50 text-amber-700 text-xs font-bold border border-amber-100 min-w-[150px]">
-                          ใช้ในสูตรต้นทุน<br/>
-                          <span className="text-[10px] font-normal">ไม่บันทึกรายจ่ายตรงนี้</span>
-                        </div>
+                        <span className="inline-block px-2.5 py-1.5 rounded-xl bg-amber-50 text-amber-700 text-xs font-bold border border-amber-100">
+                          ใช้ในสูตรต้นทุน
+                        </span>
                       ) : (
-                        <div className="inline-block px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-100 min-w-[150px]">
-                          ไปสร้าง Lot ก่อน<br/>
-                          <span className="text-[10px] font-normal">ไม่หักเป็นรายจ่าย</span>
-                        </div>
+                        <span className="inline-block px-2.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-100">
+                          ไปสร้าง Lot ก่อน
+                        </span>
                       )}
                     </td>
                   </tr>
