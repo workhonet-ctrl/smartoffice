@@ -346,9 +346,22 @@ export default function PurchaseOrder() {
   const updateRow     = (key: string, field: keyof POItem, val: any) =>
     setPoItems(p => p.map(it => it.key===key ? {...it, [field]: val} : it));
 
-  const total = poItems.reduce((s, it) => s + (Number(it.qty || 0) * Number(it.price || 0)), 0);
   const stockLinkedItems = poItems.filter(it => it.stock_item_id && it.name.trim() && Number(it.qty || 0) > 0);
   const costDetailItems = poItems.filter(it => !it.stock_item_id && it.name.trim() && Number(it.qty || 0) > 0);
+
+  // หลักคำนวณ PO แบบใหม่:
+  // - ถ้ามีรายละเอียดต้นทุน ให้ยอดรวม PO = ผลรวมรายละเอียดต้นทุนเท่านั้น
+  // - แถวสินค้าหลักเป็นตัวบอกว่า "รับเข้า/สร้าง Lot ให้สินค้าอะไร จำนวนเท่าไหร่"
+  // - ราคา/หน่วยของสินค้าหลักแสดงอัตโนมัติ = รายละเอียดต้นทุนรวม ÷ จำนวนสินค้าหลัก
+  // - ถ้าไม่มีรายละเอียดต้นทุน ให้ใช้ราคาของแถวสินค้าหลักตามปกติ
+  const stockLinkedTotalQty = stockLinkedItems.reduce((sum, it) => sum + Number(it.qty || 0), 0);
+  const costDetailTotal = costDetailItems.reduce((sum, it) => sum + Number(it.qty || 0) * Number(it.price || 0), 0);
+  const productLineRawTotal = stockLinkedItems.reduce((sum, it) => sum + Number(it.qty || 0) * Number(it.price || 0), 0);
+  const hasCostDetails = costDetailItems.length > 0;
+  const total = hasCostDetails ? costDetailTotal : productLineRawTotal;
+  const autoProductUnitCost = stockLinkedTotalQty > 0 ? total / stockLinkedTotalQty : 0;
+  const productLineDisplayTotal = (item: POItem) =>
+    hasCostDetails ? Number(item.qty || 0) * autoProductUnitCost : Number(item.qty || 0) * Number(item.price || 0);
 
 
   const handleAddSupplier = async () => {
@@ -459,6 +472,8 @@ export default function PurchaseOrder() {
     return validItems.map(it => ({
       ...it,
       line_type: it.stock_item_id ? 'product' : (it.line_type || 'cost'),
+      // ถ้ามีรายละเอียดต้นทุนแล้ว แถวสินค้าหลักไม่ควรนับเงินซ้ำ
+      price: hasCostDetails && it.stock_item_id ? 0 : Number(it.price || 0),
     }));
   };
 
@@ -594,6 +609,8 @@ export default function PurchaseOrder() {
     return validItems.map(it => ({
       ...it,
       line_type: it.stock_item_id ? 'product' : (it.line_type || 'cost'),
+      // ถ้ามีรายละเอียดต้นทุนแล้ว แถวสินค้าหลักไม่ควรนับเงินซ้ำ
+      price: hasCostDetails && it.stock_item_id ? 0 : Number(it.price || 0),
     }));
   };
 
@@ -1836,10 +1853,14 @@ export default function PurchaseOrder() {
                         className="text-center border rounded-lg px-2 py-2 text-sm font-bold focus:outline-none focus:ring-1 focus:ring-cyan-300"/>
                       <input value={item.unit} onChange={e => updateRow(item.key,'unit',e.target.value)}
                         className="text-center border rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-300"/>
-                      <input type="number" min={0} value={item.price} onChange={e => updateRow(item.key,'price',Number(e.target.value))}
-                        className="text-right border rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-300"/>
+                      <input type="number" min={0}
+                        value={hasCostDetails ? autoProductUnitCost : item.price}
+                        readOnly={hasCostDetails}
+                        onChange={e => updateRow(item.key,'price',Number(e.target.value))}
+                        title={hasCostDetails ? 'คำนวณอัตโนมัติจากรายละเอียดต้นทุนรวม ÷ จำนวนสินค้าหลัก' : ''}
+                        className={`text-right border rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-300 ${hasCostDetails ? 'bg-slate-50 text-slate-500 cursor-not-allowed' : ''}`}/>
                       <div className="text-right text-sm font-bold text-slate-700">
-                        ฿{(Number(item.qty || 0) * Number(item.price || 0)).toLocaleString()}
+                        ฿{productLineDisplayTotal(item).toLocaleString('th-TH', { maximumFractionDigits: 2 })}
                       </div>
                       <button onClick={() => removeRow(item.key)} disabled={poItems.length===1}
                         className="text-red-400 hover:text-red-600 disabled:opacity-20 flex justify-center">
@@ -1852,6 +1873,18 @@ export default function PurchaseOrder() {
                 {stockLinkedItems.length === 0 && (
                   <div className="rounded-xl bg-white border border-dashed border-cyan-200 px-4 py-3 text-xs text-cyan-700">
                     PO สินค้าพร้อมขายต้องเลือกสินค้าหลักจากระบบ เช่น ครีม Secret Rose 500 ชิ้น
+                  </div>
+                )}
+
+                {stockLinkedItems.length > 0 && hasCostDetails && (
+                  <div className="rounded-xl bg-white border border-cyan-100 px-4 py-3 text-xs text-cyan-700">
+                    ราคาต่อหน่วยสินค้าหลักคำนวณอัตโนมัติ:
+                    <b> ฿{total.toLocaleString('th-TH', { maximumFractionDigits: 2 })}</b>
+                    {' ÷ '}
+                    <b>{stockLinkedTotalQty.toLocaleString()} ชิ้น</b>
+                    {' = '}
+                    <b>฿{autoProductUnitCost.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}</b>
+                    {' / ชิ้น'}
                   </div>
                 )}
               </div>
@@ -1921,10 +1954,20 @@ export default function PurchaseOrder() {
                     ? stockLinkedItems.map(it => `${it.name} ${Number(it.qty || 0).toLocaleString()} ${it.unit}`).join(' / ')
                     : 'ยังไม่ได้เลือกสินค้าหลัก'}
                 </div>
+                {stockLinkedItems.length > 0 && (
+                  <div className="mt-1 text-xs text-emerald-600 font-bold">
+                    ต้นทุนสินค้า = ยอดรวมรายละเอียดต้นทุน และต้องเท่ากับยอดรวมทั้งสิ้น
+                  </div>
+                )}
               </div>
               <div className="text-right">
                 <div className="text-xs text-slate-400">ยอดรวมทั้งสิ้น</div>
-                <div className="text-2xl font-bold text-slate-800">฿{total.toLocaleString()}</div>
+                <div className="text-2xl font-bold text-slate-800">฿{total.toLocaleString('th-TH', { maximumFractionDigits: 2 })}</div>
+                {stockLinkedTotalQty > 0 && (
+                  <div className="text-xs text-slate-400 mt-1">
+                    ฿{autoProductUnitCost.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} / ชิ้น
+                  </div>
+                )}
               </div>
             </div>
           </div>
