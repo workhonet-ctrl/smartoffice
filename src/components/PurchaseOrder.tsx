@@ -8,7 +8,7 @@ import {
 type Supplier = { id: string; name: string; tel: string | null; address: string | null; note: string | null };
 type StockItem = { id: string; name: string; unit: string; type: string };
 type ProductMaster = { id: string; name: string; cost_thb?: number | null };
-type POCostLot = { id: string; lot_no: string; source_id: string | null; source_no: string | null; product_name: string; initial_qty: number; remaining_qty: number; unit: string; unit_cost: number; status: string; created_at: string };
+type POCostLot = { id: string; lot_no: string; source_id: string | null; source_no: string | null; product_name: string; initial_qty: number; remaining_qty: number; unit: string; unit_cost: number; total_cost?: number | null; note?: string | null; status: string; created_at: string };
 type POItem    = { key: string; stock_item_id: string | null; name: string; qty: number; unit: string; price: number };
 type POType = 'ready_to_sell' | 'cost_material' | 'expense';
 
@@ -140,6 +140,10 @@ export default function PurchaseOrder() {
   const [lotIncludedKeys, setLotIncludedKeys] = useState<Set<string>>(new Set());
   const [lotFromPONote, setLotFromPONote] = useState('');
   const [cancelLotTarget, setCancelLotTarget] = useState<{ po: PO; lot: POCostLot } | null>(null);
+  const [adjustLotTarget, setAdjustLotTarget] = useState<{ po: PO; lot: POCostLot } | null>(null);
+  const [adjustInitialQty, setAdjustInitialQty] = useState(0);
+  const [adjustUnitCost, setAdjustUnitCost] = useState(0);
+  const [adjustLotNote, setAdjustLotNote] = useState('');
   const [blockedDeleteTarget, setBlockedDeleteTarget] = useState<PO | null>(null);
   const [historyTarget, setHistoryTarget] = useState<PO | null>(null);
   const [auditTarget, setAuditTarget] = useState<PO | null>(null);
@@ -256,7 +260,7 @@ export default function PurchaseOrder() {
       supabase.from('purchase_orders').select('*').order('created_at', { ascending: false }).limit(50),
       supabase
         .from('product_cost_lots')
-        .select('id, lot_no, source_id, source_no, product_name, initial_qty, remaining_qty, unit, unit_cost, status, created_at')
+        .select('id, lot_no, source_id, source_no, product_name, initial_qty, remaining_qty, unit, unit_cost, total_cost, note, status, created_at')
         .eq('source_type', 'purchase_order')
         .in('status', ['active', 'depleted'])
         .order('created_at', { ascending: false })
@@ -1147,6 +1151,133 @@ export default function PurchaseOrder() {
     }
   };
 
+  const openAdjustPOCostLot = (po: PO, lot: POCostLot) => {
+    const usedQty = Number(lot.initial_qty || 0) - Number(lot.remaining_qty || 0);
+    setAdjustLotTarget({ po, lot });
+    setAdjustInitialQty(Number(lot.initial_qty || 0));
+    setAdjustUnitCost(Number(lot.unit_cost || 0));
+    setAdjustLotNote(`ปรับ Lot ${lot.lot_no} จาก PO ${po.po_no}`);
+    if (usedQty < 0) {
+      showToast('ข้อมูล Lot ผิดปกติ: จำนวนคงเหลือมากกว่าจำนวนเริ่มต้น', 'error');
+    }
+  };
+
+  const adjustPOCostLot = async () => {
+    if (!adjustLotTarget || saving || actionLockRef.current) return;
+
+    const { po, lot } = adjustLotTarget;
+    const oldInitial = Number(lot.initial_qty || 0);
+    const oldRemaining = Number(lot.remaining_qty || 0);
+    const usedQty = oldInitial - oldRemaining;
+    const nextInitial = Number(adjustInitialQty || 0);
+    const nextUnitCost = Number(adjustUnitCost || 0);
+    const nextRemaining = nextInitial - usedQty;
+    const nextTotalCost = nextInitial * nextUnitCost;
+
+    if (usedQty < 0) {
+      showToast('ปรับ Lot ไม่ได้ เพราะข้อมูล Lot ผิดปกติ', 'error');
+      return;
+    }
+
+    if (nextInitial <= 0 || nextUnitCost <= 0) {
+      showToast('จำนวนเริ่มต้นใหม่และต้นทุนต่อหน่วยต้องมากกว่า 0', 'error');
+      return;
+    }
+
+    if (nextRemaining < 0) {
+      showToast(`จำนวนเริ่มต้นใหม่ต้องไม่น้อยกว่าจำนวนที่ใช้ไปแล้ว (${usedQty.toLocaleString()} ${lot.unit})`, 'error');
+      return;
+    }
+
+    actionLockRef.current = true;
+    setSaving(true);
+
+    try {
+      const oldSnapshot = {
+        initial_qty: oldInitial,
+        remaining_qty: oldRemaining,
+        unit_cost: Number(lot.unit_cost || 0),
+        total_cost: Number(lot.total_cost || oldInitial * Number(lot.unit_cost || 0)),
+      };
+
+      const newSnapshot = {
+        initial_qty: nextInitial,
+        remaining_qty: nextRemaining,
+        unit_cost: nextUnitCost,
+        total_cost: nextTotalCost,
+      };
+
+      const { error } = await supabase
+        .from('product_cost_lots')
+        .update({
+          initial_qty: nextInitial,
+          remaining_qty: nextRemaining,
+          unit_cost: nextUnitCost,
+          total_cost: nextTotalCost,
+          note: adjustLotNote || `ปรับ Lot ${lot.lot_no} จาก PO ${po.po_no}`,
+        })
+        .eq('id', lot.id)
+        .eq('status', 'active');
+
+      if (error) throw error;
+
+      try {
+        await supabase.from('product_cost_lot_transactions').insert([{
+          lot_id: lot.id,
+          lot_no: lot.lot_no,
+          product_id: null,
+          product_name: lot.product_name,
+          txn_type: 'adjust',
+          qty: nextRemaining - oldRemaining,
+          unit_cost: nextUnitCost,
+          total_cost: nextTotalCost - oldSnapshot.total_cost,
+          ref_type: 'purchase_order_lot_adjustment',
+          ref_id: po.id,
+          note: adjustLotNote || `ปรับ Lot ${lot.lot_no} จาก PO ${po.po_no}`,
+        }]);
+      } catch (txnErr) {
+        console.warn('lot adjustment transaction skipped:', txnErr);
+      }
+
+      await writePOAuditLog({
+        po_id: po.id,
+        po_no: po.po_no,
+        action: 'adjust_cost_lot',
+        action_label: 'ปรับ Lot ต้นทุนจาก PO',
+        detail: `ปรับ ${lot.lot_no}: จำนวน ${oldInitial.toLocaleString()} → ${nextInitial.toLocaleString()}, ต้นทุน ${Number(lot.unit_cost || 0).toLocaleString()} → ${nextUnitCost.toLocaleString()}`,
+        old_status: po.status,
+        new_status: po.status,
+        meta: {
+          lot_id: lot.id,
+          lot_no: lot.lot_no,
+          product_name: lot.product_name,
+          used_qty: usedQty,
+          old: oldSnapshot,
+          new: newSnapshot,
+          note: adjustLotNote || null,
+        },
+      });
+
+      setPOCostLots(prev => prev.map(x => x.id === lot.id ? {
+        ...x,
+        initial_qty: nextInitial,
+        remaining_qty: nextRemaining,
+        unit_cost: nextUnitCost,
+        total_cost: nextTotalCost,
+        note: adjustLotNote || x.note,
+      } : x));
+
+      setAdjustLotTarget(null);
+      showToast(`✓ ปรับ ${lot.lot_no} แล้ว · คงเหลือใหม่ ${nextRemaining.toLocaleString()} ${lot.unit} · ต้นทุน ${nextUnitCost.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+      await loadData();
+    } catch (err: any) {
+      showToast('ปรับ Lot ไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      actionLockRef.current = false;
+      setSaving(false);
+    }
+  };
+
   const handleReceivePO = async () => {
     if (!receiveTarget || saving || actionLockRef.current) return;
 
@@ -1854,7 +1985,10 @@ export default function PurchaseOrder() {
                                   ยกเลิก Lot
                                 </button>
                               ) : (
-                                <div className="mt-1 text-[10px] text-slate-400 font-normal">มีการใช้งานแล้ว</div>
+                                <button onClick={() => openAdjustPOCostLot(po, poLots[0])}
+                                  className="mt-2 w-full px-2 py-1 rounded-lg bg-white text-amber-600 border border-amber-100 hover:bg-amber-50 text-[10px] font-bold">
+                                  ปรับ Lot
+                                </button>
                               )}
                             </div>
                           );
@@ -1900,6 +2034,121 @@ export default function PurchaseOrder() {
           </table>
         </div>
       )}
+
+      {/* Popup: ปรับล็อตต้นทุนจาก PO */}
+      {adjustLotTarget && (() => {
+        const lot = adjustLotTarget.lot;
+        const usedQty = Number(lot.initial_qty || 0) - Number(lot.remaining_qty || 0);
+        const nextInitial = Number(adjustInitialQty || 0);
+        const nextUnitCost = Number(adjustUnitCost || 0);
+        const nextRemaining = nextInitial - usedQty;
+        const nextTotalCost = nextInitial * nextUnitCost;
+        const invalid = usedQty < 0 || nextInitial <= 0 || nextUnitCost <= 0 || nextRemaining < 0;
+
+        return (
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[2rem] w-full max-w-lg shadow-2xl border border-amber-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-amber-50 via-orange-50 to-white px-6 py-6 border-b border-amber-100 relative">
+              <button onClick={() => setAdjustLotTarget(null)} disabled={saving}
+                className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 disabled:opacity-50">
+                <X size={20} />
+              </button>
+              <div className="w-14 h-14 rounded-3xl bg-amber-500 text-white flex items-center justify-center text-2xl shadow-lg mb-3">
+                ↻
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-800">ปรับ Lot ที่ถูกใช้งานแล้ว</h3>
+              <p className="text-sm text-slate-500 mt-2 leading-6">
+                ใช้แก้จำนวน/ต้นทุนของ Lot ที่สร้างผิด แต่ถูกตัดใช้งานไปแล้วบางส่วน
+              </p>
+            </div>
+
+            <div className="px-6 py-4 space-y-4">
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-sm">
+                <div className="flex justify-between gap-3"><span className="text-slate-400">เลข PO</span><b>{adjustLotTarget.po.po_no}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">Lot</span><b className="font-mono">{lot.lot_no}</b></div>
+                <div className="flex justify-between gap-3 mt-1"><span className="text-slate-400">สินค้า</span><b>{lot.product_name}</b></div>
+                <div className="grid grid-cols-3 gap-2 mt-3">
+                  <div className="rounded-xl bg-white border border-slate-100 p-2">
+                    <div className="text-[11px] text-slate-400 font-bold">เดิม</div>
+                    <div className="font-extrabold">{Number(lot.initial_qty || 0).toLocaleString()} {lot.unit}</div>
+                  </div>
+                  <div className="rounded-xl bg-white border border-slate-100 p-2">
+                    <div className="text-[11px] text-slate-400 font-bold">ใช้ไปแล้ว</div>
+                    <div className="font-extrabold text-amber-700">{usedQty.toLocaleString()} {lot.unit}</div>
+                  </div>
+                  <div className="rounded-xl bg-white border border-slate-100 p-2">
+                    <div className="text-[11px] text-slate-400 font-bold">คงเหลือเดิม</div>
+                    <div className="font-extrabold text-emerald-700">{Number(lot.remaining_qty || 0).toLocaleString()} {lot.unit}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 block mb-1">จำนวนเริ่มต้นใหม่</label>
+                  <input type="number" value={adjustInitialQty}
+                    onChange={e => setAdjustInitialQty(Number(e.target.value || 0))}
+                    className="w-full border rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-200" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 block mb-1">ต้นทุนต่อหน่วยใหม่</label>
+                  <input type="number" value={adjustUnitCost}
+                    onChange={e => setAdjustUnitCost(Number(e.target.value || 0))}
+                    className="w-full border rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-200" />
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div>
+                    <div className="text-xs text-amber-600 font-bold">คงเหลือใหม่</div>
+                    <div className={`font-extrabold ${nextRemaining < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                      {nextRemaining.toLocaleString()} {lot.unit}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-amber-600 font-bold">ต้นทุนรวมใหม่</div>
+                    <div className="font-extrabold">฿{nextTotalCost.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-amber-600 font-bold">ออเดอร์เก่า</div>
+                    <div className="font-extrabold text-slate-700">ใช้ snapshot เดิม</div>
+                  </div>
+                </div>
+              </div>
+
+              {nextRemaining < 0 && (
+                <div className="rounded-2xl bg-rose-50 border border-rose-100 px-3 py-2 text-xs text-rose-700 leading-5">
+                  จำนวนเริ่มต้นใหม่ต้องมากกว่าหรือเท่ากับจำนวนที่ใช้ไปแล้ว
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">หมายเหตุการปรับ</label>
+                <input value={adjustLotNote} onChange={e => setAdjustLotNote(e.target.value)}
+                  placeholder="เช่น ปรับจาก 100 เป็น 200 ชิ้น เพราะ PO มีสินค้า 2 บรรทัด"
+                  className="w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-200" />
+              </div>
+
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 px-3 py-2 text-xs text-slate-500 leading-5">
+                หมายเหตุ: การปรับนี้แก้ Lot สำหรับยอดคงเหลือและการล็อกต้นทุนหลังจากนี้เท่านั้น ออเดอร์ที่ล็อกไปแล้วจะยังใช้ snapshot เดิม
+              </div>
+            </div>
+
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setAdjustLotTarget(null)} disabled={saving}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ยกเลิก
+              </button>
+              <button onClick={adjustPOCostLot} disabled={saving || invalid}
+                className="px-5 py-2.5 rounded-xl bg-amber-500 text-white hover:bg-amber-600 font-bold shadow disabled:opacity-50">
+                {saving ? 'กำลังปรับ...' : 'ยืนยันปรับ Lot'}
+              </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
 
       {/* Popup: ยกเลิกล็อตต้นทุนจาก PO */}
       {cancelLotTarget && (
