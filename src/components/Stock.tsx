@@ -1,11 +1,24 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, ShoppingBag, Download } from 'lucide-react';
+import { Package, Plus, RefreshCw, ArrowDown, ArrowUp, AlertTriangle, Search, X, ShoppingBag, PackagePlus, Download, Trash2, Sparkles } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 type StockItem = {
   id: string; name: string; unit: string; type: string;
   min_qty: number; ref_id: string | null; active: boolean;
   current_qty: number; total_in: number; total_out: number;
+  stock_source?: 'movement' | 'lot';
+  lot_count?: number;
+};
+
+type ProductCostLot = {
+  id: string;
+  product_id: string | null;
+  product_name: string;
+  initial_qty: number;
+  remaining_qty: number;
+  unit: string;
+  status: string;
 };
 
 type Transaction = {
@@ -40,18 +53,51 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   const [receivedRows, setReceivedRows] = useState<StockInRow[]>([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
-  const [receiveSearch, setReceiveSearch] = useState('');
-  const [receiveDateFrom, setReceiveDateFrom] = useState('');
-  const [receiveDateTo, setReceiveDateTo] = useState('');
-  const [historySearch, setHistorySearch] = useState('');
-  const [historyType, setHistoryType] = useState<'all'|'in'|'out'>('all');
-  const [historyDateFrom, setHistoryDateFrom] = useState('');
-  const [historyDateTo, setHistoryDateTo] = useState('');
   const [toast, setToast]     = useState<{ msg: string; type: 'success'|'error' } | null>(null);
 
-  const [saving, setSaving]       = useState(false);
-  const [showSyncConfirm, setShowSyncConfirm] = useState(false);
+  // ตัวกรองประวัติการเคลื่อนไหว
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyTxnFilter, setHistoryTxnFilter] = useState<'all'|'in'|'out'|'return'|'adjustment'>('all');
+  const [historyDateFrom, setHistoryDateFrom] = useState('');
+  const [historyDateTo, setHistoryDateTo] = useState('');
+  const [selectedTxnIds, setSelectedTxnIds] = useState<string[]>([]);
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; mode: 'selected' | 'all'; ids: string[] }>({ open: false, mode: 'selected', ids: [] });
+  const [deletingTxns, setDeletingTxns] = useState(false);
 
+  // รับเข้าสต็อก form (simplified)
+  const [rcvItemId, setRcvItemId] = useState('');
+  const [rcvQty,    setRcvQty]    = useState(1);
+  const [rcvNote,   setRcvNote]   = useState('');
+  const [rcvRefId,  setRcvRefId]  = useState('');
+  const [rcvDate,   setRcvDate]   = useState(new Date().toISOString().split('T')[0]);
+  const [saving, setSaving]       = useState(false);
+
+  // Popup รับสต็อกเริ่มต้น (order-based)
+  const [showInitStock, setShowInitStock] = useState(false);
+  const [initSaving, setInitSaving] = useState(false);
+  const [initOrders, setInitOrders] = useState<any[]>([]);
+  const [initLoadingOrders, setInitLoadingOrders] = useState(false);
+  // packRows: orderId → { boxId, bubbleId, boxSearch, bubbleSearch }
+  const [packRows, setPackRows] = useState<Record<string, {
+    boxId: string; bubbleId: string;
+    boxSearch: string; bubbleSearch: string;
+    selected: boolean;
+  }>>({});
+  const [bulkBoxId, setBulkBoxId] = useState('');
+  const [bulkBubbleId, setBulkBubbleId] = useState('');
+  const [bulkBoxSearch, setBulkBoxSearch] = useState('');
+  const [bulkBubbleSearch, setBulkBubbleSearch] = useState('');
+  // legacy refs (คงไว้ป้องกัน ref error)
+  const [initTab, setInitTab]   = useState<'box'|'bubble'|'product'>('product');
+  const [initRows, setInitRows] = useState<Record<string, { qty: number; price: number; selected: boolean }>>({});
+  const [bulkPrice, setBulkPrice] = useState('');
+
+  // เพิ่มรายการใหม่
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [newName, setNewName]   = useState('');
+  const [newUnit, setNewUnit]   = useState('ชิ้น');
+  const [newType, setNewType]   = useState('product');
+  const [newMin, setNewMin]     = useState(0);
 
   const showToast = (msg: string, type: 'success'|'error' = 'success') => {
     setToast({ msg, type });
@@ -59,9 +105,68 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   };
 
   // load เฉพาะ stock ใช้บ่อย
+  // หมายเหตุ: สินค้าที่มี Lot ต้นทุนแล้ว ให้ใช้ Lot เป็นแหล่งคงเหลือหลัก
+  // เพื่อกันเคสสินค้าจากสูตร/PO ที่ไม่มีรับเข้า stock movement แล้วคงเหลือติดลบหลอก
+  const normalizeName = (value: string) =>
+    String(value || '').toLowerCase().replace(/\s+/g, '').trim();
+
   const loadItems = async () => {
-    const { data } = await supabase.from('stock_current').select('*').order('type').order('name');
-    if (data) setItems(data as StockItem[]);
+    const [{ data: stockRows }, { data: lotRows }] = await Promise.all([
+      supabase.from('stock_current').select('*').order('type').order('name'),
+      supabase
+        .from('product_cost_lots')
+        .select('id, product_id, product_name, initial_qty, remaining_qty, unit, status')
+        .in('status', ['active', 'depleted'])
+        .order('created_at', { ascending: false }),
+    ]);
+
+    const lots = (lotRows || []) as ProductCostLot[];
+
+    const lotByProductKey = lots.reduce((map, lot) => {
+      const keys = [
+        lot.product_id ? `id:${lot.product_id}` : '',
+        lot.product_name ? `name:${normalizeName(lot.product_name)}` : '',
+      ].filter(Boolean);
+
+      keys.forEach(key => {
+        if (!map[key]) {
+          map[key] = { total_in: 0, total_out: 0, current_qty: 0, lot_count: 0, unit: lot.unit };
+        }
+
+        const initial = Number(lot.initial_qty || 0);
+        const remaining = Math.max(0, Number(lot.remaining_qty || 0));
+
+        map[key].total_in += initial;
+        map[key].total_out += Math.max(0, initial - remaining);
+        map[key].current_qty += remaining;
+        map[key].lot_count += 1;
+        if (lot.unit) map[key].unit = lot.unit;
+      });
+
+      return map;
+    }, {} as Record<string, { total_in: number; total_out: number; current_qty: number; lot_count: number; unit: string }>);
+
+    const merged = ((stockRows || []) as StockItem[]).map(item => {
+      if (item.type !== 'product') return item;
+
+      const byId = item.ref_id ? lotByProductKey[`id:${item.ref_id}`] : null;
+      const byName = lotByProductKey[`name:${normalizeName(item.name)}`];
+      const lotAgg = byId || byName;
+
+      if (!lotAgg || lotAgg.lot_count <= 0) return item;
+
+      return {
+        ...item,
+        total_in: lotAgg.total_in,
+        total_out: lotAgg.total_out,
+        current_qty: lotAgg.current_qty,
+        unit: lotAgg.unit || item.unit,
+        stock_source: 'lot' as const,
+        lot_count: lotAgg.lot_count,
+      };
+    });
+
+    setItems(merged);
   };
 
   // load transactions (lazy — เฉพาะเมื่อเปิดแท็บ history)
@@ -69,46 +174,33 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     setLoading(true);
     const { data } = await supabase.from('stock_transactions')
       .select('*, stock_items(name,unit)')
-      .order('created_at', { ascending: false }).limit(200);
+      .order('created_at', { ascending: false }).limit(1000);
     if (data) setTxns(data as Transaction[]);
     setLoading(false);
   };
 
-  // load PO ที่รับเข้าแล้ว (lazy — เฉพาะเมื่อเปิดแท็บ receive)
+  // load PO (lazy — เฉพาะเมื่อเปิดแท็บ receive)
   const loadPO = async () => {
     setLoading(true);
-    try {
-      // เดิมใช้ status = approved ทำให้พอกดรับเข้าแล้ว PO เปลี่ยนเป็น received
-      // จึงไม่แสดงในแท็บ "รับเข้าสต็อก" ทั้งที่ประวัติการเคลื่อนไหวมี transaction แล้ว
-      const { data: po, error } = await supabase.from('purchase_orders')
-        .select('*')
-        .eq('status', 'received')
-        .order('po_date', { ascending: false });
-
-      if (error) throw error;
-
+    const { data: po } = await supabase.from('purchase_orders')
+      .select('*').eq('status', 'approved')
+      .order('po_date', { ascending: false });
+    if (po) {
       const rows: StockInRow[] = [];
-      for (const p of (po || [])) {
+      for (const p of po) {
         for (const item of (p.items || [])) {
           rows.push({
-            po_no: p.po_no,
-            po_date: p.updated_at || p.created_at || p.po_date,
+            po_no: p.po_no, po_date: p.po_date,
             supplier_name: p.supplier_name,
-            item_name: item.name,
-            qty: Number(item.qty || 0),
-            unit: item.unit || '',
-            price: Number(item.price || 0),
-            total: Number(item.qty || 0) * Number(item.price || 0),
+            item_name: item.name, qty: item.qty,
+            unit: item.unit, price: item.price,
+            total: item.qty * item.price,
           });
         }
       }
-
       setReceivedRows(rows);
-    } catch (err: any) {
-      showToast('❌ โหลดรายการรับเข้าสต็อกไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   const loadAll = async () => {
@@ -122,128 +214,8 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   // lazy load เมื่อสลับแท็บ
   useEffect(() => {
     if (tab === 'history' && txns.length === 0) loadTxns();
-    if (tab === 'receive') loadPO();
+    if (tab === 'receive' && receivedRows.length === 0) loadPO();
   }, [tab]);
-
-  const filteredReceivedRows = receivedRows.filter(row => {
-    const q = receiveSearch.trim().toLowerCase();
-    const haystack = [
-      row.po_no,
-      row.supplier_name || '',
-      row.item_name,
-      row.unit,
-    ].join(' ').toLowerCase();
-
-    const matchText = !q || haystack.includes(q);
-
-    const rowDate = row.po_date ? new Date(row.po_date) : null;
-    const fromOk = !receiveDateFrom || (rowDate && rowDate >= new Date(receiveDateFrom + 'T00:00:00'));
-    const toOk = !receiveDateTo || (rowDate && rowDate <= new Date(receiveDateTo + 'T23:59:59'));
-
-    return matchText && fromOk && toOk;
-  });
-
-  const clearReceiveFilters = () => {
-    setReceiveSearch('');
-    setReceiveDateFrom('');
-    setReceiveDateTo('');
-  };
-
-  const csvCell = (value: any) => `"${String(value ?? '').replace(/"/g, '""')}"`;
-
-  const exportReceivedRowsCsv = () => {
-    const header = ['วันที่รับเข้า', 'เลขที่เอกสาร', 'ผู้ขาย', 'รายการสินค้า', 'จำนวน', 'หน่วย', 'ราคา/หน่วย', 'รวม'];
-    const rows = filteredReceivedRows.map(row => [
-      row.po_date ? new Date(row.po_date).toLocaleDateString('th-TH') : '',
-      row.po_no,
-      row.supplier_name || '',
-      row.item_name,
-      row.qty,
-      row.unit,
-      row.price,
-      row.total,
-    ]);
-
-    const csv = [header, ...rows]
-      .map(r => r.map(csvCell).join(','))
-      .join('\n');
-
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const today = new Date().toISOString().split('T')[0];
-    a.href = url;
-    a.download = `stock-receive-${today}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    showToast(`✓ Export รายการรับเข้า ${filteredReceivedRows.length} รายการแล้ว`);
-  };
-
-  const filteredHistoryRows = txns.filter(t => {
-    const q = historySearch.trim().toLowerCase();
-    const itemName = (t as any).stock_items?.name || '';
-    const unit = (t as any).stock_items?.unit || '';
-    const haystack = [
-      itemName,
-      unit,
-      t.ref_type || '',
-      t.ref_id || '',
-      t.note || '',
-      t.txn_type || '',
-    ].join(' ').toLowerCase();
-
-    const matchText = !q || haystack.includes(q);
-    const matchType = historyType === 'all' || t.txn_type === historyType;
-
-    const rowDate = t.created_at ? new Date(t.created_at) : null;
-    const fromOk = !historyDateFrom || (rowDate && rowDate >= new Date(historyDateFrom + 'T00:00:00'));
-    const toOk = !historyDateTo || (rowDate && rowDate <= new Date(historyDateTo + 'T23:59:59'));
-
-    return matchText && matchType && fromOk && toOk;
-  });
-
-  const clearHistoryFilters = () => {
-    setHistorySearch('');
-    setHistoryType('all');
-    setHistoryDateFrom('');
-    setHistoryDateTo('');
-  };
-
-  const exportHistoryRowsCsv = () => {
-    const header = ['วันที่', 'เวลา', 'ประเภท', 'รายการ', 'จำนวน', 'หน่วย', 'อ้างอิงประเภท', 'อ้างอิงเลขที่', 'หมายเหตุ'];
-    const rows = filteredHistoryRows.map(t => {
-      const dt = t.created_at ? new Date(t.created_at) : null;
-      return [
-        dt ? dt.toLocaleDateString('th-TH') : '',
-        dt ? dt.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '',
-        t.txn_type === 'in' ? 'รับเข้า' : 'เบิกออก',
-        (t as any).stock_items?.name || '',
-        Number(t.qty || 0),
-        (t as any).stock_items?.unit || '',
-        t.ref_type || '',
-        t.ref_id || '',
-        t.note || '',
-      ];
-    });
-
-    const csv = [header, ...rows]
-      .map(r => r.map(csvCell).join(','))
-      .join('\n');
-
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const today = new Date().toISOString().split('T')[0];
-    a.href = url;
-    a.download = `stock-history-${today}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    showToast(`✓ Export ประวัติการเคลื่อนไหว ${filteredHistoryRows.length} รายการแล้ว`);
-  };
 
   // sync จาก products_master + boxes + bubbles (ใช้ upsert + unique constraint แทน JS loop)
   const handleSync = async () => {
@@ -267,14 +239,101 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
         .select('id', { count: 'exact', head: true });
 
       showToast(count && count > 0 ? `✓ ซิงค์แล้ว ${count} รายการใหม่` : 'ไม่มีรายการใหม่ที่ต้องซิงค์');
-      setShowSyncConfirm(false);
       await loadItems();
     } finally { setLoading(false); }
+  };
+
+  const handleReceive = async () => {
+    if (!rcvItemId || rcvQty <= 0) return;
+    setSaving(true);
+    try {
+      await supabase.from('stock_transactions').insert([{
+        stock_item_id: rcvItemId, txn_type: 'in', qty: rcvQty,
+        ref_type: 'manual', ref_id: rcvRefId || null,
+        note: rcvNote || null,
+        created_at: new Date(rcvDate).toISOString(),
+      }]);
+      showToast('✓ รับเข้าสต็อกสำเร็จ');
+      setRcvQty(1); setRcvNote(''); setRcvRefId('');
+      setRcvDate(new Date().toISOString().split('T')[0]);
+      await loadItems(); // โหลดแค่ stock ไม่ต้องโหลด txn/PO ทั้งหมด
+    } finally { setSaving(false); }
+  };
+
+  // ── เปิด popup รับสต็อกเริ่มต้น ──────────────────────────────
+  const handleOpenInitStock = async () => {
+    setInitLoadingOrders(true);
+    setShowInitStock(true);
+    try {
+      const { data } = await supabase
+        .from('orders')
+        .select('id, order_no, raw_prod, quantities, customers(name)')
+        .in('order_status', ['แพ็คสินค้า', 'ส่งสินค้าแล้ว'])
+        .order('created_at', { ascending: false });
+      setInitOrders(data || []);
+      // init packRows
+      const rows: typeof packRows = {};
+      (data || []).forEach((o: any) => {
+        rows[o.id] = { boxId: '', bubbleId: '', boxSearch: '', bubbleSearch: '', selected: false };
+      });
+      setPackRows(rows);
+    } finally { setInitLoadingOrders(false); }
+  };
+
+  const handleSaveInitStock = async () => {
+    const selected = initOrders.filter(o => {
+      const r = packRows[o.id];
+      return r?.selected && (r.boxId || r.bubbleId);
+    });
+    if (selected.length === 0) {
+      showToast('กรุณาเลือกออเดอร์และเลือกกล่อง/บั้บเบิ้ล', 'error'); return;
+    }
+    setInitSaving(true);
+    try {
+      const toInsert: any[] = [];
+      selected.forEach((o: any) => {
+        const r = packRows[o.id];
+        if (r.boxId) {
+          toInsert.push({
+            stock_item_id: r.boxId,
+            txn_type: 'out', qty: 1,
+            ref_type: 'pack', ref_id: o.order_no,
+            note: `แพ็คออเดอร์ ${o.order_no} - ${o.customers?.name || ''}`,
+          });
+        }
+        if (r.bubbleId) {
+          toInsert.push({
+            stock_item_id: r.bubbleId,
+            txn_type: 'out', qty: 1,
+            ref_type: 'pack', ref_id: o.order_no,
+            note: `แพ็คออเดอร์ ${o.order_no} - ${o.customers?.name || ''}`,
+          });
+        }
+      });
+      const { error } = await supabase.from('stock_transactions').insert(toInsert);
+      if (error) throw error;
+      showToast(`✓ ตัดสต็อก ${selected.length} ออเดอร์ (${toInsert.length} transactions)`);
+      setShowInitStock(false);
+      await loadItems();
+    } catch (err: any) {
+      showToast('❌ ' + (err.message || 'unknown'), 'error');
+    } finally { setInitSaving(false); }
   };
 
   const handleUpdateMin = async (id: string, min: number) => {
     await supabase.from('stock_items').update({ min_qty: min }).eq('id', id);
     setItems(p => p.map(i => i.id === id ? { ...i, min_qty: min } : i));
+  };
+
+  const handleAddItem = async () => {
+    if (!newName.trim()) return;
+    setSaving(true);
+    await supabase.from('stock_items').insert([{ name: newName, unit: newUnit, type: newType, min_qty: newMin }]);
+    setNewName(''); setNewUnit('ชิ้น'); setNewType('product'); setNewMin(0);
+    setShowAddItem(false);
+    showToast('✓ เพิ่มรายการสำเร็จ');
+    await loadAll();
+    setSaving(false);
   };
 
   const filtered = items.filter(i =>
@@ -291,6 +350,120 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     if (item.min_qty > 0 && item.current_qty <= item.min_qty*1.5) return <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">🟡 ใกล้หมด</span>;
     if (item.min_qty > 0) return <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">🟢 ปกติ</span>;
     return <span className="text-slate-300 text-xs">-</span>;
+  };
+
+
+  const getTxnCategory = (t: Transaction): 'in'|'out'|'return'|'adjustment' => {
+    if (t.ref_type === 'return') return 'return';
+    if (t.ref_type === 'adjustment') return 'adjustment';
+    return t.txn_type === 'in' ? 'in' : 'out';
+  };
+
+  const getTxnLabel = (t: Transaction) => {
+    const category = getTxnCategory(t);
+    if (category === 'return') return 'คืนสต็อก';
+    if (category === 'adjustment') return 'ปรับปรุง';
+    return t.txn_type === 'in' ? 'รับเข้า' : 'เบิกออก';
+  };
+
+  const txnTypeBadge = (t: Transaction) => {
+    const category = getTxnCategory(t);
+    if (category === 'return') {
+      return <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold"><ArrowDown size={10}/>คืนสต็อก</span>;
+    }
+    if (category === 'adjustment') {
+      return <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-bold">↕ ปรับปรุง</span>;
+    }
+    return t.txn_type === 'in'
+      ? <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold"><ArrowDown size={10}/>รับเข้า</span>
+      : <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-bold"><ArrowUp size={10}/>เบิกออก</span>;
+  };
+
+  const filteredTxns = txns.filter(t => {
+    const q = historySearch.trim().toLowerCase();
+    const itemName = ((t as any).stock_items?.name || '').toLowerCase();
+    const ref = `${t.ref_type || ''} ${t.ref_id || ''}`.toLowerCase();
+    const note = (t.note || '').toLowerCase();
+    const matchSearch = !q || itemName.includes(q) || ref.includes(q) || note.includes(q);
+    const matchType = historyTxnFilter === 'all' || getTxnCategory(t) === historyTxnFilter;
+    const txnDate = new Date(t.created_at).toISOString().split('T')[0];
+    const matchFrom = !historyDateFrom || txnDate >= historyDateFrom;
+    const matchTo = !historyDateTo || txnDate <= historyDateTo;
+    return matchSearch && matchType && matchFrom && matchTo;
+  });
+
+  const historyTotals = filteredTxns.reduce((acc, t) => {
+    const qty = Number(t.qty) || 0;
+    const category = getTxnCategory(t);
+    if (category === 'return') acc.returnQty += qty;
+    else if (category === 'adjustment') acc.adjustQty += qty;
+    else if (t.txn_type === 'in') acc.inQty += qty;
+    else acc.outQty += qty;
+    return acc;
+  }, { inQty: 0, outQty: 0, returnQty: 0, adjustQty: 0 });
+
+
+  const filteredTxnIds = filteredTxns.map(t => t.id);
+  const allFilteredSelected = filteredTxnIds.length > 0 && filteredTxnIds.every(id => selectedTxnIds.includes(id));
+
+  const toggleSelectAllFiltered = (checked: boolean) => {
+    if (checked) {
+      setSelectedTxnIds(Array.from(new Set([...selectedTxnIds, ...filteredTxnIds])));
+    } else {
+      setSelectedTxnIds(selectedTxnIds.filter(id => !filteredTxnIds.includes(id)));
+    }
+  };
+
+  const toggleTxnSelection = (id: string, checked: boolean) => {
+    setSelectedTxnIds(prev => checked ? Array.from(new Set([...prev, id])) : prev.filter(x => x !== id));
+  };
+
+  const openDeleteDialog = (mode: 'selected' | 'all') => {
+    const ids = mode === 'selected' ? selectedTxnIds : filteredTxnIds;
+    if (ids.length === 0) {
+      showToast(mode === 'selected' ? 'กรุณาเลือกรายการที่ต้องการลบ' : 'ไม่มีรายการสำหรับลบ', 'error');
+      return;
+    }
+    setDeleteDialog({ open: true, mode, ids });
+  };
+
+  const handleDeleteTransactions = async () => {
+    if (deleteDialog.ids.length === 0) return;
+    setDeletingTxns(true);
+    try {
+      const { error } = await supabase.from('stock_transactions').delete().in('id', deleteDialog.ids);
+      if (error) throw error;
+      showToast(`✓ ลบประวัติการเคลื่อนไหว ${deleteDialog.ids.length} รายการแล้ว`);
+      setSelectedTxnIds(prev => prev.filter(id => !deleteDialog.ids.includes(id)));
+      setDeleteDialog({ open: false, mode: 'selected', ids: [] });
+      await loadTxns();
+      await loadItems();
+    } catch (err: any) {
+      showToast('❌ ลบไม่สำเร็จ: ' + (err.message || 'unknown error'), 'error');
+    } finally {
+      setDeletingTxns(false);
+    }
+  };
+
+  const handleExportHistory = () => {
+    const rows = filteredTxns.map(t => ({
+      'วันที่': new Date(t.created_at).toLocaleDateString('th-TH'),
+      'เวลา': new Date(t.created_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+      'ประเภท': getTxnLabel(t),
+      'รายการ': (t as any).stock_items?.name || '-',
+      'จำนวน': `${t.txn_type === 'in' ? '+' : '-'}${Number(t.qty)}`,
+      'หน่วย': (t as any).stock_items?.unit || '',
+      'อ้างอิง': `${t.ref_type ? `${t.ref_type}: ` : ''}${t.ref_id || '-'}`,
+      'หมายเหตุ': t.note || '-',
+    }));
+    if (rows.length === 0) {
+      showToast('ไม่มีข้อมูลสำหรับ Export', 'error');
+      return;
+    }
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Stock Movement');
+    XLSX.writeFile(wb, `stock_movement_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (
@@ -316,11 +489,23 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button onClick={() => setShowSyncConfirm(true)} disabled={loading}
+          <button onClick={handleSync} disabled={loading}
             className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 flex items-center gap-2 text-sm">
             <RefreshCw size={13} className={loading?'animate-spin':''}/> ซิงค์จากสินค้า
           </button>
-</div>
+          <button onClick={onGoToPO}
+            className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-2 text-sm">
+            <ShoppingBag size={13}/> ใบสั่งซื้อ (PO)
+          </button>
+          <button onClick={handleOpenInitStock}
+            className="px-3 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 flex items-center gap-2 text-sm">
+            <PackagePlus size={13}/> รับสต็อกเริ่มต้น
+          </button>
+          <button onClick={() => setShowAddItem(true)}
+            className="px-3 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 flex items-center gap-2 text-sm">
+            <Plus size={13}/> เพิ่มรายการ
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -336,6 +521,11 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
       {/* ── Tab: สต็อกคงเหลือ ── */}
       {tab === 'stock' && (
         <>
+          <div className="mb-3 shrink-0 rounded-xl bg-emerald-50/70 border border-emerald-100 px-3 py-2 text-xs text-emerald-700 flex items-center gap-2">
+            <Sparkles size={14} className="text-emerald-500 shrink-0" />
+            <span className="font-bold">สินค้าแบบ Lot:</span>
+            <span>รับเข้า/เบิกออก/คงเหลือจะคำนวณจาก Lot ต้นทุน เพื่อกันยอดติดลบจาก stock movement เก่า</span>
+          </div>
           <div className="relative mb-3 shrink-0">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาสินค้า..."
@@ -363,12 +553,21 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                         {TYPE_LABEL[item.type]||'อื่นๆ'}
                       </span>
                     </td>
-                    <td className="p-3 font-medium text-slate-800 whitespace-nowrap">{item.name}</td>
-                    <td className="p-3 text-center text-green-600 font-bold">{Number(item.total_in)}</td>
-                    <td className="p-3 text-center text-red-500 font-bold">{Number(item.total_out)}</td>
+                    <td className="p-3 font-medium text-slate-800 whitespace-nowrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span>{item.name}</span>
+                        {item.stock_source === 'lot' && (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-bold">
+                            จาก Lot {item.lot_count || 0}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-3 text-center text-green-600 font-bold">{Number(item.total_in).toLocaleString()}</td>
+                    <td className="p-3 text-center text-red-500 font-bold">{Number(item.total_out).toLocaleString()}</td>
                     <td className="p-3 text-center">
                       <span className={`text-lg font-bold ${Number(item.current_qty) <= 0 ? 'text-red-600' : Number(item.current_qty) <= item.min_qty ? 'text-red-500' : 'text-slate-800'}`}>
-                        {Number(item.current_qty)}
+                        {Number(item.current_qty).toLocaleString()}
                       </span>
                       <span className="text-xs text-slate-400 ml-1">{item.unit}</span>
                     </td>
@@ -391,48 +590,14 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
         <>
           <div className="flex items-center justify-between mb-3 shrink-0 flex-wrap gap-2">
             <p className="text-sm text-slate-500">
-              รายการรับเข้าแสดง <span className="font-semibold text-slate-700">{filteredReceivedRows.length}</span> / {receivedRows.length} รายการ
-              (จาก PO ที่รับเข้าแล้ว)
+              รายการรับเข้าทั้งหมด <span className="font-semibold text-slate-700">{receivedRows.length}</span> รายการ
+              (จาก PO ที่อนุมัติแล้ว)
             </p>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={exportReceivedRowsCsv} disabled={filteredReceivedRows.length === 0}
-                className="px-3 py-1.5 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 flex items-center gap-1.5 text-sm font-medium disabled:opacity-50">
-                <Download size={13}/> Export Excel
-              </button>
-              <button onClick={onGoToPO}
-                className="px-3 py-1.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-1.5 text-sm font-medium">
-                <ShoppingBag size={13}/> สร้าง PO ใหม่
-              </button>
-            </div>
+            <button onClick={onGoToPO}
+              className="px-3 py-1.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-1.5 text-sm font-medium">
+              <ShoppingBag size={13}/> สร้าง PO ใหม่
+            </button>
           </div>
-
-          <div className="mb-3 bg-white rounded-2xl shadow-sm border border-slate-100 p-3 shrink-0">
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_170px_170px_auto] gap-2">
-              <div className="relative">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                <input value={receiveSearch} onChange={e => setReceiveSearch(e.target.value)}
-                  placeholder="ค้นหาเลข PO / ผู้ขาย / รายการสินค้า..."
-                  className="w-full pl-9 pr-3 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-              </div>
-              <input type="date" value={receiveDateFrom} onChange={e => setReceiveDateFrom(e.target.value)}
-                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-              <input type="date" value={receiveDateTo} onChange={e => setReceiveDateTo(e.target.value)}
-                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-              <button onClick={clearReceiveFilters}
-                className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 text-sm font-semibold whitespace-nowrap">
-                ล้างตัวกรอง
-              </button>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2 text-xs">
-              <span className="px-3 py-1 rounded-full bg-green-50 text-green-700 font-bold">
-                รวมจำนวน {filteredReceivedRows.reduce((sum, r) => sum + Number(r.qty || 0), 0).toLocaleString()} ชิ้น
-              </span>
-              <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 font-bold">
-                รวมมูลค่า ฿{filteredReceivedRows.reduce((sum, r) => sum + Number(r.total || 0), 0).toLocaleString()}
-              </span>
-            </div>
-          </div>
-
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
             <table className="text-sm w-full" style={{minWidth:'850px'}}>
               <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
@@ -448,12 +613,12 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {filteredReceivedRows.length === 0 && (
+                {receivedRows.length === 0 && (
                   <tr><td colSpan={8} className="p-10 text-center text-slate-400">
-                    ยังไม่มีการรับเข้าสต็อก — รับเข้า PO แล้วรายการจะแสดงที่นี่
+                    ยังไม่มีการรับเข้าสต็อก — อนุมัติ PO เพื่อรับเข้าสต็อก
                   </td></tr>
                 )}
-                {filteredReceivedRows.map((row, idx) => (
+                {receivedRows.map((row, idx) => (
                   <tr key={idx} className="border-b hover:bg-slate-50">
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
                       {new Date(row.po_date).toLocaleDateString('th-TH')}
@@ -474,17 +639,17 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                   </tr>
                 ))}
               </tbody>
-              {filteredReceivedRows.length > 0 && (
+              {receivedRows.length > 0 && (
                 <tfoot className="bg-slate-50 border-t-2 border-slate-200 sticky bottom-0">
                   <tr>
                     <td colSpan={4} className="p-3 text-right text-sm font-semibold text-slate-600">รวมทั้งสิ้น</td>
                     <td className="p-3 text-center font-bold text-green-600">
-                      {filteredReceivedRows.reduce((s, r) => s + r.qty, 0)}
+                      {receivedRows.reduce((s, r) => s + r.qty, 0)}
                     </td>
                     <td/>
                     <td/>
                     <td className="p-3 text-right font-bold text-slate-800">
-                      ฿{filteredReceivedRows.reduce((s, r) => s + r.total, 0).toLocaleString()}
+                      ฿{receivedRows.reduce((s, r) => s + r.total, 0).toLocaleString()}
                     </td>
                   </tr>
                 </tfoot>
@@ -496,52 +661,88 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
 
       {/* ── Tab: ประวัติ ── */}
       {tab === 'history' && (
-        <>
-          <div className="mb-3 bg-white rounded-2xl shadow-sm border border-slate-100 p-3 shrink-0">
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_140px_160px_160px_auto_auto] gap-2">
-              <div className="relative">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                <input value={historySearch} onChange={e => setHistorySearch(e.target.value)}
-                  placeholder="ค้นหารายการ / อ้างอิง / หมายเหตุ..."
-                  className="w-full pl-9 pr-3 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+        <div className="flex flex-col flex-1 min-h-0 gap-3">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-3 shrink-0 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+              <div className="relative md:col-span-2">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                <input
+                  value={historySearch}
+                  onChange={e => setHistorySearch(e.target.value)}
+                  placeholder="ค้นหาสินค้า / กล่อง / อ้างอิง / หมายเหตุ..."
+                  className="w-full pl-8 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
               </div>
-              <select value={historyType} onChange={e => setHistoryType(e.target.value as any)}
-                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300">
-                <option value="all">ทั้งหมด</option>
+              <select
+                value={historyTxnFilter}
+                onChange={e => setHistoryTxnFilter(e.target.value as any)}
+                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white">
+                <option value="all">ทุกประเภท</option>
                 <option value="in">รับเข้า</option>
                 <option value="out">เบิกออก</option>
+                <option value="return">คืนสต็อก</option>
+                <option value="adjustment">ปรับปรุง</option>
               </select>
-              <input type="date" value={historyDateFrom} onChange={e => setHistoryDateFrom(e.target.value)}
-                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-              <input type="date" value={historyDateTo} onChange={e => setHistoryDateTo(e.target.value)}
-                className="border rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
-              <button onClick={clearHistoryFilters}
-                className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 text-sm font-semibold whitespace-nowrap">
-                ล้างตัวกรอง
-              </button>
-              <button onClick={exportHistoryRowsCsv} disabled={filteredHistoryRows.length === 0}
-                className="px-4 py-2.5 bg-cyan-500 text-white rounded-xl hover:bg-cyan-600 text-sm font-semibold whitespace-nowrap disabled:opacity-50 flex items-center justify-center gap-1.5">
-                <Download size={13}/> Export Excel
-              </button>
+              <input
+                type="date"
+                value={historyDateFrom}
+                onChange={e => setHistoryDateFrom(e.target.value)}
+                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              <input
+                type="date"
+                value={historyDateTo}
+                onChange={e => setHistoryDateTo(e.target.value)}
+                className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
             </div>
-
-            <div className="mt-2 flex flex-wrap gap-2 text-xs">
-              <span className="px-3 py-1 rounded-full bg-slate-50 text-slate-700 font-bold">
-                แสดง {filteredHistoryRows.length} / {txns.length} รายการ
-              </span>
-              <span className="px-3 py-1 rounded-full bg-green-50 text-green-700 font-bold">
-                รับเข้า +{filteredHistoryRows.filter(t => t.txn_type === 'in').reduce((sum, t) => sum + Number(t.qty || 0), 0).toLocaleString()}
-              </span>
-              <span className="px-3 py-1 rounded-full bg-red-50 text-red-700 font-bold">
-                เบิกออก -{filteredHistoryRows.filter(t => t.txn_type !== 'in').reduce((sum, t) => sum + Number(t.qty || 0), 0).toLocaleString()}
-              </span>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap text-xs">
+                <span className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg font-semibold">แสดง {filteredTxns.length} / {txns.length} รายการ</span>
+                <span className="px-3 py-1.5 bg-green-50 text-green-700 rounded-lg font-bold">รับเข้า +{historyTotals.inQty.toLocaleString()}</span>
+                <span className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg font-bold">เบิกออก -{historyTotals.outQty.toLocaleString()}</span>
+                <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg font-bold">คืนสต็อก +{historyTotals.returnQty.toLocaleString()}</span>
+                <span className="px-3 py-1.5 bg-amber-50 text-amber-700 rounded-lg font-bold">ปรับปรุง {historyTotals.adjustQty.toLocaleString()}</span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setHistorySearch(''); setHistoryTxnFilter('all'); setHistoryDateFrom(''); setHistoryDateTo(''); }}
+                  className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center gap-1 text-xs font-medium">
+                  <X size={12}/> ล้างตัวกรอง
+                </button>
+                <button
+                  onClick={loadTxns}
+                  className="px-3 py-1.5 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 flex items-center gap-1 text-xs font-medium">
+                  <RefreshCw size={12} className={loading ? 'animate-spin' : ''}/> รีโหลด
+                </button>
+                <button
+                  onClick={handleExportHistory}
+                  className="px-3 py-1.5 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 flex items-center gap-1 text-xs font-bold">
+                  <Download size={12}/> Export Excel
+                </button>
+                <button
+                  onClick={() => openDeleteDialog('selected')}
+                  className="px-3 py-1.5 bg-rose-500 text-white rounded-lg hover:bg-rose-600 flex items-center gap-1 text-xs font-bold">
+                  <Trash2 size={12}/> เลือกลบ
+                </button>
+                <button
+                  onClick={() => openDeleteDialog('all')}
+                  className="px-3 py-1.5 bg-fuchsia-500 text-white rounded-lg hover:bg-fuchsia-600 flex items-center gap-1 text-xs font-bold">
+                  <Trash2 size={12}/> ลบทั้งหมด
+                </button>
+              </div>
             </div>
           </div>
 
           <div className="flex-1 bg-white rounded-xl shadow overflow-auto min-h-0">
-            <table className="text-sm w-full" style={{minWidth:'700px'}}>
+            <table className="text-sm w-full" style={{minWidth:'980px'}}>
               <thead className="bg-slate-800 text-slate-200 text-xs sticky top-0 z-10">
                 <tr>
+                  <th className="p-3 text-center w-12">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={e => toggleSelectAllFiltered(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-400 cursor-pointer"
+                    />
+                  </th>
                   <th className="p-3 text-left whitespace-nowrap">วันที่</th>
                   <th className="p-3 text-center whitespace-nowrap">ประเภท</th>
                   <th className="p-3 text-left whitespace-nowrap">รายการ</th>
@@ -551,19 +752,22 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {filteredHistoryRows.length===0 && <tr><td colSpan={6} className="p-8 text-center text-slate-400">ยังไม่มีการเคลื่อนไหวตามตัวกรอง</td></tr>}
-                {filteredHistoryRows.map(t => (
-                  <tr key={t.id} className={`border-b hover:bg-slate-50 ${t.txn_type==='in'?'':'bg-red-50/30'}`}>
+                {filteredTxns.length===0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">ไม่พบประวัติการเคลื่อนไหวตามตัวกรอง</td></tr>}
+                {filteredTxns.map(t => (
+                  <tr key={t.id} className={`border-b hover:bg-slate-50 ${selectedTxnIds.includes(t.id) ? 'bg-rose-50/70' : t.txn_type==='in' ? '' : 'bg-red-50/30'}`}>
+                    <td className="p-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedTxnIds.includes(t.id)}
+                        onChange={e => toggleTxnSelection(t.id, e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-rose-500 focus:ring-rose-400 cursor-pointer"
+                      />
+                    </td>
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
                       {new Date(t.created_at).toLocaleDateString('th-TH')}
                       <div className="text-slate-400">{new Date(t.created_at).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}</div>
                     </td>
-                    <td className="p-3 text-center">
-                      {t.txn_type==='in'
-                        ? <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold"><ArrowDown size={10}/>รับเข้า</span>
-                        : <span className="flex items-center justify-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-bold"><ArrowUp size={10}/>เบิกออก</span>
-                      }
-                    </td>
+                    <td className="p-3 text-center">{txnTypeBadge(t)}</td>
                     <td className="p-3 font-medium whitespace-nowrap">{(t as any).stock_items?.name || '-'}</td>
                     <td className="p-3 text-center font-bold">
                       <span className={t.txn_type==='in'?'text-green-600':' text-red-500'}>
@@ -581,51 +785,300 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
               </tbody>
             </table>
           </div>
-        </>
+        </div>
       )}
 
-      {/* Popup: ยืนยันซิงค์จากสินค้า */}
-      {showSyncConfirm && (
-        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-[2rem] w-full max-w-md shadow-2xl border border-cyan-100 overflow-hidden relative">
-            <div className="absolute -top-16 -right-16 w-40 h-40 bg-cyan-300/30 rounded-full blur-2xl"></div>
-            <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-fuchsia-300/30 rounded-full blur-2xl"></div>
+      {/* Modal เพิ่มรายการ */}
 
-            <div className="relative bg-gradient-to-br from-cyan-50 via-indigo-50 to-fuchsia-50 px-6 py-6 border-b border-cyan-100">
-              <div className="absolute right-5 top-5 text-3xl">✨</div>
-              <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-cyan-400 via-indigo-500 to-fuchsia-500 text-white flex items-center justify-center text-3xl shadow-lg mb-3">
-                🔄
+      {/* ── Modal: รับสต็อกเริ่มต้น ─────────────────────────────────── */}
+      {showInitStock && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col">
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <PackagePlus size={20} className="text-cyan-600"/> ตัดสต็อกกล่อง+บั้บเบิ้ล จากออเดอร์
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  เลือกออเดอร์ → เลือกกล่อง+บั้บเบิ้ล → บันทึกตัดสต็อก
+                </p>
               </div>
-              <h3 className="text-xl font-extrabold text-slate-800">ซิงค์รายการสินค้าเข้าส Stock ใช่ไหม?</h3>
-              <p className="text-sm text-slate-500 mt-2 leading-6">
-                ระบบจะดึงรายการจากสินค้า / กล่อง / บั้บเบิ้ล มาเพิ่มในรายการสต็อก
-                โดยรายการที่มีอยู่แล้วจะไม่เพิ่มซ้ำ
-              </p>
+              <button onClick={() => setShowInitStock(false)} className="p-2 hover:bg-slate-100 rounded-lg">
+                <X size={18}/>
+              </button>
             </div>
 
-            <div className="relative px-6 py-4">
-              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-sm text-slate-600">
-                <div className="font-bold text-slate-800 mb-1">สิ่งที่จะเกิดขึ้น</div>
-                <div>✅ เพิ่มรายการใหม่ที่ยังไม่มีในสต็อก</div>
-                <div>✅ ไม่ลบรายการเดิม</div>
-                <div>✅ ไม่เปลี่ยนยอดคงเหลือเดิม</div>
-                <div>✅ ไม่แตะประวัติการเคลื่อนไหว</div>
+            {/* Bulk assign bar */}
+            <div className="px-6 py-3 bg-slate-50 border-b shrink-0 flex items-center gap-3 flex-wrap">
+              <span className="text-xs font-medium text-slate-600">ใส่ให้ทุกที่เลือก:</span>
+              {/* Bulk Box */}
+              <div className="flex flex-col gap-0.5">
+                <input list="bulk-init-boxes"
+                  value={bulkBoxId ? (items.find(b => b.id === bulkBoxId)?.name || bulkBoxSearch) : bulkBoxSearch}
+                  onChange={e => {
+                    setBulkBoxSearch(e.target.value);
+                    const found = items.find(b => b.type === 'box' && b.name === e.target.value);
+                    setBulkBoxId(found ? found.id : '');
+                  }}
+                  placeholder="กล่อง..."
+                  className="border rounded-lg px-2 py-1.5 text-xs w-40 focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white"/>
+                <datalist id="bulk-init-boxes">
+                  {items.filter(b => b.type === 'box').map(b => <option key={b.id} value={b.name}/>)}
+                </datalist>
               </div>
-              <div className="mt-3 rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700">
-                ⚠️ ควรใช้เมื่อมีสินค้า/กล่อง/บั้บเบิ้ลใหม่ และต้องการให้มาแสดงในหน้าจัดการสต็อก
+              {/* Bulk Bubble */}
+              <div className="flex flex-col gap-0.5">
+                <input list="bulk-init-bubbles"
+                  value={bulkBubbleId ? (items.find(b => b.id === bulkBubbleId)?.name || bulkBubbleSearch) : bulkBubbleSearch}
+                  onChange={e => {
+                    setBulkBubbleSearch(e.target.value);
+                    const found = items.find(b => b.type === 'bubble' && b.name === e.target.value);
+                    setBulkBubbleId(found ? found.id : '');
+                  }}
+                  placeholder="บั้บเบิ้ล..."
+                  className="border rounded-lg px-2 py-1.5 text-xs w-40 focus:outline-none focus:ring-2 focus:ring-cyan-300 bg-white"/>
+                <datalist id="bulk-init-bubbles">
+                  {items.filter(b => b.type === 'bubble').map(b => <option key={b.id} value={b.name}/>)}
+                </datalist>
+              </div>
+              <button
+                onClick={() => {
+                  const selected = initOrders.filter(o => packRows[o.id]?.selected);
+                  if (selected.length === 0) { showToast('เลือกออเดอร์ก่อน', 'error'); return; }
+                  setPackRows(prev => {
+                    const next = { ...prev };
+                    selected.forEach(o => {
+                      next[o.id] = {
+                        ...next[o.id],
+                        ...(bulkBoxId ? { boxId: bulkBoxId, boxSearch: bulkBoxSearch } : {}),
+                        ...(bulkBubbleId ? { bubbleId: bulkBubbleId, bubbleSearch: bulkBubbleSearch } : {}),
+                      };
+                    });
+                    return next;
+                  });
+                }}
+                className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-700 whitespace-nowrap">
+                ✓ ใส่ให้ที่เลือก
+              </button>
+              <span className="text-xs text-slate-400 ml-auto">
+                เลือกแล้ว {Object.values(packRows).filter(r => r.selected).length} / {initOrders.length} ออเดอร์
+              </span>
+            </div>
+
+            {/* Table */}
+            <div className="flex-1 overflow-auto">
+              {initLoadingOrders && (
+                <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด...</div>
+              )}
+              {!initLoadingOrders && (
+                <table className="w-full text-sm border-collapse">
+                  <thead className="bg-slate-800 text-white sticky top-0 z-10">
+                    <tr>
+                      <th className="p-3 w-8">
+                        <input type="checkbox"
+                          checked={initOrders.length > 0 && initOrders.every(o => packRows[o.id]?.selected)}
+                          onChange={e => setPackRows(prev => {
+                            const next = { ...prev };
+                            initOrders.forEach(o => { next[o.id] = { ...next[o.id], selected: e.target.checked }; });
+                            return next;
+                          })}
+                          className="rounded cursor-pointer"/>
+                      </th>
+                      <th className="p-3 text-left text-xs font-medium">เลขออเดอร์</th>
+                      <th className="p-3 text-left text-xs font-medium">ลูกค้า</th>
+                      <th className="p-3 text-left text-xs font-medium">สินค้า</th>
+                      <th className="p-3 text-left text-xs font-medium w-44">กล่อง</th>
+                      <th className="p-3 text-left text-xs font-medium w-44">บั้บเบิ้ล</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {initOrders.map((o, idx) => {
+                      const r = packRows[o.id] || { boxId: '', bubbleId: '', boxSearch: '', bubbleSearch: '', selected: false };
+                      const prods = (o.raw_prod || '').split('|').filter(Boolean);
+                      return (
+                        <tr key={o.id} className={`border-b align-top transition ${r.selected ? 'bg-cyan-50' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                          <td className="p-3">
+                            <input type="checkbox" checked={r.selected}
+                              onChange={e => setPackRows(prev => ({
+                                ...prev,
+                                [o.id]: { ...prev[o.id], selected: e.target.checked }
+                              }))}
+                              className="rounded cursor-pointer"/>
+                          </td>
+                          <td className="p-3 text-xs text-cyan-600 font-mono whitespace-nowrap">{o.order_no}</td>
+                          <td className="p-3 font-medium text-slate-800 whitespace-nowrap">{o.customers?.name || '-'}</td>
+                          <td className="p-3">
+                            {prods.map((p: string, i: number) => (
+                              <div key={i} className="flex items-center gap-1 text-xs text-slate-700">
+                                <span className="text-slate-300 text-[10px]">{i+1}.</span>
+                                {p.trim()}
+                              </div>
+                            ))}
+                          </td>
+                          {/* กล่อง */}
+                          <td className="p-3">
+                            <>
+                              <input list={'ibox-' + o.id}
+                                value={r.boxId ? (items.find(b => b.id === r.boxId)?.name || r.boxSearch) : r.boxSearch}
+                                onChange={e => {
+                                  const found = items.find(b => b.type === 'box' && b.name === e.target.value);
+                                  setPackRows(prev => ({
+                                    ...prev,
+                                    [o.id]: { ...prev[o.id], boxSearch: e.target.value, boxId: found?.id || '' }
+                                  }));
+                                }}
+                                placeholder="พิมพ์ค้นหา..."
+                                className={['border rounded-lg px-2 py-1 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-cyan-300', r.boxId ? 'border-green-400 bg-green-50' : ''].join(' ')}/>
+                              <datalist id={'ibox-' + o.id}>
+                                {items.filter(b => b.type === 'box').map(b => <option key={b.id} value={b.name}/>)}
+                              </datalist>
+                            </>
+                          </td>
+                          {/* บั้บเบิ้ล */}
+                          <td className="p-3">
+                            <>
+                              <input list={'ibub-' + o.id}
+                                value={r.bubbleId ? (items.find(b => b.id === r.bubbleId)?.name || r.bubbleSearch) : r.bubbleSearch}
+                                onChange={e => {
+                                  const found = items.find(b => b.type === 'bubble' && b.name === e.target.value);
+                                  setPackRows(prev => ({
+                                    ...prev,
+                                    [o.id]: { ...prev[o.id], bubbleSearch: e.target.value, bubbleId: found?.id || '' }
+                                  }));
+                                }}
+                                placeholder="พิมพ์ค้นหา..."
+                                className={['border rounded-lg px-2 py-1 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-cyan-300', r.bubbleId ? 'border-green-400 bg-green-50' : ''].join(' ')}/>
+                              <datalist id={'ibub-' + o.id}>
+                                {items.filter(b => b.type === 'bubble').map(b => <option key={b.id} value={b.name}/>)}
+                              </datalist>
+                            </>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t flex items-center justify-between shrink-0">
+              <div className="text-sm text-slate-500">
+                ที่เลือกและมีกล่อง/บั้บเบิ้ล:{' '}
+                <span className="font-bold text-cyan-600">
+                  {initOrders.filter(o => {
+                    const r = packRows[o.id];
+                    return r?.selected && (r.boxId || r.bubbleId);
+                  }).length} ออเดอร์
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setShowInitStock(false)}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 text-sm font-medium">
+                  ยกเลิก
+                </button>
+                <button onClick={handleSaveInitStock} disabled={initSaving}
+                  className="px-6 py-2 bg-cyan-600 text-white rounded-xl hover:bg-cyan-700 text-sm font-semibold disabled:opacity-50 flex items-center gap-2">
+                  <PackagePlus size={16}/>
+                  {initSaving ? 'กำลังบันทึก...' : 'ตัดสต็อก'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-slate-800">เพิ่มรายการสต็อก</h3>
+              <button onClick={() => setShowAddItem(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">ชื่อ</label>
+                <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ชื่อสินค้า/วัสดุ"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">ประเภท</label>
+                  <select value={newType} onChange={e => setNewType(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300">
+                    {Object.entries(TYPE_LABEL).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">หน่วย</label>
+                  <input value={newUnit} onChange={e => setNewUnit(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">จำนวนขั้นต่ำ (แจ้งเตือน)</label>
+                <input type="number" min={0} value={newMin} onChange={e => setNewMin(Number(e.target.value))}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300"/>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setShowAddItem(false)} className="flex-1 py-2 bg-slate-200 rounded-lg text-sm hover:bg-slate-300">ยกเลิก</button>
+              <button onClick={handleAddItem} disabled={!newName.trim()||saving}
+                className="flex-1 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 disabled:opacity-50 font-medium">
+                เพิ่มรายการ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {deleteDialog.open && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-[110] flex items-center justify-center p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-[0_25px_80px_rgba(0,0,0,0.25)] border border-rose-100">
+            <div className="relative bg-gradient-to-br from-pink-500 via-fuchsia-500 to-orange-400 px-6 py-6 text-white">
+              <div className="absolute -top-6 -right-4 h-24 w-24 rounded-full bg-white/15" />
+              <div className="absolute -bottom-8 -left-6 h-24 w-24 rounded-full bg-white/10" />
+              <div className="relative flex items-start gap-4">
+                <div className="h-14 w-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center shadow-lg shrink-0">
+                  <Trash2 size={26} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Sparkles size={16} className="text-yellow-200" />
+                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-pink-100">Delete Confirm</p>
+                  </div>
+                  <h3 className="text-xl font-extrabold leading-tight">แน่ใจหรือไม่ที่จะลบรายการนี้?</h3>
+                  <p className="mt-2 text-sm text-pink-50/95">
+                    {deleteDialog.mode === 'selected'
+                      ? `คุณกำลังจะลบประวัติที่เลือก ${deleteDialog.ids.length} รายการ`
+                      : `คุณกำลังจะลบทั้งหมด ${deleteDialog.ids.length} รายการตามตัวกรองที่แสดงอยู่`}
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="relative px-6 pb-6 flex justify-end gap-2">
-              <button onClick={() => setShowSyncConfirm(false)} disabled={loading}
-                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
-                ยกเลิก
-              </button>
-              <button onClick={handleSync} disabled={loading}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:from-cyan-600 hover:to-fuchsia-600 font-bold shadow disabled:opacity-50 flex items-center gap-2">
-                <RefreshCw size={15} className={loading ? 'animate-spin' : ''}/>
-                {loading ? 'กำลังซิงค์...' : 'ยืนยันซิงค์'}
-              </button>
+            <div className="px-6 py-5 bg-gradient-to-b from-rose-50 to-orange-50">
+              <div className="rounded-2xl border border-rose-200 bg-white/90 px-4 py-4 text-sm text-slate-700 shadow-sm">
+                <p className="font-bold text-rose-600 mb-1">⚠️ คำเตือนสำคัญ</p>
+                <p>หากลบแล้ว <span className="font-bold text-rose-600">จะไม่สามารถกู้คืนกลับมาได้</span> กรุณาตรวจสอบอีกครั้งก่อนยืนยันนะคะ</p>
+              </div>
+
+              <div className="mt-5 flex gap-3">
+                <button
+                  onClick={() => setDeleteDialog({ open: false, mode: 'selected', ids: [] })}
+                  className="flex-1 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 transition">
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={handleDeleteTransactions}
+                  disabled={deletingTxns}
+                  className="flex-1 rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-fuchsia-500 px-4 py-3 text-sm font-bold text-white shadow-lg hover:scale-[1.02] transition disabled:opacity-60 disabled:hover:scale-100">
+                  {deletingTxns ? 'กำลังลบ...' : 'ยืนยันการลบ'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
