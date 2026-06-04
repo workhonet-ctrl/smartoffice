@@ -855,6 +855,28 @@ export default function PurchaseOrder() {
 
   const poItemKey = (it: POItem, idx: number) => it.key || `${idx}`;
 
+  const isPOCostOnlyItem = (name: string) =>
+    /(ขนส่ง|ค่าส่ง|shipping|ค่าขนส่ง|บริการ|ค่าบริการ|ค่าแรง|แพ็ก|บรรจุ|อุปกรณ์|กล่อง|สติ๊กเกอร์|ถุง)/i.test(String(name || ''));
+
+  const calcDefaultLotOutputQtyFromPO = (items: Array<{ name?: string; qty?: number; unit?: string }>, mainName: string) => {
+    const cleanMain = String(mainName || '').trim();
+
+    // กรณีมีสินค้าเดียวกันหลายบรรทัด เช่น ซื้อ 100 ชิ้น ราคา 50 และ 100 ชิ้น ราคา 55
+    // จำนวนเข้าล็อตต้องรวมเป็น 200 ชิ้น ไม่ใช่เอาแค่บรรทัดแรก
+    const sameNameQty = items
+      .filter(it => String(it.name || '').trim() === cleanMain)
+      .reduce((sum, it) => sum + Number(it.qty || 0), 0);
+
+    if (sameNameQty > 0) return sameNameQty;
+
+    // fallback: รวมเฉพาะแถวที่เป็นสินค้า ไม่ใช่ค่าใช้จ่าย/ค่าส่ง/วัสดุ
+    const productQty = items
+      .filter(it => !isPOCostOnlyItem(String(it.name || '')))
+      .reduce((sum, it) => sum + Number(it.qty || 0), 0);
+
+    return productQty > 0 ? productQty : 1;
+  };
+
   const openCreateLotFromPO = async (po: PO) => {
     const existingLots = lotsByPOId[po.id] || [];
     if (existingLots.length > 0) {
@@ -882,16 +904,14 @@ export default function PurchaseOrder() {
       return;
     }
 
-    const mainRow = selectable.find(row => {
-      const name = String(row.it.name || '');
-      return !/(ขนส่ง|ค่าส่ง|shipping|บริการ|ค่า)/i.test(name);
-    }) || selectable[0];
+    const mainRow = selectable.find(row => !isPOCostOnlyItem(String(row.it.name || ''))) || selectable[0];
 
     const foundProduct = products.find(p => p.name === mainRow.it.name || mainRow.it.name.includes(p.name) || p.name.includes(mainRow.it.name));
+    const defaultOutputQty = calcDefaultLotOutputQtyFromPO(selectable.map(row => row.it), String(mainRow.it.name || ''));
 
     setLotFromPOTarget(po);
     setLotProductId(foundProduct?.id || '');
-    setLotOutputQty(Number(mainRow.it.qty || 1));
+    setLotOutputQty(defaultOutputQty);
     setLotOutputUnit(mainRow.it.unit || 'ชิ้น');
     setLotIncludedKeys(new Set(selectable.map(row => row.key)));
     setLotFromPONote(`สร้างล็อตจาก PO ${po.po_no}`);
@@ -1848,6 +1868,9 @@ export default function PurchaseOrder() {
                     <input type="number" value={lotOutputQty}
                       onChange={e => setLotOutputQty(Number(e.target.value || 0))}
                       className="w-full border rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-200" />
+                    <div className="mt-1 text-[10px] text-slate-400">
+                      ระบบรวมจำนวนสินค้าชื่อเดียวกันให้อัตโนมัติ
+                    </div>
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-500 block mb-1">หน่วย</label>
