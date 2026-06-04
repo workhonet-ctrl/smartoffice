@@ -9,7 +9,7 @@ type Supplier = { id: string; name: string; tel: string | null; address: string 
 type StockItem = { id: string; name: string; unit: string; type: string };
 type ProductMaster = { id: string; name: string; cost_thb?: number | null };
 type POCostLot = { id: string; lot_no: string; source_id: string | null; source_no: string | null; product_name: string; initial_qty: number; remaining_qty: number; unit: string; unit_cost: number; total_cost?: number | null; note?: string | null; status: string; created_at: string };
-type POItem    = { key: string; stock_item_id: string | null; name: string; qty: number; unit: string; price: number };
+type POItem    = { key: string; stock_item_id: string | null; name: string; qty: number; unit: string; price: number; line_type?: 'product' | 'cost' };
 type POType = 'ready_to_sell' | 'cost_material' | 'expense';
 
 type PO        = {
@@ -107,7 +107,7 @@ export default function PurchaseOrder() {
   const [supplierName, setSupplierName] = useState('');
   const [note, setNote]         = useState('');
   const [poType, setPoType]     = useState<POType>('ready_to_sell');
-  const [poItems, setPoItems]   = useState<POItem[]>([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
+  const [poItems, setPoItems]   = useState<POItem[]>([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0, line_type:'product' }]);
   const [saving, setSaving]     = useState(false);
 
   // Supplier modal
@@ -319,12 +319,37 @@ export default function PurchaseOrder() {
   };
 
 
-  const addRow    = () => setPoItems(p => [...p, { key: String(Date.now()), stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
-  const removeRow = (key: string) => setPoItems(p => p.filter(it => it.key !== key));
-  const updateRow = (key: string, field: keyof POItem, val: any) =>
+  const newProductRow = (): POItem => ({
+    key: String(Date.now() + Math.random()),
+    stock_item_id: null,
+    name: '',
+    qty: 1,
+    unit: 'ชิ้น',
+    price: 0,
+    line_type: 'product',
+  });
+
+  const newCostRow = (name = ''): POItem => ({
+    key: String(Date.now() + Math.random()),
+    stock_item_id: null,
+    name,
+    qty: 1,
+    unit: 'ชิ้น',
+    price: 0,
+    line_type: 'cost',
+  });
+
+  const addRow        = () => setPoItems(p => [...p, newCostRow()]);
+  const addProductRow = () => setPoItems(p => [...p, newProductRow()]);
+  const addCostRow    = (name = '') => setPoItems(p => [...p, newCostRow(name)]);
+  const removeRow     = (key: string) => setPoItems(p => p.filter(it => it.key !== key));
+  const updateRow     = (key: string, field: keyof POItem, val: any) =>
     setPoItems(p => p.map(it => it.key===key ? {...it, [field]: val} : it));
 
-  const total = poItems.reduce((s, it) => s + (it.qty * it.price), 0);
+  const total = poItems.reduce((s, it) => s + (Number(it.qty || 0) * Number(it.price || 0)), 0);
+  const stockLinkedItems = poItems.filter(it => it.stock_item_id && it.name.trim() && Number(it.qty || 0) > 0);
+  const costDetailItems = poItems.filter(it => !it.stock_item_id && it.name.trim() && Number(it.qty || 0) > 0);
+
 
   const handleAddSupplier = async () => {
     if (!newSup.name.trim()) return;
@@ -407,14 +432,14 @@ export default function PurchaseOrder() {
     const items = (po.items as POItem[]) || [];
     setPoItems(items.length > 0
       ? items.map((it, i) => ({ ...it, key: String(i+1) }))
-      : [{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]
+      : [{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0, line_type:'product' }]
     );
     setTab('create');
   };
 
   const cancelEditPO = () => {
     setEditingPO(null);
-    setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
+    setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0, line_type:'product' }]);
     setSupplierId(''); setSupplierName(''); setNote(''); setPoType('ready_to_sell');
     setTab('list');
   };
@@ -423,11 +448,18 @@ export default function PurchaseOrder() {
     if (!editingPO) return null;
     const validItems = poItems.filter(it => it.name.trim() && it.qty > 0);
     if (!validItems.length) { showToast('กรุณาเพิ่มรายการสินค้า', 'error'); return null; }
+    if (poType === 'ready_to_sell' && !validItems.some(it => it.stock_item_id)) {
+      showToast('PO สินค้าพร้อมขายต้องมีแถวสินค้าหลักที่เลือกจากระบบ', 'error');
+      return null;
+    }
     if (editingPO.status === 'approved' || editingPO.status === 'received') {
       showToast('PO ที่อนุมัติแล้วหรือรับเข้าแล้ว ไม่สามารถแก้ไขได้', 'error');
       return null;
     }
-    return validItems;
+    return validItems.map(it => ({
+      ...it,
+      line_type: it.stock_item_id ? 'product' : (it.line_type || 'cost'),
+    }));
   };
 
   const openUpdateConfirm = () => {
@@ -477,7 +509,7 @@ export default function PurchaseOrder() {
 
       setShowEditConfirm(false);
       setEditingPO(null);
-      setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
+      setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0, line_type:'product' }]);
       setSupplierId(''); setSupplierName(''); setNote('');
       await Promise.all([initPoNo(), loadData()]);
       setTab('list');
@@ -555,7 +587,14 @@ export default function PurchaseOrder() {
     const validItems = poItems.filter(it => it.name.trim() && it.qty > 0);
     if (!validItems.length) { showToast('กรุณาเพิ่มรายการสินค้า', 'error'); return null; }
     if (!supplierId && !supplierName.trim()) { showToast('กรุณาเลือกผู้ขายก่อนส่งอนุมัติ', 'error'); return null; }
-    return validItems;
+    if (poType === 'ready_to_sell' && !validItems.some(it => it.stock_item_id)) {
+      showToast('PO สินค้าพร้อมขายต้องมีแถวสินค้าหลักที่เลือกจากระบบ เพื่อให้รับเข้าและสร้าง Lot ได้', 'error');
+      return null;
+    }
+    return validItems.map(it => ({
+      ...it,
+      line_type: it.stock_item_id ? 'product' : (it.line_type || 'cost'),
+    }));
   };
 
   const openSubmitApproval = () => {
@@ -580,6 +619,7 @@ export default function PurchaseOrder() {
         supplier_name: supplierName || null,
         items: validItems, total_thb: total,
         status: 'pending_approval', note: note || null,
+        po_type: poType,
       }]).select().single();
 
       // กันกรณีมีคนสร้างพร้อมกันพอดีจนเลขชน ให้ขอเลขใหม่แล้วลองอีกครั้ง
@@ -591,6 +631,7 @@ export default function PurchaseOrder() {
           supplier_name: supplierName || null,
           items: validItems, total_thb: total,
           status: 'pending_approval', note: note || null,
+          po_type: poType,
         }]).select().single();
         createdPO = retry.data;
         error = retry.error;
@@ -613,7 +654,7 @@ export default function PurchaseOrder() {
       setShowSubmitSuccess(true);
 
       // reset form
-      setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
+      setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0, line_type:'product' }]);
       setSupplierId(''); setSupplierName(''); setNote('');
       await Promise.all([initPoNo(), loadData()]);
     } catch (err: any) {
@@ -632,7 +673,7 @@ export default function PurchaseOrder() {
         items: validItems, total_thb: total, status: 'draft', note: note || null,
       }]);
       showToast('✓ บันทึกร่างสำเร็จ');
-      setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
+      setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0, line_type:'product' }]);
       setSupplierId(''); setSupplierName(''); setNote('');
       await Promise.all([initPoNo(), loadData()]);
     } catch (err: any) {
@@ -1623,7 +1664,7 @@ export default function PurchaseOrder() {
           </button>
           <button onClick={() => {
               setEditingPO(null);
-              setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0 }]);
+              setPoItems([{ key:'1', stock_item_id:null, name:'', qty:1, unit:'ชิ้น', price:0, line_type:'product' }]);
               setSupplierId(''); setSupplierName(''); setNote('');
               initPoNo();
               setTab('create');
@@ -1727,19 +1768,31 @@ export default function PurchaseOrder() {
 
           {/* Items */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-slate-700 flex items-center gap-2">
-                <FileText size={15}/> รายการสินค้า
-                <span className="text-xs text-slate-400 font-normal">{poItems.length} รายการ</span>
-              </h3>
-              <button onClick={addRow} className="px-3 py-1.5 bg-green-500 text-white rounded-lg text-sm hover:bg-green-600 flex items-center gap-1.5">
-                <Plus size={13}/> เพิ่มรายการ
-              </button>
+            <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+              <div>
+                <h3 className="font-semibold text-slate-700 flex items-center gap-2">
+                  <FileText size={15}/> รายการสินค้า
+                  <span className="text-xs text-slate-400 font-normal">{poItems.length} รายการ</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  แถวสินค้าหลักต้องเลือกจากระบบ ส่วนรายละเอียดด้านล่างใช้รวมต้นทุนของ Lot
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={addProductRow}
+                  className="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-sm hover:bg-slate-200 flex items-center gap-1.5">
+                  <Plus size={13}/> เพิ่มสินค้าหลัก
+                </button>
+                <button onClick={() => addCostRow()}
+                  className="px-3 py-1.5 bg-green-500 text-white rounded-lg text-sm hover:bg-green-600 flex items-center gap-1.5">
+                  <Plus size={13}/> เพิ่มรายละเอียดต้นทุน
+                </button>
+              </div>
             </div>
 
-            <div className="space-y-3">
-              {/* Header */}
-              <div className="grid text-xs font-semibold text-slate-500 uppercase px-1" style={{gridTemplateColumns:'2fr 90px 90px 120px 100px 32px'}}>
+            <div className="rounded-2xl bg-cyan-50 border border-cyan-100 p-4 mb-4">
+              <div className="text-xs font-bold text-cyan-700 mb-2">สินค้าหลักที่ผูกกับระบบ</div>
+              <div className="grid text-xs font-semibold text-cyan-700/80 px-1 mb-2" style={{gridTemplateColumns:'2fr 90px 90px 120px 100px 32px'}}>
                 <div>สินค้า / บริการ</div>
                 <div className="text-center">จำนวน</div>
                 <div className="text-center">หน่วย</div>
@@ -1748,57 +1801,130 @@ export default function PurchaseOrder() {
                 <div/>
               </div>
 
-              {poItems.map((item, idx) => (
-                <div key={item.key} className="grid gap-2 items-center" style={{gridTemplateColumns:'2fr 90px 90px 120px 100px 32px'}}>
-                  {/* สินค้า */}
-                  <div>
-                    {item.stock_item_id ? (
-                      <div className="flex items-center gap-1 border rounded-lg px-3 py-2 bg-cyan-50 border-cyan-200">
-                        <span className="flex-1 text-sm font-medium text-slate-800 truncate">{item.name}</span>
-                        <button onClick={() => updateRow(item.key, 'stock_item_id', null)} className="text-slate-300 hover:text-red-500"><X size={13}/></button>
-                      </div>
-                    ) : (
-                      <SearchDrop
-                        options={stockOpts} value={''}
-                        onChange={(id, label, unit) => {
-                          updateRow(item.key, 'stock_item_id', id||null);
-                          updateRow(item.key, 'name', label);
-                          if (unit) updateRow(item.key, 'unit', unit);
-                        }}
-                        placeholder={`รายการที่ ${idx+1}...`}
-                      />
-                    )}
-                    {!item.stock_item_id && (
-                      <input value={item.name} onChange={e => updateRow(item.key,'name',e.target.value)}
-                        placeholder="หรือพิมพ์ชื่อสินค้าเอง..."
-                        className="mt-1 w-full border-b border-dashed border-slate-300 text-xs px-1 focus:outline-none focus:border-indigo-400 bg-transparent"/>
-                    )}
-                  </div>
-                  {/* จำนวน */}
-                  <input type="number" min={1} value={item.qty} onChange={e => updateRow(item.key,'qty',Number(e.target.value))}
-                    className="text-center border rounded-lg px-2 py-2 text-sm font-bold focus:outline-none focus:ring-1 focus:ring-indigo-300"/>
-                  {/* หน่วย */}
-                  <input value={item.unit} onChange={e => updateRow(item.key,'unit',e.target.value)}
-                    className="text-center border rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300"/>
-                  {/* ราคา/หน่วย */}
-                  <input type="number" min={0} value={item.price} onChange={e => updateRow(item.key,'price',Number(e.target.value))}
-                    className="text-right border rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300"/>
-                  {/* รวม */}
-                  <div className="text-right text-sm font-bold text-slate-700">
-                    ฿{(item.qty * item.price).toLocaleString()}
-                  </div>
-                  {/* ลบ */}
-                  <button onClick={() => removeRow(item.key)} disabled={poItems.length===1}
-                    className="text-red-400 hover:text-red-600 disabled:opacity-20 flex justify-center">
-                    <Trash2 size={15}/>
-                  </button>
-                </div>
-              ))}
+              <div className="space-y-2">
+                {poItems.map((item, idx) => {
+                  const isProductLine = !!item.stock_item_id || item.line_type === 'product' || (idx === 0 && poType === 'ready_to_sell');
+                  if (!isProductLine) return null;
 
-              {/* Total */}
-              <div className="border-t-2 border-slate-200 pt-3 flex justify-end items-center gap-4">
-                <span className="text-sm text-slate-500 font-semibold">ยอดรวมทั้งสิ้น</span>
-                <span className="text-2xl font-bold text-slate-800">฿{total.toLocaleString()}</span>
+                  return (
+                    <div key={item.key} className="grid gap-2 items-center" style={{gridTemplateColumns:'2fr 90px 90px 120px 100px 32px'}}>
+                      <div>
+                        {item.stock_item_id ? (
+                          <div className="flex items-center gap-1 border rounded-lg px-3 py-2 bg-white border-cyan-200">
+                            <span className="flex-1 text-sm font-bold text-slate-800 truncate">{item.name}</span>
+                            <span className="px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700 text-[10px] font-bold">สินค้า</span>
+                            <button onClick={() => {
+                              updateRow(item.key, 'stock_item_id', null);
+                              updateRow(item.key, 'line_type', 'product');
+                            }} className="text-slate-300 hover:text-red-500"><X size={13}/></button>
+                          </div>
+                        ) : (
+                          <SearchDrop
+                            options={stockOpts} value={''}
+                            onChange={(id, label, unit) => {
+                              updateRow(item.key, 'stock_item_id', id||null);
+                              updateRow(item.key, 'name', label);
+                              updateRow(item.key, 'line_type', 'product');
+                              if (unit) updateRow(item.key, 'unit', unit);
+                            }}
+                            placeholder="เลือกสินค้าหลักจากระบบ..."
+                          />
+                        )}
+                      </div>
+
+                      <input type="number" min={1} value={item.qty} onChange={e => updateRow(item.key,'qty',Number(e.target.value))}
+                        className="text-center border rounded-lg px-2 py-2 text-sm font-bold focus:outline-none focus:ring-1 focus:ring-cyan-300"/>
+                      <input value={item.unit} onChange={e => updateRow(item.key,'unit',e.target.value)}
+                        className="text-center border rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-300"/>
+                      <input type="number" min={0} value={item.price} onChange={e => updateRow(item.key,'price',Number(e.target.value))}
+                        className="text-right border rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-300"/>
+                      <div className="text-right text-sm font-bold text-slate-700">
+                        ฿{(Number(item.qty || 0) * Number(item.price || 0)).toLocaleString()}
+                      </div>
+                      <button onClick={() => removeRow(item.key)} disabled={poItems.length===1}
+                        className="text-red-400 hover:text-red-600 disabled:opacity-20 flex justify-center">
+                        <Trash2 size={15}/>
+                      </button>
+                    </div>
+                  );
+                })}
+
+                {stockLinkedItems.length === 0 && (
+                  <div className="rounded-xl bg-white border border-dashed border-cyan-200 px-4 py-3 text-xs text-cyan-700">
+                    PO สินค้าพร้อมขายต้องเลือกสินค้าหลักจากระบบ เช่น ครีม Secret Rose 500 ชิ้น
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <div className="text-xs font-bold text-slate-600">รายละเอียดต้นทุนที่รวมใน Lot</div>
+                  <div className="text-[11px] text-slate-400">เช่น ค่าผลิตภัณฑ์, ค่าบรรจุ, ค่าสติ๊กเกอร์, ค่าทำความสะอาด</div>
+                </div>
+                <span className="text-xs font-bold text-slate-500">{costDetailItems.length} รายการ</span>
+              </div>
+
+              <div className="grid text-xs font-semibold text-slate-500 uppercase px-1 mb-2" style={{gridTemplateColumns:'2fr 90px 90px 120px 100px 32px'}}>
+                <div>รายละเอียด</div>
+                <div className="text-center">จำนวน</div>
+                <div className="text-center">หน่วย</div>
+                <div className="text-right">ราคา/หน่วย</div>
+                <div className="text-right">รวม</div>
+                <div/>
+              </div>
+
+              <div className="space-y-2">
+                {poItems.map((item, idx) => {
+                  const isProductLine = !!item.stock_item_id || item.line_type === 'product' || (idx === 0 && poType === 'ready_to_sell');
+                  if (isProductLine) return null;
+
+                  return (
+                    <div key={item.key} className="grid gap-2 items-center" style={{gridTemplateColumns:'2fr 90px 90px 120px 100px 32px'}}>
+                      <input value={item.name} onChange={e => {
+                          updateRow(item.key,'name',e.target.value);
+                          updateRow(item.key,'line_type','cost');
+                        }}
+                        placeholder="เช่น ค่าผลิตภัณฑ์ / ค่าบรรจุ / ค่าสติ๊กเกอร์"
+                        className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300 bg-white"/>
+                      <input type="number" min={1} value={item.qty} onChange={e => updateRow(item.key,'qty',Number(e.target.value))}
+                        className="text-center border rounded-lg px-2 py-2 text-sm font-bold focus:outline-none focus:ring-1 focus:ring-indigo-300 bg-white"/>
+                      <input value={item.unit} onChange={e => updateRow(item.key,'unit',e.target.value)}
+                        className="text-center border rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300 bg-white"/>
+                      <input type="number" min={0} value={item.price} onChange={e => updateRow(item.key,'price',Number(e.target.value))}
+                        className="text-right border rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300 bg-white"/>
+                      <div className="text-right text-sm font-bold text-slate-700">
+                        ฿{(Number(item.qty || 0) * Number(item.price || 0)).toLocaleString()}
+                      </div>
+                      <button onClick={() => removeRow(item.key)} disabled={poItems.length===1}
+                        className="text-red-400 hover:text-red-600 disabled:opacity-20 flex justify-center">
+                        <Trash2 size={15}/>
+                      </button>
+                    </div>
+                  );
+                })}
+
+                {costDetailItems.length === 0 && (
+                  <div className="rounded-xl bg-white border border-dashed border-slate-200 px-4 py-3 text-xs text-slate-400">
+                    ยังไม่มีรายละเอียดต้นทุน กด “เพิ่มรายละเอียดต้นทุน” เพื่อใส่ค่าผลิต/ค่าบรรจุ/ค่าสติ๊กเกอร์
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl bg-white border border-slate-100 p-4 flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="text-xs text-slate-400 font-bold">สรุปต้นทุนเข้าตัวสินค้า</div>
+                <div className="text-sm text-slate-600">
+                  {stockLinkedItems.length > 0
+                    ? stockLinkedItems.map(it => `${it.name} ${Number(it.qty || 0).toLocaleString()} ${it.unit}`).join(' / ')
+                    : 'ยังไม่ได้เลือกสินค้าหลัก'}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-slate-400">ยอดรวมทั้งสิ้น</div>
+                <div className="text-2xl font-bold text-slate-800">฿{total.toLocaleString()}</div>
               </div>
             </div>
           </div>
