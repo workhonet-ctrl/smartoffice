@@ -139,6 +139,7 @@ export default function PurchaseOrder() {
   const [lotOutputUnit, setLotOutputUnit] = useState('ชิ้น');
   const [lotIncludedKeys, setLotIncludedKeys] = useState<Set<string>>(new Set());
   const [lotFromPONote, setLotFromPONote] = useState('');
+  const [cancelLotTarget, setCancelLotTarget] = useState<{ po: PO; lot: POCostLot } | null>(null);
   const [blockedDeleteTarget, setBlockedDeleteTarget] = useState<PO | null>(null);
   const [historyTarget, setHistoryTarget] = useState<PO | null>(null);
   const [auditTarget, setAuditTarget] = useState<PO | null>(null);
@@ -1087,6 +1088,65 @@ export default function PurchaseOrder() {
     }
   };
 
+  const canCancelPOCostLot = (lot: POCostLot) =>
+    Number(lot.remaining_qty || 0) === Number(lot.initial_qty || 0) && lot.status === 'active';
+
+  const cancelPOCostLot = async () => {
+    if (!cancelLotTarget || saving || actionLockRef.current) return;
+
+    const { po, lot } = cancelLotTarget;
+
+    if (!canCancelPOCostLot(lot)) {
+      showToast('ยกเลิก Lot ไม่ได้ เพราะ Lot นี้ถูกใช้งาน/ตัดต้นทุนไปแล้ว', 'error');
+      return;
+    }
+
+    actionLockRef.current = true;
+    setSaving(true);
+
+    try {
+      const { error } = await supabase
+        .from('product_cost_lots')
+        .update({
+          status: 'cancelled',
+          note: `ยกเลิก Lot จาก PO ${po.po_no} เนื่องจากสร้างผิด / ต้องสร้างใหม่`,
+        })
+        .eq('id', lot.id)
+        .eq('status', 'active')
+        .eq('remaining_qty', lot.initial_qty);
+
+      if (error) throw error;
+
+      await writePOAuditLog({
+        po_id: po.id,
+        po_no: po.po_no,
+        action: 'cancel_cost_lot',
+        action_label: 'ยกเลิก Lot ต้นทุนจาก PO',
+        detail: `ยกเลิก ${lot.lot_no} เพื่อให้สร้าง Lot ใหม่ได้`,
+        old_status: po.status,
+        new_status: po.status,
+        meta: {
+          lot_id: lot.id,
+          lot_no: lot.lot_no,
+          product_name: lot.product_name,
+          initial_qty: lot.initial_qty,
+          remaining_qty: lot.remaining_qty,
+          unit_cost: lot.unit_cost,
+        },
+      });
+
+      setPOCostLots(prev => prev.filter(x => x.id !== lot.id));
+      setCancelLotTarget(null);
+      showToast(`✓ ยกเลิก ${lot.lot_no} แล้ว สามารถสร้าง Lot ใหม่จาก PO นี้ได้`);
+      await loadData();
+    } catch (err: any) {
+      showToast('ยกเลิก Lot ไม่สำเร็จ: ' + (err.message || 'unknown'), 'error');
+    } finally {
+      actionLockRef.current = false;
+      setSaving(false);
+    }
+  };
+
   const handleReceivePO = async () => {
     if (!receiveTarget || saving || actionLockRef.current) return;
 
@@ -1781,13 +1841,21 @@ export default function PurchaseOrder() {
 
                         if (poLots.length > 0) {
                           return (
-                            <div className="px-3 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold border border-emerald-100 min-w-[118px]">
+                            <div className="px-3 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold border border-emerald-100 min-w-[150px]">
                               <div className="flex items-center gap-1">
                                 <PackageCheck size={12}/> สร้าง Lot แล้ว
                               </div>
                               <div className="mt-1 text-[10px] font-mono text-emerald-600">
                                 {poLots.map(l => l.lot_no).join(', ')}
                               </div>
+                              {poLots.every(l => canCancelPOCostLot(l)) ? (
+                                <button onClick={() => setCancelLotTarget({ po, lot: poLots[0] })}
+                                  className="mt-2 w-full px-2 py-1 rounded-lg bg-white text-rose-500 border border-rose-100 hover:bg-rose-50 text-[10px] font-bold">
+                                  ยกเลิก Lot
+                                </button>
+                              ) : (
+                                <div className="mt-1 text-[10px] text-slate-400 font-normal">มีการใช้งานแล้ว</div>
+                              )}
                             </div>
                           );
                         }
@@ -1830,6 +1898,72 @@ export default function PurchaseOrder() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Popup: ยกเลิกล็อตต้นทุนจาก PO */}
+      {cancelLotTarget && (
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[2rem] w-full max-w-md shadow-2xl border border-rose-100 overflow-hidden">
+            <div className="bg-gradient-to-br from-rose-50 via-amber-50 to-white px-6 py-6 border-b border-rose-100 relative">
+              <button onClick={() => setCancelLotTarget(null)} disabled={saving}
+                className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 disabled:opacity-50">
+                <X size={20} />
+              </button>
+              <div className="w-14 h-14 rounded-3xl bg-rose-500 text-white flex items-center justify-center text-2xl shadow-lg mb-3">
+                !
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-800">ยกเลิก Lot จาก PO?</h3>
+              <p className="text-sm text-slate-500 mt-2 leading-6">
+                ใช้กรณีสร้าง Lot ผิด เช่น จำนวน/ต้นทุนผิด แล้วต้องการสร้างใหม่จาก PO ใบเดิม
+              </p>
+            </div>
+
+            <div className="px-6 py-4 space-y-3">
+              <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">เลข PO</span>
+                  <b>{cancelLotTarget.po.po_no}</b>
+                </div>
+                <div className="flex justify-between gap-3 mt-1">
+                  <span className="text-slate-400">Lot</span>
+                  <b className="font-mono">{cancelLotTarget.lot.lot_no}</b>
+                </div>
+                <div className="flex justify-between gap-3 mt-1">
+                  <span className="text-slate-400">สินค้า</span>
+                  <b>{cancelLotTarget.lot.product_name}</b>
+                </div>
+                <div className="flex justify-between gap-3 mt-1">
+                  <span className="text-slate-400">คงเหลือ</span>
+                  <b>
+                    {Number(cancelLotTarget.lot.remaining_qty || 0).toLocaleString()} /
+                    {Number(cancelLotTarget.lot.initial_qty || 0).toLocaleString()} {cancelLotTarget.lot.unit}
+                  </b>
+                </div>
+              </div>
+
+              {canCancelPOCostLot(cancelLotTarget.lot) ? (
+                <div className="rounded-2xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-700 leading-5">
+                  หลังยกเลิกแล้ว PO ใบนี้จะกลับมาแสดงปุ่ม “สร้าง Lot” เพื่อให้สร้างใหม่ได้
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-rose-50 border border-rose-100 px-3 py-2 text-xs text-rose-700 leading-5">
+                  ยกเลิกไม่ได้ เพราะ Lot นี้ถูกใช้งานหรือตัดต้นทุนไปแล้ว
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 pb-6 flex justify-end gap-2">
+              <button onClick={() => setCancelLotTarget(null)} disabled={saving}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold disabled:opacity-50">
+                ปิด
+              </button>
+              <button onClick={cancelPOCostLot} disabled={saving || !canCancelPOCostLot(cancelLotTarget.lot)}
+                className="px-5 py-2.5 rounded-xl bg-rose-500 text-white hover:bg-rose-600 font-bold shadow disabled:opacity-50">
+                {saving ? 'กำลังยกเลิก...' : 'ยืนยันยกเลิก Lot'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
