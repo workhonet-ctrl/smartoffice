@@ -918,6 +918,21 @@ export default function PurchaseOrder() {
 
   const poItemKey = (it: POItem, idx: number) => it.key || `${idx}`;
 
+  const isProductLine = (it: POItem, idx = 0) =>
+    !!it.stock_item_id || it.line_type === 'product' || (idx === 0 && !it.line_type);
+
+  const isCostDetailLine = (it: POItem, idx = 0) =>
+    !isProductLine(it, idx);
+
+  const splitPOItems = (items: POItem[] = []) => {
+    const productLines = items.filter((it, idx) => isProductLine(it, idx));
+    const costLines = items.filter((it, idx) => isCostDetailLine(it, idx));
+    return { productLines, costLines };
+  };
+
+  const poItemSubtotal = (it: POItem) =>
+    Number(it.qty || 0) * Number(it.price || 0);
+
   const isPOCostOnlyItem = (name: string) =>
     /(ขนส่ง|ค่าส่ง|shipping|ค่าขนส่ง|บริการ|ค่าบริการ|ค่าแรง|แพ็ก|บรรจุ|อุปกรณ์|กล่อง|สติ๊กเกอร์|ถุง)/i.test(String(name || ''));
 
@@ -958,25 +973,39 @@ export default function PurchaseOrder() {
     }
 
     const items = (po.items || []) as POItem[];
-    const selectable = items
-      .map((it, idx) => ({ it, idx, key: poItemKey(it, idx) }))
-      .filter(row => row.it.name && Number(row.it.qty || 0) > 0 && Number(row.it.price || 0) >= 0);
+    const { productLines, costLines } = splitPOItems(items);
+    const validProductLines = productLines
+      .map((it, idx) => ({ it, idx, key: poItemKey(it, items.indexOf(it)) }))
+      .filter(row => row.it.name && row.it.stock_item_id && Number(row.it.qty || 0) > 0);
 
-    if (selectable.length === 0) {
-      showToast('PO นี้ไม่มีรายการที่ใช้สร้างล็อตได้', 'error');
+    if (validProductLines.length === 0) {
+      showToast('PO นี้ไม่มีสินค้าหลักที่ผูกกับระบบ จึงสร้าง Lot ไม่ได้', 'error');
       return;
     }
 
-    const mainRow = selectable.find(row => !isPOCostOnlyItem(String(row.it.name || ''))) || selectable[0];
+    const costSelectable = (costLines.length > 0 ? costLines : productLines)
+      .map((it) => ({ it, idx: items.indexOf(it), key: poItemKey(it, items.indexOf(it)) }))
+      .filter(row => row.it.name && Number(row.it.qty || 0) > 0 && Number(row.it.price || 0) >= 0);
 
-    const foundProduct = products.find(p => p.name === mainRow.it.name || mainRow.it.name.includes(p.name) || p.name.includes(mainRow.it.name));
-    const defaultOutputQty = calcDefaultLotOutputQtyFromPO(selectable.map(row => row.it), String(mainRow.it.name || ''));
+    if (costSelectable.length === 0) {
+      showToast('PO นี้ไม่มีรายละเอียดต้นทุนที่ใช้สร้างล็อตได้', 'error');
+      return;
+    }
+
+    const mainRow = validProductLines[0];
+    const foundProduct = products.find(p =>
+      p.id === mainRow.it.stock_item_id ||
+      p.name === mainRow.it.name ||
+      mainRow.it.name.includes(p.name) ||
+      p.name.includes(mainRow.it.name)
+    );
 
     setLotFromPOTarget(po);
     setLotProductId(foundProduct?.id || '');
-    setLotOutputQty(defaultOutputQty);
+    setLotOutputQty(Number(mainRow.it.qty || 1));
     setLotOutputUnit(mainRow.it.unit || 'ชิ้น');
-    setLotIncludedKeys(new Set(selectable.map(row => row.key)));
+    // รวมต้นทุนจากรายละเอียดต้นทุนเท่านั้น ถ้าไม่มีรายละเอียดจึง fallback ไปใช้แถวสินค้า
+    setLotIncludedKeys(new Set(costSelectable.map(row => row.key)));
     setLotFromPONote(`สร้างล็อตจาก PO ${po.po_no}`);
   };
 
@@ -988,7 +1017,7 @@ export default function PurchaseOrder() {
   };
 
   const lotFromPOTotalCost = () =>
-    selectedLotPOItems().reduce((sum: number, it: any) => sum + Number(it.qty || 0) * Number(it.price || 0), 0);
+    selectedLotPOItems().reduce((sum: number, it: any) => sum + poItemSubtotal(it), 0);
 
   const lotFromPOUnitCost = () =>
     Number(lotOutputQty || 0) > 0 ? lotFromPOTotalCost() / Number(lotOutputQty || 1) : 0;
@@ -2923,30 +2952,80 @@ export default function PurchaseOrder() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-100 overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-800 text-white text-xs">
-                    <tr>
-                      <th className="px-3 py-2 text-left">รายการ</th>
-                      <th className="px-3 py-2 text-center">จำนวน</th>
-                      <th className="px-3 py-2 text-center">หน่วย</th>
-                      <th className="px-3 py-2 text-right">ราคา/หน่วย</th>
-                      <th className="px-3 py-2 text-right">รวม</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailTarget.items.map((it, i) => (
-                      <tr key={i} className="border-b last:border-0">
-                        <td className="px-3 py-2 font-medium text-slate-800">{it.name}</td>
-                        <td className="px-3 py-2 text-center">{it.qty}</td>
-                        <td className="px-3 py-2 text-center">{it.unit}</td>
-                        <td className="px-3 py-2 text-right">฿{Number(it.price).toLocaleString()}</td>
-                        <td className="px-3 py-2 text-right font-bold">฿{Number(it.qty * it.price).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {(() => {
+                const detailItems = (detailTarget.items || []) as POItem[];
+                const { productLines, costLines } = splitPOItems(detailItems);
+                const costTotal = costLines.length > 0
+                  ? costLines.reduce((sum, it) => sum + poItemSubtotal(it), 0)
+                  : productLines.reduce((sum, it) => sum + poItemSubtotal(it), 0);
+                const productQty = productLines.reduce((sum, it) => sum + Number(it.qty || 0), 0);
+                const autoUnitCost = productQty > 0 ? costTotal / productQty : 0;
+
+                return (
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-cyan-100 bg-cyan-50/50 overflow-hidden">
+                      <div className="px-4 py-3 text-xs font-extrabold text-cyan-700">
+                        สินค้าหลักที่ผูกกับระบบ
+                      </div>
+                      <table className="w-full text-sm">
+                        <thead className="bg-cyan-900 text-white text-xs">
+                          <tr>
+                            <th className="px-3 py-2 text-left">สินค้า</th>
+                            <th className="px-3 py-2 text-center">จำนวน</th>
+                            <th className="px-3 py-2 text-center">หน่วย</th>
+                            <th className="px-3 py-2 text-right">ต้นทุน/หน่วย</th>
+                            <th className="px-3 py-2 text-right">รวมเข้าตัวสินค้า</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {productLines.map((it, i) => (
+                            <tr key={i} className="border-b last:border-0 bg-white">
+                              <td className="px-3 py-2 font-bold text-slate-800">{it.name}</td>
+                              <td className="px-3 py-2 text-center">{Number(it.qty || 0).toLocaleString()}</td>
+                              <td className="px-3 py-2 text-center">{it.unit}</td>
+                              <td className="px-3 py-2 text-right">฿{autoUnitCost.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}</td>
+                              <td className="px-3 py-2 text-right font-bold">฿{(Number(it.qty || 0) * autoUnitCost).toLocaleString('th-TH', { maximumFractionDigits: 2 })}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-100 overflow-hidden">
+                      <div className="px-4 py-3 text-xs font-extrabold text-slate-600 bg-slate-50">
+                        รายละเอียดต้นทุนที่รวมใน Lot
+                      </div>
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-800 text-white text-xs">
+                          <tr>
+                            <th className="px-3 py-2 text-left">รายละเอียด</th>
+                            <th className="px-3 py-2 text-center">จำนวน</th>
+                            <th className="px-3 py-2 text-center">หน่วย</th>
+                            <th className="px-3 py-2 text-right">ราคา/หน่วย</th>
+                            <th className="px-3 py-2 text-right">รวม</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(costLines.length > 0 ? costLines : productLines).map((it, i) => (
+                            <tr key={i} className="border-b last:border-0">
+                              <td className="px-3 py-2 font-medium text-slate-800">{it.name}</td>
+                              <td className="px-3 py-2 text-center">{Number(it.qty || 0).toLocaleString()}</td>
+                              <td className="px-3 py-2 text-center">{it.unit}</td>
+                              <td className="px-3 py-2 text-right">฿{Number(it.price || 0).toLocaleString()}</td>
+                              <td className="px-3 py-2 text-right font-bold">฿{poItemSubtotal(it).toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="rounded-2xl bg-emerald-50 border border-emerald-100 px-4 py-3 text-sm text-emerald-700 flex justify-between gap-3">
+                      <span className="font-bold">สรุป: จำนวน Lot มาจากสินค้าหลักเท่านั้น รายละเอียดต้นทุนใช้คิดเงินเท่านั้น</span>
+                      <b>รวม ฿{costTotal.toLocaleString('th-TH', { maximumFractionDigits: 2 })}</b>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {detailTarget.note && (
                 <div className="mt-4 rounded-2xl bg-amber-50 border border-amber-100 p-3 text-sm text-amber-800 whitespace-pre-wrap">
