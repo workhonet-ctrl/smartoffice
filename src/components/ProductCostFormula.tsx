@@ -211,25 +211,36 @@ export default function ProductCostFormula() {
       .forEach(lot => {
         const key = String(lot.product_id);
         const remaining = Number(lot.remaining_qty || 0);
-        const active = lot.status === 'active' && remaining > 0 ? 1 : 0;
+        const isActiveLot = lot.status === 'active' && remaining > 0;
+        const active = isActiveLot ? 1 : 0;
+        const activeRemaining = isActiveLot ? remaining : 0;
         const cur = map.get(key);
 
         if (!cur) {
           map.set(key, {
             product_id: key,
             product_name: lot.product_name,
-            latest_unit_cost: Number(lot.unit_cost || 0),
+            latest_unit_cost: isActiveLot ? Number(lot.unit_cost || 0) : 0,
             active_lots: active,
-            remaining_qty: remaining,
-            latest_created_at: lot.created_at,
+            remaining_qty: activeRemaining,
+            latest_created_at: isActiveLot ? lot.created_at : '',
           });
         } else {
           cur.active_lots += active;
-          cur.remaining_qty += remaining;
-          if (String(lot.created_at || '').localeCompare(String(cur.latest_created_at || '')) > 0) {
+          // สำคัญ: ยอดคงเหลือในสรุปต้องนับเฉพาะ Lot active เท่านั้น
+          // Lot ที่ปิด/ยกเลิก/depleted ไม่ควรเอาคงเหลือไปสะสม
+          cur.remaining_qty += activeRemaining;
+
+          // ราคาทุนล่าสุดให้ยึดเฉพาะ Lot active ก่อน
+          if (isActiveLot && String(lot.created_at || '').localeCompare(String(cur.latest_created_at || '')) > 0) {
             cur.latest_unit_cost = Number(lot.unit_cost || 0);
             cur.latest_created_at = lot.created_at;
             cur.product_name = lot.product_name || cur.product_name;
+          }
+
+          // ถ้ายังไม่มี active lot เลย ให้เก็บชื่อสินค้าไว้ แต่อย่าเอาคงเหลือจาก lot ปิดมารวม
+          if (!cur.product_name && lot.product_name) {
+            cur.product_name = lot.product_name;
           }
         }
       });
@@ -790,7 +801,7 @@ export default function ProductCostFormula() {
                 <div className="font-extrabold text-slate-800 truncate">{p.product_name}</div>
                 <div className="text-xs text-cyan-600 truncate mt-0.5">ล็อตจาก PO · ไม่มีสูตรต้นทุน</div>
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-slate-400">{p.active_lots} ล็อต · คงเหลือ {Number(p.remaining_qty || 0).toLocaleString()}</span>
+                  <span className="text-xs text-slate-400">active {p.active_lots} ล็อต · คงเหลือใช้งาน {Number(p.remaining_qty || 0).toLocaleString()}</span>
                   <span className="text-sm font-extrabold text-cyan-700">{money(Number(p.latest_unit_cost || 0))}</span>
                 </div>
               </button>
@@ -1128,6 +1139,11 @@ export default function ProductCostFormula() {
                         {lot.status === 'active' ? 'ใช้งานอยู่' : lot.status === 'depleted' ? 'หมดแล้ว' : 'ปิดล็อต'}
                       </span>
                     </div>
+                    {lot.status !== 'active' && (
+                      <div className="mt-2 text-xs text-slate-400">
+                        Lot นี้ไม่ถูกนับรวมในยอดคงเหลือใช้งาน
+                      </div>
+                    )}
 
                     <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-2 text-sm">
                       <div className="rounded-2xl bg-white border border-slate-100 p-3">
