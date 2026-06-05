@@ -793,18 +793,35 @@ export default function PurchaseOrder() {
     const supplier = suppliers.find(s => s.id === po.supplier_id);
     const items = (po.items || []) as POItem[];
 
-    const itemRows = items.map((it, idx) => `
-      <tr>
-        <td class="center">${idx + 1}</td>
-        <td>
-          <div class="item-name">${escHtml(it.name || '-')}</div>
-        </td>
-        <td class="center">${escHtml(String(it.qty || 0))}</td>
-        <td class="center">${escHtml(it.unit || '-')}</td>
-        <td class="right">฿${Number(it.price || 0).toLocaleString()}</td>
-        <td class="right strong">฿${Number((it.qty || 0) * (it.price || 0)).toLocaleString()}</td>
-      </tr>
-    `).join('');
+    const { productLines, costLines } = splitPOItems(items as POItem[]);
+    const itemRows = [
+      ...productLines.map((it, idx) => `
+        <tr>
+          <td class="center">${idx + 1}</td>
+          <td>
+            <div class="item-name">${escHtml(it.name || '-')}</div>
+            <div style="font-size:11px;color:#0891b2;font-weight:700">สินค้าหลักที่ผูกกับระบบ</div>
+          </td>
+          <td class="center">${escHtml(String(it.qty || 0))}</td>
+          <td class="center">${escHtml(it.unit || '-')}</td>
+          <td class="right">฿${Number(it.price || 0).toLocaleString()}</td>
+          <td class="right strong">฿${Number((it.qty || 0) * (it.price || 0)).toLocaleString()}</td>
+        </tr>
+      `),
+      ...costLines.map((it, idx) => `
+        <tr>
+          <td class="center">${productLines.length + idx + 1}</td>
+          <td>
+            <div class="item-name">${escHtml(it.name || '-')}</div>
+            <div style="font-size:11px;color:#64748b">รายละเอียดต้นทุนที่รวมใน Lot</div>
+          </td>
+          <td class="center">${escHtml(String(it.qty || 0))}</td>
+          <td class="center">${escHtml(it.unit || '-')}</td>
+          <td class="right">฿${Number(it.price || 0).toLocaleString()}</td>
+          <td class="right strong">฿${Number((it.qty || 0) * (it.price || 0)).toLocaleString()}</td>
+        </tr>
+      `),
+    ].join('');
 
     const html = `<!DOCTYPE html>
 <html>
@@ -1549,8 +1566,11 @@ export default function PurchaseOrder() {
       po.po_date ? new Date(po.po_date).toLocaleDateString('th-TH') : '',
       po.supplier_name || '',
       statusLabelText(po.status),
-      po.items.length,
-      po.items.map(it => `${it.name} x${it.qty} ${it.unit}`).join(' | '),
+      splitPOItems((po.items || []) as POItem[]).productLines.length,
+      [
+        'สินค้าหลัก: ' + splitPOItems((po.items || []) as POItem[]).productLines.map(it => `${it.name} x${it.qty} ${it.unit}`).join(' | '),
+        'รายละเอียดต้นทุน: ' + splitPOItems((po.items || []) as POItem[]).costLines.map(it => `${it.name} x${it.qty} ${it.unit}`).join(' | '),
+      ].filter(Boolean).join(' / '),
       Number(po.total_thb || 0),
       po.note || '',
     ]);
@@ -2112,10 +2132,27 @@ export default function PurchaseOrder() {
                           🔒 เอกสารปิดงาน
                         </div>
                       )}
-                      {po.items.slice(0,3).map((it, i) => (
-                        <div key={i} className="truncate">{it.name} <span className="text-slate-400">×{it.qty} {it.unit}</span></div>
-                      ))}
-                      {po.items.length > 3 && <div className="text-slate-400">+{po.items.length-3} รายการ</div>}
+                      {(() => {
+                        const { productLines, costLines } = splitPOItems((po.items || []) as POItem[]);
+                        const shownProducts = productLines.slice(0, 3);
+                        return (
+                          <>
+                            {shownProducts.map((it, i) => (
+                              <div key={i} className="truncate font-medium text-slate-600">
+                                {it.name} <span className="text-slate-400">×{it.qty} {it.unit}</span>
+                              </div>
+                            ))}
+                            {productLines.length > 3 && (
+                              <div className="text-slate-400">+{productLines.length - 3} สินค้าหลัก</div>
+                            )}
+                            {costLines.length > 0 && (
+                              <div className="text-[11px] text-slate-400">
+                                รายละเอียดต้นทุน {costLines.length} รายการ
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </td>
                   <td className="p-3 text-right font-bold text-slate-800 whitespace-nowrap">
