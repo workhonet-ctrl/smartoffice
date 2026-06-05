@@ -13,11 +13,18 @@ type StockItem = {
 
 type ProductCostLot = {
   id: string;
+  lot_no?: string | null;
   product_id: string | null;
   product_name: string;
   initial_qty: number;
   remaining_qty: number;
   unit: string;
+  unit_cost?: number | null;
+  total_cost?: number | null;
+  source_type?: string | null;
+  source_no?: string | null;
+  source_snapshot?: any;
+  created_at?: string | null;
   status: string;
 };
 
@@ -32,6 +39,8 @@ type Transaction = {
 type StockInRow = {
   po_no: string; po_date: string; supplier_name: string | null;
   item_name: string; qty: number; unit: string; price: number; total: number;
+  source?: 'lot' | 'po';
+  lot_no?: string | null;
 };
 
 type Tab = 'stock' | 'receive' | 'history';
@@ -179,27 +188,48 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
     setLoading(false);
   };
 
-  // load PO (lazy — เฉพาะเมื่อเปิดแท็บ receive)
+  // load รับเข้าสต็อกจาก Lot ที่สร้างจาก PO
+  // หมายเหตุ: ระบบใหม่รับสินค้าเข้าคงเหลือผ่าน product_cost_lots
+  // ไม่ได้มี stock_transactions เสมอไป จึงต้องแสดงประวัติรับเข้าจาก Lot ด้วย
   const loadPO = async () => {
     setLoading(true);
-    const { data: po } = await supabase.from('purchase_orders')
-      .select('*').eq('status', 'approved')
-      .order('po_date', { ascending: false });
-    if (po) {
-      const rows: StockInRow[] = [];
-      for (const p of po) {
-        for (const item of (p.items || [])) {
-          rows.push({
-            po_no: p.po_no, po_date: p.po_date,
-            supplier_name: p.supplier_name,
-            item_name: item.name, qty: item.qty,
-            unit: item.unit, price: item.price,
-            total: item.qty * item.price,
-          });
-        }
-      }
-      setReceivedRows(rows);
+
+    const { data: lotRows, error: lotErr } = await supabase
+      .from('product_cost_lots')
+      .select('id, lot_no, product_name, initial_qty, unit, unit_cost, total_cost, source_no, source_snapshot, created_at, status')
+      .eq('source_type', 'purchase_order')
+      .in('status', ['active', 'depleted'])
+      .order('created_at', { ascending: false })
+      .limit(1000);
+
+    if (lotErr) {
+      showToast('โหลดประวัติรับเข้าจาก Lot ไม่สำเร็จ: ' + lotErr.message, 'error');
+      setReceivedRows([]);
+      setLoading(false);
+      return;
     }
+
+    const rows: StockInRow[] = ((lotRows || []) as ProductCostLot[]).map(lot => {
+      const snap = lot.source_snapshot || {};
+      const qty = Number(lot.initial_qty || 0);
+      const price = Number(lot.unit_cost || 0);
+      const total = Number(lot.total_cost || qty * price);
+
+      return {
+        po_no: String(lot.source_no || snap.po_no || lot.lot_no || '-'),
+        po_date: String(snap.po_date || lot.created_at || new Date().toISOString()),
+        supplier_name: snap.supplier_name || null,
+        item_name: lot.product_name || '-',
+        qty,
+        unit: lot.unit || 'ชิ้น',
+        price,
+        total,
+        source: 'lot',
+        lot_no: lot.lot_no || null,
+      };
+    });
+
+    setReceivedRows(rows);
     setLoading(false);
   };
 
@@ -214,7 +244,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
   // lazy load เมื่อสลับแท็บ
   useEffect(() => {
     if (tab === 'history' && txns.length === 0) loadTxns();
-    if (tab === 'receive' && receivedRows.length === 0) loadPO();
+    if (tab === 'receive') loadPO();
   }, [tab]);
 
   // sync จาก products_master + boxes + bubbles (ใช้ upsert + unique constraint แทน JS loop)
@@ -591,7 +621,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
           <div className="flex items-center justify-between mb-3 shrink-0 flex-wrap gap-2">
             <p className="text-sm text-slate-500">
               รายการรับเข้าทั้งหมด <span className="font-semibold text-slate-700">{receivedRows.length}</span> รายการ
-              (จาก PO ที่อนุมัติแล้ว)
+              (จาก Lot ที่สร้างจาก PO)
             </p>
             <button onClick={onGoToPO}
               className="px-3 py-1.5 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 flex items-center gap-1.5 text-sm font-medium">
@@ -615,7 +645,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
               <tbody>
                 {receivedRows.length === 0 && (
                   <tr><td colSpan={8} className="p-10 text-center text-slate-400">
-                    ยังไม่มีการรับเข้าสต็อก — อนุมัติ PO เพื่อรับเข้าสต็อก
+                    ยังไม่มีประวัติรับเข้าจาก Lot — สร้าง Lot จาก PO เพื่อให้แสดงที่นี่
                   </td></tr>
                 )}
                 {receivedRows.map((row, idx) => (
@@ -623,7 +653,10 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                     <td className="p-3 text-xs text-slate-500 whitespace-nowrap">
                       {new Date(row.po_date).toLocaleDateString('th-TH')}
                     </td>
-                    <td className="p-3 font-mono text-xs text-indigo-700 whitespace-nowrap">{row.po_no}</td>
+                    <td className="p-3 whitespace-nowrap">
+                      <div className="font-mono text-xs text-indigo-700">{row.po_no}</div>
+                      {row.lot_no && <div className="mt-0.5 inline-flex px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-700 text-[10px] font-bold border border-cyan-100">{row.lot_no}</div>}
+                    </td>
                     <td className="p-3 text-sm text-slate-700 whitespace-nowrap">
                       {row.supplier_name || <span className="text-slate-300">-</span>}
                     </td>
@@ -631,10 +664,10 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                     <td className="p-3 text-center font-bold text-green-600">{row.qty}</td>
                     <td className="p-3 text-center text-slate-500">{row.unit}</td>
                     <td className="p-3 text-right text-slate-600">
-                      {row.price > 0 ? `฿${row.price.toLocaleString()}` : <span className="text-slate-300">-</span>}
+                      {row.price > 0 ? `฿${row.price.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}` : <span className="text-slate-300">-</span>}
                     </td>
                     <td className="p-3 text-right font-bold text-slate-800">
-                      {row.total > 0 ? `฿${row.total.toLocaleString()}` : <span className="text-slate-300">-</span>}
+                      {row.total > 0 ? `฿${row.total.toLocaleString('th-TH', { maximumFractionDigits: 2 })}` : <span className="text-slate-300">-</span>}
                     </td>
                   </tr>
                 ))}
@@ -649,7 +682,7 @@ export default function Stock({ onGoToPO }: { onGoToPO?: () => void }) {
                     <td/>
                     <td/>
                     <td className="p-3 text-right font-bold text-slate-800">
-                      ฿{receivedRows.reduce((s, r) => s + r.total, 0).toLocaleString()}
+                      ฿{receivedRows.reduce((s, r) => s + r.total, 0).toLocaleString('th-TH', { maximumFractionDigits: 2 })}
                     </td>
                   </tr>
                 </tfoot>
