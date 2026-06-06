@@ -950,6 +950,29 @@ export default function PurchaseOrder() {
   const poItemSubtotal = (it: POItem) =>
     Number(it.qty || 0) * Number(it.price || 0);
 
+  const normalizePOItemName = (value: string) =>
+    String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+
+  const findProductMasterForPOItem = (it: POItem) =>
+    products.find(p =>
+      p.id === it.stock_item_id ||
+      p.name === it.name ||
+      String(it.name || '').includes(p.name) ||
+      p.name.includes(String(it.name || ''))
+    );
+
+  const findCostLinesForProductLine = (productLine: POItem, allCostLines: POItem[]) => {
+    const productName = normalizePOItemName(productLine.name);
+    const exact = allCostLines.filter(c => normalizePOItemName(c.name) === productName);
+    if (exact.length > 0) return exact;
+
+    const fuzzy = allCostLines.filter(c => {
+      const costName = normalizePOItemName(c.name);
+      return costName.includes(productName) || productName.includes(costName);
+    });
+    return fuzzy;
+  };
+
   const isPOCostOnlyItem = (name: string) =>
     /(ขนส่ง|ค่าส่ง|shipping|ค่าขนส่ง|บริการ|ค่าบริการ|ค่าแรง|แพ็ก|บรรจุ|อุปกรณ์|กล่อง|สติ๊กเกอร์|ถุง)/i.test(String(name || ''));
 
@@ -985,7 +1008,7 @@ export default function PurchaseOrder() {
     }
 
     if (po.status !== 'received') {
-      showToast('ต้องรับเข้า/ปิดงาน PO ก่อน จึงสร้างล็อตต้นทุนจาก PO ได้', 'error');
+      showToast('ต้องรับเข้า/ปิดงาน PO ก่อน จึงสร้าง Lot จาก PO ได้', 'error');
       return;
     }
 
@@ -1058,28 +1081,14 @@ export default function PurchaseOrder() {
   const createCostLotFromPO = async () => {
     if (!lotFromPOTarget || saving || actionLockRef.current) return;
 
-    const product = products.find(p => p.id === lotProductId);
-    if (!product) {
-      showToast('กรุณาเลือกสินค้าที่จะสร้างล็อต', 'error');
-      return;
-    }
+    const items = ((lotFromPOTarget.items || []) as POItem[]);
+    const { productLines, costLines } = splitPOItems(items);
+    const validProductLines = productLines.filter(it =>
+      it.name?.trim() && it.stock_item_id && Number(it.qty || 0) > 0
+    );
 
-    if (Number(lotOutputQty || 0) <= 0) {
-      showToast('จำนวนเข้าล็อตต้องมากกว่า 0', 'error');
-      return;
-    }
-
-    const selectedItems = selectedLotPOItems();
-    if (selectedItems.length === 0) {
-      showToast('กรุณาเลือกรายการใน PO ที่จะรวมเป็นต้นทุนล็อต', 'error');
-      return;
-    }
-
-    const totalCost = lotFromPOTotalCost();
-    const unitCost = lotFromPOUnitCost();
-
-    if (totalCost <= 0 || unitCost <= 0) {
-      showToast('ต้นทุนรวมและต้นทุนต่อหน่วยต้องมากกว่า 0', 'error');
+    if (validProductLines.length === 0) {
+      showToast('PO นี้ไม่มีสินค้าหลักที่ผูกกับระบบ จึงสร้าง Lot ไม่ได้', 'error');
       return;
     }
 
@@ -1087,104 +1096,233 @@ export default function PurchaseOrder() {
     setSaving(true);
 
     try {
-      // กันสร้างล็อตซ้ำจาก PO เดียวกัน + สินค้าเดียวกัน
-      const { data: existing, error: existErr } = await supabase
-        .from('product_cost_lots')
-        .select('id, lot_no, remaining_qty, unit_cost')
-        .eq('source_type', 'purchase_order')
-        .eq('source_id', lotFromPOTarget.id)
-        .eq('product_id', product.id)
-        .in('status', ['active', 'depleted'])
-        .limit(1);
+      const lotsToCreate: Array<{
+        product: ProductMaster;
+        productLine: POItem;
+        includedItems: POItem[];
+        outputQty: number;
+        outputUnit: string;
+        totalCost: number;
+        unitCost: number;
+      }> = [];
 
-      if (existErr) throw existErr;
+      if (validProductLines.length === 1) {
+        const productLine = validProductLines[0];
+        const product = findProductMasterForPOItem(productLine);
 
-      if ((existing || []).length > 0) {
-        showToast(`PO นี้สร้างล็อตของสินค้านี้ไปแล้ว: ${(existing as any[])[0].lot_no}`, 'error');
+        if (!product) {
+          showToast(`ไม่พบสินค้าใน products_master: ${productLine.name}`, 'error');
+          return;
+        }
+
+        const selectedItems = selectedLotPOItems();
+        if (selectedItems.length === 0) {
+          showToast('กรุณาเลือกรายการใน PO ที่จะรวมเป็นต้นทุนล็อต', 'error');
+          return;
+        }
+
+        const outputQty = Number(lotOutputQty || productLine.qty || 0);
+        const outputUnit = lotOutputUnit || productLine.unit || 'ชิ้น';
+        const totalCost = selectedItems.reduce((sum: number, it: any) => sum + poItemSubtotal(it), 0);
+        const unitCost = outputQty > 0 ? totalCost / outputQty : 0;
+
+        lotsToCreate.push({
+          product,
+          productLine,
+          includedItems: selectedItems as POItem[],
+          outputQty,
+          outputUnit,
+          totalCost,
+          unitCost,
+        });
+      } else {
+        // หลายสินค้าหลักใน PO เดียว:
+        // สร้าง Lot แยกตามสินค้าหลัก และจับคู่รายละเอียดต้นทุนตามชื่อสินค้า
+        for (const productLine of validProductLines) {
+          const product = findProductMasterForPOItem(productLine);
+
+          if (!product) {
+            showToast(`ไม่พบสินค้าใน products_master: ${productLine.name}`, 'error');
+            return;
+          }
+
+          const matchedCostLines = findCostLinesForProductLine(productLine, costLines);
+
+          if (matchedCostLines.length === 0) {
+            showToast(`ยังจับคู่รายละเอียดต้นทุนของ "${productLine.name}" ไม่ได้ กรุณาให้ชื่อรายละเอียดต้นทุนตรงกับสินค้าหลัก`, 'error');
+            return;
+          }
+
+          const outputQty = Number(productLine.qty || 0);
+          const outputUnit = productLine.unit || 'ชิ้น';
+          const totalCost = matchedCostLines.reduce((sum, it) => sum + poItemSubtotal(it), 0);
+          const unitCost = outputQty > 0 ? totalCost / outputQty : 0;
+
+          lotsToCreate.push({
+            product,
+            productLine,
+            includedItems: matchedCostLines,
+            outputQty,
+            outputUnit,
+            totalCost,
+            unitCost,
+          });
+        }
+      }
+
+      const invalid = lotsToCreate.find(x => x.outputQty <= 0 || x.totalCost <= 0 || x.unitCost <= 0);
+      if (invalid) {
+        showToast(`สร้าง Lot ไม่ได้: ${invalid.productLine.name} จำนวน/ต้นทุนต้องมากกว่า 0`, 'error');
         return;
       }
 
-      const lotNo = await generateCostLotNo();
+      // กันสร้างล็อตซ้ำจาก PO เดียวกัน + สินค้าตัวเดิม
+      const { data: existing, error: existErr } = await supabase
+        .from('product_cost_lots')
+        .select('id, lot_no, product_id, product_name')
+        .eq('source_type', 'purchase_order')
+        .eq('source_id', lotFromPOTarget.id)
+        .in('status', ['active', 'depleted']);
 
-      const sourceSnapshot = {
+      if (existErr) throw existErr;
+
+      const existingProductIds = new Set((existing || []).map((x: any) => String(x.product_id || '')));
+      const duplicated = lotsToCreate.find(x => existingProductIds.has(String(x.product.id)));
+
+      if (duplicated) {
+        const oldLot = (existing || []).find((x: any) => String(x.product_id || '') === String(duplicated.product.id));
+        showToast(`PO นี้สร้างล็อตของ ${duplicated.product.name} ไปแล้ว: ${oldLot?.lot_no || '-'}`, 'error');
+        return;
+      }
+
+      const createdLots: any[] = [];
+
+      for (const entry of lotsToCreate) {
+        const lotNo = await generateCostLotNo();
+
+        const sourceSnapshot = {
+          po_id: lotFromPOTarget.id,
+          po_no: lotFromPOTarget.po_no,
+          po_date: lotFromPOTarget.po_date,
+          supplier_id: lotFromPOTarget.supplier_id,
+          supplier_name: lotFromPOTarget.supplier_name,
+          product_id: entry.product.id,
+          product_name: entry.product.name,
+          output_qty: entry.outputQty,
+          output_unit: entry.outputUnit,
+          total_cost: entry.totalCost,
+          unit_cost: entry.unitCost,
+          product_line: {
+            name: entry.productLine.name,
+            qty: Number(entry.productLine.qty || 0),
+            unit: entry.productLine.unit,
+            stock_item_id: entry.productLine.stock_item_id || null,
+          },
+          included_items: entry.includedItems.map((it: any) => ({
+            name: it.name,
+            qty: Number(it.qty || 0),
+            unit: it.unit,
+            price: Number(it.price || 0),
+            subtotal: poItemSubtotal(it),
+            stock_item_id: it.stock_item_id || null,
+          })),
+        };
+
+        const { data: lot, error: lotErr } = await supabase
+          .from('product_cost_lots')
+          .insert([{
+            lot_no: lotNo,
+            product_id: entry.product.id,
+            product_name: entry.product.name,
+            formula_id: null,
+            calculation_history_id: null,
+            initial_qty: entry.outputQty,
+            remaining_qty: entry.outputQty,
+            unit: entry.outputUnit,
+            unit_cost: entry.unitCost,
+            total_cost: entry.totalCost,
+            status: 'active',
+            note: lotFromPONote || `สร้างล็อตจาก PO ${lotFromPOTarget.po_no}`,
+            source_type: 'purchase_order',
+            source_id: lotFromPOTarget.id,
+            source_no: lotFromPOTarget.po_no,
+            source_snapshot: sourceSnapshot,
+          }])
+          .select()
+          .single();
+
+        if (lotErr) throw lotErr;
+
+        const { error: txnErr } = await supabase
+          .from('product_cost_lot_transactions')
+          .insert([{
+            lot_id: lot.id,
+            lot_no: lotNo,
+            product_id: entry.product.id,
+            product_name: entry.product.name,
+            txn_type: 'in',
+            qty: entry.outputQty,
+            unit_cost: entry.unitCost,
+            total_cost: entry.totalCost,
+            ref_type: 'purchase_order',
+            ref_id: lotFromPOTarget.id,
+            note: `สร้างล็อตจาก PO ${lotFromPOTarget.po_no}`,
+          }]);
+
+        if (txnErr) throw txnErr;
+
+        createdLots.push({
+          lot,
+          lotNo,
+          entry,
+        });
+      }
+
+      await writePOAuditLog({
         po_id: lotFromPOTarget.id,
         po_no: lotFromPOTarget.po_no,
-        po_date: lotFromPOTarget.po_date,
-        supplier_id: lotFromPOTarget.supplier_id,
-        supplier_name: lotFromPOTarget.supplier_name,
-        product_id: product.id,
-        product_name: product.name,
-        output_qty: Number(lotOutputQty || 0),
-        output_unit: lotOutputUnit || 'ชิ้น',
-        total_cost: totalCost,
-        unit_cost: unitCost,
-        included_items: selectedItems.map((it: any) => ({
-          name: it.name,
-          qty: Number(it.qty || 0),
-          unit: it.unit,
-          price: Number(it.price || 0),
-          subtotal: Number(it.qty || 0) * Number(it.price || 0),
-          stock_item_id: it.stock_item_id || null,
-        })),
-      };
+        action: createdLots.length > 1 ? 'create_cost_lots' : 'create_cost_lot',
+        action_label: createdLots.length > 1 ? 'สร้าง Lot หลายสินค้า' : 'สร้าง Lot ต้นทุนจาก PO',
+        detail: createdLots.length > 1
+          ? `สร้าง Lot ${createdLots.length} รายการจาก PO เดียว`
+          : `สร้าง Lot ${createdLots[0]?.lotNo || ''} จาก PO`,
+        old_status: lotFromPOTarget.status,
+        new_status: lotFromPOTarget.status,
+        meta: {
+          lots_count: createdLots.length,
+          lots: createdLots.map(x => ({
+            lot_no: x.lotNo,
+            product_name: x.entry.product.name,
+            qty: x.entry.outputQty,
+            unit_cost: x.entry.unitCost,
+            total_cost: x.entry.totalCost,
+          })),
+        },
+      });
 
-      const { data: lot, error: lotErr } = await supabase
-        .from('product_cost_lots')
-        .insert([{
-          lot_no: lotNo,
-          product_id: product.id,
-          product_name: product.name,
-          formula_id: null,
-          calculation_history_id: null,
-          initial_qty: Number(lotOutputQty || 0),
-          remaining_qty: Number(lotOutputQty || 0),
-          unit: lotOutputUnit || 'ชิ้น',
-          unit_cost: unitCost,
-          total_cost: totalCost,
-          status: 'active',
-          note: lotFromPONote || `สร้างล็อตจาก PO ${lotFromPOTarget.po_no}`,
-          source_type: 'purchase_order',
+      showToast(
+        createdLots.length > 1
+          ? `✓ สร้าง Lot จาก PO สำเร็จ ${createdLots.length} รายการ`
+          : `✓ สร้างล็อต ${createdLots[0]?.lotNo} จาก PO สำเร็จ · ต้นทุน/หน่วย ฿${createdLots[0]?.entry.unitCost.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      );
+
+      setPOCostLots(prev => [
+        ...createdLots.map(x => ({
+          id: x.lot.id,
+          lot_no: x.lotNo,
           source_id: lotFromPOTarget.id,
           source_no: lotFromPOTarget.po_no,
-          source_snapshot: sourceSnapshot,
-        }])
-        .select()
-        .single();
+          product_name: x.entry.product.name,
+          initial_qty: x.entry.outputQty,
+          remaining_qty: x.entry.outputQty,
+          unit: x.entry.outputUnit,
+          unit_cost: x.entry.unitCost,
+          status: 'active',
+          created_at: x.lot.created_at,
+        })),
+        ...prev,
+      ]);
 
-      if (lotErr) throw lotErr;
-
-      const { error: txnErr } = await supabase
-        .from('product_cost_lot_transactions')
-        .insert([{
-          lot_id: lot.id,
-          lot_no: lotNo,
-          product_id: product.id,
-          product_name: product.name,
-          txn_type: 'in',
-          qty: Number(lotOutputQty || 0),
-          unit_cost: unitCost,
-          total_cost: totalCost,
-          ref_type: 'purchase_order',
-          ref_id: lotFromPOTarget.id,
-          note: `สร้างล็อตจาก PO ${lotFromPOTarget.po_no}`,
-        }]);
-
-      if (txnErr) throw txnErr;
-
-      showToast(`✓ สร้างล็อต ${lotNo} จาก PO สำเร็จ · ต้นทุน/หน่วย ฿${unitCost.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-      setPOCostLots(prev => [{
-        id: lot.id,
-        lot_no: lotNo,
-        source_id: lotFromPOTarget.id,
-        source_no: lotFromPOTarget.po_no,
-        product_name: product.name,
-        initial_qty: Number(lotOutputQty || 0),
-        remaining_qty: Number(lotOutputQty || 0),
-        unit: lotOutputUnit || 'ชิ้น',
-        unit_cost: unitCost,
-        status: 'active',
-        created_at: lot.created_at,
-      }, ...prev]);
       setLotFromPOTarget(null);
       setLotIncludedKeys(new Set());
       await loadData();
@@ -1195,6 +1333,7 @@ export default function PurchaseOrder() {
       setSaving(false);
     }
   };
+
 
   const canCancelPOCostLot = (lot: POCostLot) =>
     Number(lot.remaining_qty || 0) === Number(lot.initial_qty || 0) && lot.status === 'active';
@@ -2451,7 +2590,7 @@ export default function PurchaseOrder() {
         </div>
       )}
 
-      {/* Popup: สร้างล็อตต้นทุนจาก PO */}
+      {/* Popup: สร้าง Lot จาก PO */}
       {lotFromPOTarget && (
         <div className="fixed inset-0 bg-black/45 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-[2rem] w-full max-w-3xl shadow-2xl border border-emerald-100 overflow-hidden">
